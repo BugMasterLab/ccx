@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### 优化
+
+- **移动端加载性能优化** - 针对手机端打开慢的问题进行多维度优化
+  - 后端：新增 Gzip 中间件 (`backend-go/internal/middleware/gzip.go`)，采用白名单模式仅压缩静态资源（`/assets/`、`.js`、`.css` 等），避免意外压缩未来新增的流式端点
+  - 前端：Vuetify 组件按需导入，首屏 JS 从 1,374 KB 降至 506 KB (-63%)
+  - 前端：图表组件 (`GlobalStatsChart`、`KeyTrendChart`) 改为异步加载，ApexCharts 库 (582 KB) 延后到用户展开图表时才加载
+  - 前端：优化分包策略，vue-vendor / vuetify / charts 独立分包
+  - 依赖：升级 gin-gonic/gin v1.11.0，新增 gin-contrib/gzip v1.2.5
+
 ## [v2.6.19] - 2026-02-28
 
 ### 修复

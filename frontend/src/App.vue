@@ -366,7 +366,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
 import { useTheme } from 'vuetify'
 import { api, fetchHealth, ApiError, type Channel } from './services/api'
 import { versionService } from './services/version'
@@ -376,7 +376,8 @@ import { usePreferencesStore } from './stores/preferences'
 import { useDialogStore } from './stores/dialog'
 import { useSystemStore } from './stores/system'
 import AddChannelModal from './components/AddChannelModal.vue'
-import GlobalStatsChart from './components/GlobalStatsChart.vue'
+// 异步加载图表组件，减少首屏 JS 体积
+const GlobalStatsChart = defineAsyncComponent(() => import('./components/GlobalStatsChart.vue'))
 import { useAppTheme } from './composables/useTheme'
 
 // Vuetify主题

@@ -35,6 +35,37 @@ bun run preview   # 预览构建
 
 编辑 `src/plugins/vuetify.ts` 中的 `lightTheme` 和 `darkTheme`。
 
+## Vuetify 组件系统
+
+项目使用 **按需导入** 方案，手动注册使用的 Vuetify 组件和指令，显著减小打包体积（首屏 JS 减少约 60%）。
+
+**配置文件**: `src/plugins/vuetify.ts`
+
+**新增组件步骤**:
+1. 从 `vuetify/components/V<Component>` 添加导入
+2. 在 `createVuetify({ components: { ... } })` 中注册
+
+```typescript
+// 1. 导入
+import { VBadge } from 'vuetify/components/VBadge'
+
+// 2. 注册
+export default createVuetify({
+  components: {
+    // ... 现有组件
+    VBadge,  // 新增
+  },
+  // ...
+})
+```
+
+**常见组件路径**:
+- 布局: `VApp`, `VMain`, `VContainer`, `VRow`, `VCol` 等
+- 表单: `VTextField`, `VSelect`, `VSwitch`, `VBtn` 等
+- 反馈: `VAlert`, `VSnackbar`, `VDialog`, `VTooltip` 等
+
+**注意**: 如果模板中使用了未注册的组件，运行时会报 `Unknown custom element` 错误。
+
 ## 图标系统
 
 项目使用 **SVG 按需导入** 方案，从 `@mdi/js` 导入单个图标 path，而非完整字体文件，显著减小打包体积。

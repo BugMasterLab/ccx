@@ -1,8 +1,51 @@
 import { createVuetify } from 'vuetify'
 import { h } from 'vue'
 import type { IconSet, IconProps, ThemeDefinition } from 'vuetify'
-import * as components from 'vuetify/components'
-import * as directives from 'vuetify/directives'
+
+// 按需导入 Vuetify 组件（减少约 50% 打包体积）
+// 布局组件
+import { VApp } from 'vuetify/components/VApp'
+import { VMain } from 'vuetify/components/VMain'
+import { VContainer, VRow, VCol, VSpacer } from 'vuetify/components/VGrid'
+import { VAppBar } from 'vuetify/components/VAppBar'
+
+// 卡片与容器
+import { VCard, VCardTitle, VCardText, VCardActions } from 'vuetify/components/VCard'
+import { VDialog } from 'vuetify/components/VDialog'
+import { VOverlay } from 'vuetify/components/VOverlay'
+import { VExpansionPanels, VExpansionPanel, VExpansionPanelTitle, VExpansionPanelText } from 'vuetify/components/VExpansionPanel'
+
+// 表单组件
+import { VForm } from 'vuetify/components/VForm'
+import { VTextField } from 'vuetify/components/VTextField'
+import { VTextarea } from 'vuetify/components/VTextarea'
+import { VSelect } from 'vuetify/components/VSelect'
+import { VCombobox } from 'vuetify/components/VCombobox'
+import { VSwitch } from 'vuetify/components/VSwitch'
+import { VBtn } from 'vuetify/components/VBtn'
+import { VBtnToggle } from 'vuetify/components/VBtnToggle'
+
+// 列表组件
+import { VList, VListItem, VListItemTitle } from 'vuetify/components/VList'
+import { VMenu } from 'vuetify/components/VMenu'
+
+// 反馈组件
+import { VAlert } from 'vuetify/components/VAlert'
+import { VSnackbar } from 'vuetify/components/VSnackbar'
+import { VProgressCircular } from 'vuetify/components/VProgressCircular'
+import { VTooltip } from 'vuetify/components/VTooltip'
+
+// 数据展示
+import { VChip } from 'vuetify/components/VChip'
+import { VAvatar } from 'vuetify/components/VAvatar'
+import { VIcon } from 'vuetify/components/VIcon'
+import { VDivider } from 'vuetify/components/VDivider'
+
+// 过渡动画
+import { VExpandTransition } from 'vuetify/components/transitions'
+
+// 按需导入指令
+import { Ripple, ClickOutside } from 'vuetify/directives'
 
 // 引入样式
 import 'vuetify/styles'
@@ -366,8 +409,57 @@ const darkTheme: ThemeDefinition = {
 }
 
 export default createVuetify({
-  components,
-  directives,
+  components: {
+    // 布局
+    VApp,
+    VMain,
+    VContainer,
+    VRow,
+    VCol,
+    VSpacer,
+    VAppBar,
+    // 卡片与容器
+    VCard,
+    VCardTitle,
+    VCardText,
+    VCardActions,
+    VDialog,
+    VOverlay,
+    VExpansionPanels,
+    VExpansionPanel,
+    VExpansionPanelTitle,
+    VExpansionPanelText,
+    // 表单
+    VForm,
+    VTextField,
+    VTextarea,
+    VSelect,
+    VCombobox,
+    VSwitch,
+    VBtn,
+    VBtnToggle,
+    // 列表
+    VList,
+    VListItem,
+    VListItemTitle,
+    VMenu,
+    // 反馈
+    VAlert,
+    VSnackbar,
+    VProgressCircular,
+    VTooltip,
+    // 数据展示
+    VChip,
+    VAvatar,
+    VIcon,
+    VDivider,
+    // 过渡
+    VExpandTransition,
+  },
+  directives: {
+    Ripple,
+    ClickOutside,
+  },
   icons: {
     defaultSet: 'mdi',
     sets: {

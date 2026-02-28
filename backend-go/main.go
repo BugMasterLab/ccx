@@ -126,6 +126,9 @@ func main() {
 	// 配置 CORS
 	r.Use(middleware.CORSMiddleware(envCfg))
 
+	// 静态资源 Gzip 压缩（排除 API 端点）
+	r.Use(middleware.GzipMiddleware())
+
 	// Web UI 访问控制中间件
 	r.Use(middleware.WebAuthMiddleware(envCfg, cfgManager))
 

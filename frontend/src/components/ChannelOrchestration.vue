@@ -500,11 +500,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import draggable from 'vuedraggable'
 import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats, type ChannelRecentActivity } from '../services/api'
 import ChannelStatusBadge from './ChannelStatusBadge.vue'
-import KeyTrendChart from './KeyTrendChart.vue'
+// 异步加载图表组件，减少首屏 JS 体积
+const KeyTrendChart = defineAsyncComponent(() => import('./KeyTrendChart.vue'))
 import ChannelLogsDialog from './ChannelLogsDialog.vue'
 
 const props = defineProps<{
