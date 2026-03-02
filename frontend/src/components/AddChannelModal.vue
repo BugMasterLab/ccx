@@ -698,7 +698,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Channel } from '../services/api'
-import { fetchUpstreamModels, ApiError } from '../services/api'
+import { ApiService, ApiError } from '../services/api'
 import {
   isValidApiKey as _isValidApiKey,
   isValidUrl as _isValidQuickInputUrl,
@@ -1632,31 +1632,57 @@ const fetchTargetModels = async () => {
     return
   }
 
-  // 如果已经有模型列表且所有 key 都已检测过,直接返回(缓存)
-  if (targetModelOptions.value.length > 0) {
-    const allKeysChecked = form.apiKeys.every(key => keyModelsStatus.value.has(key))
-    if (allKeysChecked) {
-      return
-    }
+  // 仅为未检测过的 API Key 发起请求
+  const uncheckedKeys = form.apiKeys.filter(key => !keyModelsStatus.value.has(key))
+
+  if (uncheckedKeys.length === 0) {
+    return
   }
 
   fetchingModels.value = true
   fetchModelsError.value = ''
 
-  // 仅为未检测过的 API Key 发起请求
-  const uncheckedKeys = form.apiKeys.filter(key => !keyModelsStatus.value.has(key))
+  const apiService = new ApiService()
+  const channelId = props.channel?.index
 
-  if (uncheckedKeys.length === 0) {
-    fetchingModels.value = false
-    return
+  // modelsApiType 决定请求协议（Bearer/x-goog-api-key、/v1/models vs /v1beta/models）
+  // 对于 gemini 渠道组内配置为 openai/claude serviceType 的渠道，应走对应协议而非 Gemini 协议
+  const effectiveServiceType = form.serviceType || detectedServiceType.value || getDefaultServiceTypeValue()
+  let modelsApiType: 'messages' | 'responses' | 'chat' | 'gemini'
+  if (effectiveServiceType === 'gemini') {
+    modelsApiType = 'gemini'
+  } else if (effectiveServiceType === 'responses') {
+    modelsApiType = 'responses'
+  } else if (effectiveServiceType === 'openai') {
+    modelsApiType = 'chat'
+  } else {
+    modelsApiType = 'messages'
   }
 
-  // 为每个未检测的 API Key 检测 models 状态
+  // 每个 unchecked key 并发独立请求
   const keyPromises = uncheckedKeys.map(async (apiKey) => {
     keyModelsStatus.value.set(apiKey, { loading: true, success: false })
 
     try {
-      const response = await fetchUpstreamModels(form.baseUrl, apiKey)
+      let response: any
+      // 始终传递 form.baseUrl，确保检测使用表单当前值（而非已保存的旧配置）
+      const id = channelId ?? 0
+      const baseUrlArg = form.baseUrl || undefined
+
+      switch (modelsApiType) {
+        case 'messages':
+          response = await apiService.getChannelModels(id, apiKey, baseUrlArg)
+          break
+        case 'responses':
+          response = await apiService.getResponsesChannelModels(id, apiKey, baseUrlArg)
+          break
+        case 'chat':
+          response = await apiService.getChatChannelModels(id, apiKey, baseUrlArg)
+          break
+        case 'gemini':
+          response = await apiService.getGeminiChannelModels(id, apiKey, baseUrlArg)
+          break
+      }
 
       keyModelsStatus.value.set(apiKey, {
         loading: false,
@@ -1664,51 +1690,44 @@ const fetchTargetModels = async () => {
         statusCode: 200,
         modelCount: response.data.length
       })
-
-      return response.data
+      return response.data as { id: string }[]
     } catch (error) {
       let errorMsg = '未知错误'
       let statusCode = 0
-
       if (error instanceof ApiError) {
         errorMsg = error.message
         statusCode = error.status
       } else if (error instanceof Error) {
         errorMsg = error.message
       }
-
       keyModelsStatus.value.set(apiKey, {
         loading: false,
         success: false,
         statusCode,
         error: errorMsg
       })
-
-      return []
+      return [] as { id: string }[]
     }
   })
 
   try {
     const results = await Promise.all(keyPromises)
 
-    // 合并新获取的模型列表到现有列表
+    // 合并所有成功 key 的模型列表（去重）
     const allModels = new Set<string>(targetModelOptions.value.map(opt => opt.value))
-    results.forEach(models => {
-      models.forEach(m => allModels.add(m.id))
-    })
+    results.forEach(models => models.forEach(m => allModels.add(m.id)))
 
     targetModelOptions.value = Array.from(allModels)
       .sort()
       .map(id => ({ title: id, value: id }))
 
-    // 如果所有 key 都失败了,显示错误
+    // 所有 key（含已有记录）都失败时才显示错误
     const allFailed = form.apiKeys.every(key => {
-      const status = keyModelsStatus.value.get(key)
-      return status && !status.success
+      const s = keyModelsStatus.value.get(key)
+      return s && !s.success
     })
-
     if (allFailed) {
-      fetchModelsError.value = '所有 API Key 都无法获取模型列表,请检查 API 密钥列表中的错误信息'
+      fetchModelsError.value = '所有 API Key 都无法获取模型列表，请检查 API 密钥列表中的错误信息'
     }
   } finally {
     fetchingModels.value = false

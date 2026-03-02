@@ -1,5 +1,19 @@
 ## [Unreleased]
 
+### 新增
+
+- **渠道模型列表查询 API** - 添加 `POST /api/{type}/channels/:id/models` 端点（支持 messages/responses/chat/gemini 四种渠道类型），通过后端代理获取上游模型列表，解决前端直连上游时的 CORS 跨域问题和 API Key 泄露风险
+  - 请求体 `{"key": "sk-xxx", "baseUrl": "https://..."}` - 单个 key，始终传递表单当前 baseUrl（确保检测反映最新配置，而非已保存的旧值）
+  - 前端对每个 key 并发独立请求，各自维护独立状态（loading/success/fail），合并所有成功 key 的模型列表去重展示
+  - `apiType` 与 `modelsApiType` 解耦：`apiType` 决定在哪个渠道组数组查找 id，`modelsApiType` 按 serviceType 决定请求协议（Bearer/x-goog-api-key、/v1/models vs /v1beta/models），支持 gemini 渠道组内配置 openai/claude serviceType 的渠道
+  - Gemini 特殊处理：使用 `/v1beta/models` 端点和 `x-goog-api-key` 认证头；后端将 `{"models": [{"name": "models/gemini-..."}]}` 转换为 OpenAI 兼容格式 `{"object": "list", "data": [{"id": "gemini-..."}]}`，若响应无 `models` 字段则透传原始响应
+  - 后端单次请求 10s 超时
+  - 新增 `messages/GetChannelModels` 单元测试（6 个用例：非法 ID、空 key、渠道不存在、上游 200、上游 401、临时 baseUrl）
+
+### 安全
+
+- **SSRF 防护（云元数据）** - 模型列表查询 API 新增 `utils.ValidateBaseURL()` 验证，硬编码拦截云元数据服务（169.254.169.254），防止云凭证泄露。允许其他内网地址（支持 Ollama、内网部署等场景）
+
 ### 重构
 
 - **统一 Dashboard 端点** - 将 4 种 dashboard 端点（`/api/messages/channels/dashboard`, `/api/chat/channels/dashboard`, `/api/gemini/channels/dashboard` 及 `?type=responses`）统一为 `/api/messages/channels/dashboard?type=messages|responses|chat|gemini`，消除代码重复，符合 DRY 原则
@@ -10,6 +24,10 @@
 
 - **模型重定向源模型名支持自由输入** - 将源模型名输入框从 `v-select`（仅选列表）改为 `v-combobox`（可选可输入），与目标模型名保持一致
 - **源模型名输入验证实时反馈** - 新增 `validateSourceModelName` 函数，拦截非法输入：自定义模型名超过 50 字符（内置选项不受限）、含空格、含非法字符（仅允许字母、数字、`-_.:/@+`）；验证绑定到 `@update:model-value` 事件，输入时实时显示错误提示并禁用"添加"按钮
+
+### 修复
+
+- **前端代码质量** - 移除 `AddChannelModal.vue` 中未使用的 `apiType` 变量和无效的 ESLint 指令，消除 lint 警告
 
 ## [v2.6.21] - 2026-03-02
 
