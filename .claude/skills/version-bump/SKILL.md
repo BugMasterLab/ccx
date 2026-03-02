@@ -1,9 +1,9 @@
 ---
 name: version-bump
-description: 升级项目版本号并提交git，支持patch/minor/major版本升级或指定具体版本号
-version: 1.1.0
+description: 升级项目版本号并提交git，支持patch/minor/major版本升级或指定具体版本号，自动从git log生成CHANGELOG
+version: 1.2.0
 author: https://github.com/BenedictKing/ccx/
-allowed-tools: Bash, Read, Write
+allowed-tools: Bash, Read, Write, Edit
 context: fork
 ---
 
@@ -73,11 +73,47 @@ echo "v{新版本号}" > VERSION
 
 | 情况 | 行为 |
 |------|------|
-| 无 `[Unreleased]` 区块 | ⚠️ 警告用户 CHANGELOG.md 中没有 `[Unreleased]` 区块，询问是否继续（跳过 CHANGELOG 更新） |
-| 有 `[Unreleased]` 但下方无变更内容 | ❌ 中止流程，提示用户先在 `[Unreleased]` 下写入本次版本的变更内容 |
-| 有 `[Unreleased]` 且有变更内容 | ✅ 正常替换 |
+| 有 `[Unreleased]` 且有变更内容 | ✅ 正常替换为新版本号和日期 |
+| 有 `[Unreleased]` 但下方无变更内容 | 进入 **git log 自动生成** 流程 |
+| 无 `[Unreleased]` 区块 | 进入 **git log 自动生成** 流程 |
 
-**替换规则：**
+**git log 自动生成流程：**
+
+当 CHANGELOG 中没有现成的变更内容时，从 git log 自动生成：
+
+1. 获取上一个版本 tag 到 HEAD 的提交记录：
+   ```bash
+   git log v{上一个版本}..HEAD --pretty=format:"%h %s"
+   ```
+2. 如果没有提交记录，❌ 中止流程，提示用户没有新的变更
+3. 按 Conventional Commits 的 `type` 将提交分组为 CHANGELOG 分类：
+
+   | type | CHANGELOG 分类 |
+   |------|---------------|
+   | `feat` | 新增 |
+   | `fix` | 修复 |
+   | `perf` | 优化 |
+   | `refactor` | 重构 |
+   | `docs` | 文档 |
+   | `chore`, `ci`, `build` | 其他 |
+   | `revert` | 回滚 |
+
+4. 为每个提交生成简洁的 CHANGELOG 条目，参考已有 CHANGELOG 条目的风格（含加粗标题和详情描述）
+5. 在 CHANGELOG.md 顶部插入新版本区块（在第一个 `## [v` 之前）：
+   ```markdown
+   ## [v{新版本号}] - YYYY-MM-DD
+
+   ### 新增
+
+   - **功能标题** - 简要描述
+
+   ### 修复
+
+   - **修复标题** - 简要描述
+   ```
+6. 仅保留有内容的分类，跳过空分类
+
+**替换规则（有 Unreleased 时）：**
 
 ```markdown
 # 替换前
