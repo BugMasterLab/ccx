@@ -168,6 +168,15 @@ func (cm *ConfigManager) UpdateGeminiUpstream(index int, updates UpstreamUpdate)
 	if updates.ModelMapping != nil {
 		upstream.ModelMapping = updates.ModelMapping
 	}
+	if updates.ReasoningMapping != nil {
+		upstream.ReasoningMapping = updates.ReasoningMapping
+	}
+	if updates.TextVerbosity != nil {
+		upstream.TextVerbosity = *updates.TextVerbosity
+	}
+	if updates.FastMode != nil {
+		upstream.FastMode = *updates.FastMode
+	}
 	if updates.InsecureSkipVerify != nil {
 		upstream.InsecureSkipVerify = *updates.InsecureSkipVerify
 	}

@@ -407,3 +407,55 @@ func TestAddUpstream_BaseURLDeduplication(t *testing.T) {
 func strPtr(s string) *string {
 	return &s
 }
+
+func TestUpdateGeminiUpstream_AdvancedOptions(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	initialConfig := `{
+		"upstream": [],
+		"geminiUpstream": [{
+			"name": "gemini-channel",
+			"baseUrl": "https://old.gemini.com",
+			"apiKeys": ["test-key"],
+			"serviceType": "gemini",
+			"reasoningMapping": {"gemini-2.5-pro": "low"},
+			"textVerbosity": "low",
+			"fastMode": false
+		}]
+	}`
+	if err := os.WriteFile(configPath, []byte(initialConfig), 0644); err != nil {
+		t.Fatalf("写入初始配置失败: %v", err)
+	}
+
+	cm, err := NewConfigManager(configPath)
+	if err != nil {
+		t.Fatalf("初始化配置管理器失败: %v", err)
+	}
+	defer cm.Close()
+
+	_, err = cm.UpdateGeminiUpstream(0, UpstreamUpdate{
+		ReasoningMapping: map[string]string{"gemini-2.5-pro": "high"},
+		TextVerbosity:    strPtr("medium"),
+		FastMode:         boolPtr(true),
+	})
+	if err != nil {
+		t.Fatalf("UpdateGeminiUpstream 失败: %v", err)
+	}
+
+	cfg := cm.GetConfig()
+	upstream := cfg.GeminiUpstream[0]
+
+	if got := upstream.ReasoningMapping["gemini-2.5-pro"]; got != "high" {
+		t.Fatalf("ReasoningMapping[gemini-2.5-pro] = %q, want high", got)
+	}
+	if upstream.TextVerbosity != "medium" {
+		t.Fatalf("TextVerbosity = %q, want medium", upstream.TextVerbosity)
+	}
+	if !upstream.FastMode {
+		t.Fatal("FastMode = false, want true")
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
