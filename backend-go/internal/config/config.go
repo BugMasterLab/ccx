@@ -25,6 +25,9 @@ type UpstreamConfig struct {
 	Website            string            `json:"website,omitempty"`
 	InsecureSkipVerify bool              `json:"insecureSkipVerify,omitempty"`
 	ModelMapping       map[string]string `json:"modelMapping,omitempty"`
+	ReasoningMapping   map[string]string `json:"reasoningMapping,omitempty"`
+	TextVerbosity      string            `json:"textVerbosity,omitempty"`
+	FastMode           bool              `json:"fastMode,omitempty"`
 	// 多渠道调度相关字段
 	Priority       int        `json:"priority"`                 // 渠道优先级（数字越小优先级越高，默认按索引）
 	Status         string     `json:"status"`                   // 渠道状态：active（正常）, suspended（暂停）, disabled（备用池）
@@ -52,6 +55,9 @@ type UpstreamUpdate struct {
 	Website            *string           `json:"website"`
 	InsecureSkipVerify *bool             `json:"insecureSkipVerify"`
 	ModelMapping       map[string]string `json:"modelMapping"`
+	ReasoningMapping   map[string]string `json:"reasoningMapping"`
+	TextVerbosity      *string           `json:"textVerbosity"`
+	FastMode           *bool             `json:"fastMode"`
 	// 多渠道调度相关字段
 	Priority       *int       `json:"priority"`
 	Status         *string    `json:"status"`

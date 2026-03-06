@@ -32,3 +32,32 @@ func TestSupportsModel(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveReasoningEffort(t *testing.T) {
+	upstream := &UpstreamConfig{
+		ReasoningMapping: map[string]string{
+			"gpt-5":            "high",
+			"gpt-5.1-codex":    "xhigh",
+			"o3":               "medium",
+		},
+	}
+
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		{"精确匹配", "o3", "medium"},
+		{"最长匹配优先", "gpt-5.1-codex", "xhigh"},
+		{"模糊匹配回退", "gpt-5.1", "xhigh"},
+		{"未匹配返回空", "claude-3-7-sonnet", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveReasoningEffort(tt.model, upstream); got != tt.want {
+				t.Fatalf("ResolveReasoningEffort(%q) = %q, want %q", tt.model, got, tt.want)
+			}
+		})
+	}
+}

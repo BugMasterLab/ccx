@@ -260,20 +260,25 @@ func buildProviderRequest(
 
 	switch upstream.ServiceType {
 	case "openai", "responses", "":
-		// OpenAI 兼容上游：透传请求，仅替换 model
-		if mappedModel != model {
-			var reqMap map[string]interface{}
-			if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
-				return nil, err
-			}
-			reqMap["model"] = mappedModel
-			var err error
-			requestBody, err = json.Marshal(reqMap)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			requestBody = bodyBytes
+		// OpenAI 兼容上游：透传请求，仅替换 model 并注入高级参数
+		var reqMap map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+			return nil, err
+		}
+		reqMap["model"] = mappedModel
+		if effort := config.ResolveReasoningEffort(model, upstream); effort != "" {
+			reqMap["reasoning"] = map[string]interface{}{"effort": effort}
+		}
+		if upstream.TextVerbosity != "" {
+			reqMap["text"] = map[string]interface{}{"verbosity": upstream.TextVerbosity}
+		}
+		if upstream.FastMode {
+			reqMap["service_tier"] = "priority"
+		}
+		var err error
+		requestBody, err = json.Marshal(reqMap)
+		if err != nil {
+			return nil, err
 		}
 		url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
 

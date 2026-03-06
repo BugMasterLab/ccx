@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/BenedictKing/ccx/internal/config"
@@ -48,7 +49,17 @@ func (p *GeminiProvider) ConvertToProviderRequest(c *gin.Context, upstream *conf
 		action = "streamGenerateContent?alt=sse"
 	}
 
-	url := fmt.Sprintf("%s/models/%s:%s", strings.TrimSuffix(upstream.GetEffectiveBaseURL(), "/"), model, action)
+	baseURL := strings.TrimSuffix(upstream.GetEffectiveBaseURL(), "/")
+	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
+	if skipVersionPrefix {
+		baseURL = strings.TrimSuffix(baseURL, "#")
+	}
+	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
+	if !versionPattern.MatchString(baseURL) && !skipVersionPrefix {
+		baseURL += "/v1beta"
+	}
+
+	url := fmt.Sprintf("%s/models/%s:%s", baseURL, model, action)
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(reqBodyBytes))
 	if err != nil {

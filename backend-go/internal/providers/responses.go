@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -22,129 +23,242 @@ type ResponsesProvider struct {
 	SessionManager *session.SessionManager
 }
 
-// ConvertToProviderRequest 将 Responses 请求转换为上游格式
+// ConvertToProviderRequest 将请求转换为上游格式
 func (p *ResponsesProvider) ConvertToProviderRequest(
 	c *gin.Context,
 	upstream *config.UpstreamConfig,
 	apiKey string,
 ) (*http.Request, []byte, error) {
-	// 1. 读取原始请求体
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("读取请求体失败: %w", err)
 	}
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-	var providerReq interface{}
-
-	// 2. 使用转换器工厂创建转换器
-	converter := converters.NewConverter(upstream.ServiceType)
-
-	// 3. 判断是否为透传模式
-	if _, ok := converter.(*converters.ResponsesPassthroughConverter); ok {
-		// [Mode-Passthrough] 透传模式：使用 map 保留所有字段
-		var reqMap map[string]interface{}
-		if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
-			return nil, bodyBytes, fmt.Errorf("透传模式下解析请求失败: %w", err)
-		}
-
-		// 只做模型重定向
-		if model, ok := reqMap["model"].(string); ok {
-			reqMap["model"] = config.RedirectModel(model, upstream)
-		}
-
-		providerReq = reqMap
-	} else {
-		// [Mode-Convert] 非透传模式：保持原有逻辑
-		var responsesReq types.ResponsesRequest
-		if err := json.Unmarshal(bodyBytes, &responsesReq); err != nil {
-			return nil, bodyBytes, fmt.Errorf("解析 Responses 请求失败: %w", err)
-		}
-
-		// 获取或创建会话
-		sess, err := p.SessionManager.GetOrCreateSession(responsesReq.PreviousResponseID)
-		if err != nil {
-			return nil, bodyBytes, fmt.Errorf("获取会话失败: %w", err)
-		}
-
-		// 模型重定向
-		responsesReq.Model = config.RedirectModel(responsesReq.Model, upstream)
-
-		// 转换请求
-		convertedReq, err := converter.ToProviderRequest(sess, &responsesReq)
-		if err != nil {
-			return nil, bodyBytes, fmt.Errorf("转换请求失败: %w", err)
-		}
-		providerReq = convertedReq
+	if p.SessionManager == nil {
+		p.SessionManager = newDefaultSessionManager()
 	}
 
-	// 4. 序列化请求体（禁用 HTML 转义）
+	providerReq, reqBodyForURL, err := p.buildProviderRequestBody(c.Request.URL.Path, bodyBytes, upstream)
+	if err != nil {
+		return nil, bodyBytes, err
+	}
+
 	reqBody, err := utils.MarshalJSONNoEscape(providerReq)
 	if err != nil {
 		return nil, bodyBytes, fmt.Errorf("序列化请求失败: %w", err)
 	}
 
-	// 7. 构建 HTTP 请求
-	var targetURL string
-	if upstream.ServiceType == "gemini" {
-		// Gemini 使用特殊 URL 格式: {baseURL}/v1beta/models/{model}:{action}
+	targetURL, err := p.buildRequestURL(upstream, reqBodyForURL)
+	if err != nil {
+		return nil, bodyBytes, err
+	}
+
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, targetURL, bytes.NewReader(reqBody))
+	if err != nil {
+		return nil, bodyBytes, err
+	}
+
+	req.Header = utils.PrepareUpstreamHeaders(c, req.URL.Host)
+	req.Header.Del("authorization")
+	req.Header.Del("x-api-key")
+	req.Header.Del("x-goog-api-key")
+
+	switch upstream.ServiceType {
+	case "gemini":
+		utils.SetGeminiAuthenticationHeader(req.Header, apiKey)
+	default:
+		utils.SetAuthenticationHeader(req.Header, apiKey)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
+
+	return req, bodyBytes, nil
+}
+
+func (p *ResponsesProvider) buildProviderRequestBody(requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
+	if requestPath == "/v1/messages" {
+		responsesReq, err := p.buildResponsesRequestFromClaude(bodyBytes, upstream)
+		if err != nil {
+			return nil, nil, fmt.Errorf("解析 Claude Messages 请求失败: %w", err)
+		}
+		return responsesReq, bodyBytes, nil
+	}
+
+	var providerReq interface{}
+	converter := converters.NewConverter(upstream.ServiceType)
+
+	if _, ok := converter.(*converters.ResponsesPassthroughConverter); ok {
+		var reqMap map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+			return nil, nil, fmt.Errorf("透传模式下解析请求失败: %w", err)
+		}
+		if model, ok := reqMap["model"].(string); ok {
+			reqMap["model"] = config.RedirectModel(model, upstream)
+			if effort := config.ResolveReasoningEffort(model, upstream); effort != "" {
+				reqMap["reasoning"] = map[string]interface{}{"effort": effort}
+			}
+		}
+		if upstream.TextVerbosity != "" {
+			reqMap["text"] = map[string]interface{}{"verbosity": upstream.TextVerbosity}
+		}
+		if upstream.FastMode {
+			reqMap["service_tier"] = "priority"
+		}
+		providerReq = reqMap
+	} else {
 		var responsesReq types.ResponsesRequest
-		json.Unmarshal(bodyBytes, &responsesReq)
+		if err := json.Unmarshal(bodyBytes, &responsesReq); err != nil {
+			return nil, nil, fmt.Errorf("解析 Responses 请求失败: %w", err)
+		}
+
+		sess, err := p.SessionManager.GetOrCreateSession(responsesReq.PreviousResponseID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("获取会话失败: %w", err)
+		}
+
+		responsesReq.Model = config.RedirectModel(responsesReq.Model, upstream)
+		convertedReq, err := converter.ToProviderRequest(sess, &responsesReq)
+		if err != nil {
+			return nil, nil, fmt.Errorf("转换请求失败: %w", err)
+		}
+		providerReq = convertedReq
+	}
+
+	return providerReq, bodyBytes, nil
+}
+
+func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
+	var claudeReq types.ClaudeRequest
+	if err := json.Unmarshal(bodyBytes, &claudeReq); err != nil {
+		return nil, err
+	}
+
+	input := make([]map[string]interface{}, 0, len(claudeReq.Messages))
+	for _, msg := range claudeReq.Messages {
+		item := map[string]interface{}{
+			"type": "message",
+			"role": normalizeRole(msg.Role),
+		}
+
+		contentBlocks := make([]map[string]interface{}, 0)
+		switch content := msg.Content.(type) {
+		case string:
+			if content != "" {
+				contentBlocks = append(contentBlocks, map[string]interface{}{"type": "input_text", "text": content})
+			}
+		case []interface{}:
+			for _, rawBlock := range content {
+				block, ok := rawBlock.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				switch block["type"] {
+				case "text":
+					if text, ok := block["text"].(string); ok && text != "" {
+						contentBlocks = append(contentBlocks, map[string]interface{}{"type": "input_text", "text": text})
+					}
+				case "tool_use":
+					arguments, _ := utils.MarshalJSONNoEscape(block["input"])
+					input = append(input, map[string]interface{}{
+						"type":      "function_call",
+						"call_id":   block["id"],
+						"name":      block["name"],
+						"arguments": string(arguments),
+					})
+				case "tool_result":
+					resultText := extractClaudeToolResult(block["content"])
+					input = append(input, map[string]interface{}{
+						"type":    "function_call_output",
+						"call_id": block["tool_use_id"],
+						"output":  resultText,
+					})
+				}
+			}
+		}
+
+		if len(contentBlocks) > 0 {
+			item["content"] = contentBlocks
+			input = append(input, item)
+		}
+	}
+
+	responsesReq := map[string]interface{}{
+		"model":  config.RedirectModel(claudeReq.Model, upstream),
+		"input":  input,
+		"stream": claudeReq.Stream,
+	}
+	if instructions := extractSystemText(claudeReq.System); instructions != "" {
+		responsesReq["instructions"] = instructions
+	}
+	if claudeReq.MaxTokens > 0 {
+		responsesReq["max_output_tokens"] = claudeReq.MaxTokens
+	}
+	if claudeReq.Temperature > 0 {
+		responsesReq["temperature"] = claudeReq.Temperature
+	}
+	if len(claudeReq.Tools) > 0 {
+		tools := make([]map[string]interface{}, 0, len(claudeReq.Tools))
+		for _, tool := range claudeReq.Tools {
+			item := map[string]interface{}{
+				"name":       tool.Name,
+				"parameters": tool.InputSchema,
+			}
+			if tool.Description != "" {
+				item["description"] = tool.Description
+			}
+			tools = append(tools, item)
+		}
+		responsesReq["tools"] = tools
+	}
+	return responsesReq, nil
+}
+
+func extractClaudeToolResult(content interface{}) string {
+	switch v := content.(type) {
+	case string:
+		return v
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			block, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if text, ok := block["text"].(string); ok && text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		bytes, _ := utils.MarshalJSONNoEscape(v)
+		return string(bytes)
+	}
+}
+
+func (p *ResponsesProvider) buildRequestURL(upstream *config.UpstreamConfig, bodyBytes []byte) (string, error) {
+	if upstream.ServiceType == "gemini" {
+		var responsesReq types.ResponsesRequest
+		if err := json.Unmarshal(bodyBytes, &responsesReq); err != nil {
+			return "", fmt.Errorf("解析 Responses 请求失败: %w", err)
+		}
 		model := config.RedirectModel(responsesReq.Model, upstream)
 		action := "generateContent"
 		if responsesReq.Stream {
 			action = "streamGenerateContent?alt=sse"
 		}
 		baseURL := strings.TrimSuffix(upstream.GetEffectiveBaseURL(), "/")
-
-		// 检查是否已包含版本号后缀
 		versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
 		if !versionPattern.MatchString(baseURL) && !strings.HasSuffix(upstream.BaseURL, "#") {
-			baseURL = baseURL + "/v1beta"
+			baseURL += "/v1beta"
 		}
-
-		targetURL = fmt.Sprintf("%s/models/%s:%s", baseURL, model, action)
-	} else {
-		targetURL = p.buildTargetURL(upstream)
+		return fmt.Sprintf("%s/models/%s:%s", baseURL, model, action), nil
 	}
-	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", targetURL, bytes.NewReader(reqBody))
-	if err != nil {
-		return nil, bodyBytes, err
-	}
-
-	// 8. 设置请求头（透明代理）
-	// 使用统一的头部处理逻辑，保留客户端的大部分 headers
-	req.Header = utils.PrepareUpstreamHeaders(c, req.URL.Host)
-
-	// 删除客户端的所有认证头，避免冲突
-	req.Header.Del("authorization")
-	req.Header.Del("x-api-key")
-	req.Header.Del("x-goog-api-key")
-
-	// 根据 ServiceType 设置对应的认证头
-	switch upstream.ServiceType {
-	case "gemini":
-		// 只有 Gemini 使用特殊的认证头
-		utils.SetGeminiAuthenticationHeader(req.Header, apiKey)
-	default:
-		// claude, responses, openai 等都使用 Authorization: Bearer
-		utils.SetAuthenticationHeader(req.Header, apiKey)
-	}
-
-	// 确保 Content-Type 正确
-	req.Header.Set("Content-Type", "application/json")
-
-	// 应用自定义请求头（最后执行，允许覆盖任何头）
-	utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
-
-	return req, bodyBytes, nil
+	return p.buildTargetURL(upstream), nil
 }
 
 // buildTargetURL 根据上游类型构建目标 URL
-// 智能拼接逻辑：
-// 1. 如果 baseURL 以 # 结尾，跳过自动添加 /v1
-// 2. 如果 baseURL 已包含版本号后缀（如 /v1, /v2, /v8, /v1beta），直接拼接端点路径
-// 3. 如果 baseURL 不包含版本号后缀，自动添加 /v1 再拼接端点路径
 func (p *ResponsesProvider) buildTargetURL(upstream *config.UpstreamConfig) string {
 	baseURL := upstream.BaseURL
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
@@ -153,11 +267,9 @@ func (p *ResponsesProvider) buildTargetURL(upstream *config.UpstreamConfig) stri
 	}
 	baseURL = strings.TrimSuffix(baseURL, "/")
 
-	// 使用正则表达式检测 baseURL 是否以版本号结尾（/v1, /v2, /v1beta, /v2alpha等）
 	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
 	hasVersionSuffix := versionPattern.MatchString(baseURL)
 
-	// 根据 ServiceType 确定端点路径
 	var endpoint string
 	switch upstream.ServiceType {
 	case "responses":
@@ -165,25 +277,98 @@ func (p *ResponsesProvider) buildTargetURL(upstream *config.UpstreamConfig) stri
 	case "claude":
 		endpoint = "/messages"
 	case "gemini":
-		// Gemini 使用不同的 URL 结构，在 ConvertToProviderRequest 中处理
-		// 这里返回基础 URL，实际 URL 在请求构建时动态生成
 		endpoint = ""
 	default:
 		endpoint = "/chat/completions"
 	}
 
-	// 如果 baseURL 已包含版本号或以#结尾，直接拼接端点
-	// 否则添加 /v1 再拼接端点
 	if hasVersionSuffix || skipVersionPrefix {
 		return baseURL + endpoint
 	}
 	return baseURL + "/v1" + endpoint
 }
 
-// ConvertToClaudeResponse 将上游响应转换为 Responses 格式（实际上不再需要 Claude 格式）
+// ConvertToClaudeResponse 将上游响应转换为 Claude 响应
 func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.ProviderResponse) (*types.ClaudeResponse, error) {
-	// 这个方法在 ResponsesHandler 中不会被调用，这里提供兼容性实现
-	return nil, fmt.Errorf("ResponsesProvider 不支持 ConvertToClaudeResponse")
+	var responsesResp map[string]interface{}
+	if err := json.Unmarshal(providerResp.Body, &responsesResp); err != nil {
+		return nil, err
+	}
+
+	claudeResp := &types.ClaudeResponse{
+		ID:      generateID(),
+		Type:    "message",
+		Role:    "assistant",
+		Content: []types.ClaudeContent{},
+	}
+
+	if id, ok := responsesResp["id"].(string); ok && id != "" {
+		claudeResp.ID = id
+	}
+
+	if output, ok := responsesResp["output"].([]interface{}); ok {
+		for _, rawItem := range output {
+			item, ok := rawItem.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			switch item["type"] {
+			case "message":
+				if content, ok := item["content"].([]interface{}); ok {
+					for _, rawBlock := range content {
+						block, ok := rawBlock.(map[string]interface{})
+						if !ok {
+							continue
+						}
+						if text, ok := block["text"].(string); ok && text != "" {
+							claudeResp.Content = append(claudeResp.Content, types.ClaudeContent{Type: "text", Text: text})
+						}
+					}
+				}
+			case "function_call":
+				var input interface{}
+				if args, ok := item["arguments"].(string); ok && args != "" {
+					_ = json.Unmarshal([]byte(args), &input)
+				}
+				claudeResp.Content = append(claudeResp.Content, types.ClaudeContent{
+					Type:  "tool_use",
+					ID:    toString(item["call_id"]),
+					Name:  toString(item["name"]),
+					Input: input,
+				})
+			}
+		}
+	}
+
+	if usageRaw, ok := responsesResp["usage"].(map[string]interface{}); ok {
+		claudeResp.Usage = &types.Usage{}
+		if v, ok := usageRaw["input_tokens"].(float64); ok {
+			claudeResp.Usage.InputTokens = int(v)
+		}
+		if v, ok := usageRaw["output_tokens"].(float64); ok {
+			claudeResp.Usage.OutputTokens = int(v)
+		}
+		if cacheRead, ok := usageRaw["cache_read_input_tokens"].(float64); ok {
+			claudeResp.Usage.CacheReadInputTokens = int(cacheRead)
+		}
+	}
+
+	hasToolUse := false
+	for _, block := range claudeResp.Content {
+		if block.Type == "tool_use" {
+			hasToolUse = true
+			break
+		}
+	}
+	if hasToolUse {
+		claudeResp.StopReason = "tool_use"
+	} else if status, _ := responsesResp["status"].(string); status == "incomplete" {
+		claudeResp.StopReason = "max_tokens"
+	} else {
+		claudeResp.StopReason = "end_turn"
+	}
+
+	return claudeResp, nil
 }
 
 // ConvertToResponsesResponse 将上游响应转换为 Responses 格式
@@ -192,18 +377,170 @@ func (p *ResponsesProvider) ConvertToResponsesResponse(
 	upstreamType string,
 	sessionID string,
 ) (*types.ResponsesResponse, error) {
-	// 解析响应体为 map
 	respMap, err := converters.JSONToMap(providerResp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("解析响应失败: %w", err)
 	}
-
-	// 使用转换器工厂
 	converter := converters.NewConverter(upstreamType)
 	return converter.FromProviderResponse(respMap, sessionID)
 }
 
-// HandleStreamResponse 处理流式响应（暂不实现）
+// HandleStreamResponse 处理流式响应
 func (p *ResponsesProvider) HandleStreamResponse(body io.ReadCloser) (<-chan string, <-chan error, error) {
-	return nil, nil, fmt.Errorf("Responses Provider 暂不支持流式响应")
+	eventChan := make(chan string, 100)
+	errChan := make(chan error, 1)
+
+	go func() {
+		defer close(eventChan)
+		defer body.Close()
+
+		scanner := bufio.NewScanner(body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		pendingEventType := ""
+		messageStartSent := false
+		textBlockStarted := false
+		textBlockIndex := 0
+		toolBlockIndex := 1
+		currentTool := map[string]string{}
+		latestInputTokens := 0
+		latestOutputTokens := 0
+		stopReason := "end_turn"
+
+		emitJSON := func(eventName string, payload map[string]interface{}) {
+			payload["type"] = eventName
+			b, _ := json.Marshal(payload)
+			eventChan <- fmt.Sprintf("event: %s\ndata: %s\n\n", eventName, string(b))
+		}
+
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			if strings.HasPrefix(line, "event: ") {
+				pendingEventType = strings.TrimPrefix(line, "event: ")
+				continue
+			}
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			var data map[string]interface{}
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &data); err != nil {
+				continue
+			}
+
+			eventType := pendingEventType
+			if eventType == "" {
+				eventType = toString(data["type"])
+			}
+			pendingEventType = ""
+
+			switch eventType {
+			case "response.output_text.delta":
+				if !messageStartSent {
+					eventChan <- buildMessageStartEvent("responses")
+					messageStartSent = true
+				}
+				if !textBlockStarted {
+					emitJSON("content_block_start", map[string]interface{}{
+						"index": textBlockIndex,
+						"content_block": map[string]interface{}{"type": "text", "text": ""},
+					})
+					textBlockStarted = true
+				}
+				delta := toString(data["delta"])
+				if delta != "" {
+					emitJSON("content_block_delta", map[string]interface{}{
+						"index": textBlockIndex,
+						"delta": map[string]interface{}{"type": "text_delta", "text": delta},
+					})
+				}
+			case "response.output_item.added":
+				item, _ := data["item"].(map[string]interface{})
+				if toString(item["type"]) != "function_call" {
+					continue
+				}
+				if !messageStartSent {
+					eventChan <- buildMessageStartEvent("responses")
+					messageStartSent = true
+				}
+				if textBlockStarted {
+					emitJSON("content_block_stop", map[string]interface{}{"index": textBlockIndex})
+					textBlockStarted = false
+				}
+				currentTool = map[string]string{
+					"id":   toString(item["call_id"]),
+					"name": toString(item["name"]),
+				}
+				if currentTool["id"] == "" {
+					currentTool["id"] = currentTool["name"]
+				}
+				emitJSON("content_block_start", map[string]interface{}{
+					"index": toolBlockIndex,
+					"content_block": map[string]interface{}{
+						"type": "tool_use",
+						"id":   currentTool["id"],
+						"name": currentTool["name"],
+					},
+				})
+			case "response.function_call_arguments.delta":
+				if currentTool["id"] == "" {
+					continue
+				}
+				emitJSON("content_block_delta", map[string]interface{}{
+					"index": toolBlockIndex,
+					"delta": map[string]interface{}{"type": "input_json_delta", "partial_json": toString(data["delta"])},
+				})
+			case "response.output_item.done":
+				item, _ := data["item"].(map[string]interface{})
+				if toString(item["type"]) == "function_call" && currentTool["id"] != "" {
+					emitJSON("content_block_stop", map[string]interface{}{"index": toolBlockIndex})
+					toolBlockIndex++
+					stopReason = "tool_use"
+					currentTool = map[string]string{}
+				}
+			case "response.completed":
+				response, _ := data["response"].(map[string]interface{})
+				usage, _ := response["usage"].(map[string]interface{})
+				if v, ok := usage["input_tokens"].(float64); ok {
+					latestInputTokens = int(v)
+				}
+				if v, ok := usage["output_tokens"].(float64); ok {
+					latestOutputTokens = int(v)
+				}
+				status := toString(response["status"])
+				if status == "incomplete" {
+					stopReason = "max_tokens"
+				}
+				if textBlockStarted {
+					emitJSON("content_block_stop", map[string]interface{}{"index": textBlockIndex})
+					textBlockStarted = false
+				}
+				if !messageStartSent {
+					eventChan <- buildMessageStartEvent("responses")
+					messageStartSent = true
+				}
+				emitJSON("message_delta", map[string]interface{}{
+					"delta": map[string]interface{}{"stop_reason": stopReason, "stop_sequence": nil},
+					"usage": map[string]interface{}{"input_tokens": latestInputTokens, "output_tokens": latestOutputTokens},
+				})
+				emitJSON("message_stop", map[string]interface{}{})
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			errChan <- err
+		}
+	}()
+
+	return eventChan, errChan, nil
+}
+
+func toString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
 }

@@ -64,7 +64,6 @@ func RedirectModel(model string, upstream *UpstreamConfig) string {
 	}
 
 	// 模糊匹配：按源模型长度从长到短排序，确保最长匹配优先
-	// 例如：同时配置 "codex" 和 "gpt-5.1-codex" 时，"gpt-5.1-codex" 应该先匹配
 	type mapping struct {
 		source string
 		target string
@@ -73,12 +72,10 @@ func RedirectModel(model string, upstream *UpstreamConfig) string {
 	for source, target := range upstream.ModelMapping {
 		mappings = append(mappings, mapping{source, target})
 	}
-	// 按源模型长度降序排序
 	sort.Slice(mappings, func(i, j int) bool {
 		return len(mappings[i].source) > len(mappings[j].source)
 	})
 
-	// 按排序后的顺序进行模糊匹配
 	for _, m := range mappings {
 		if strings.Contains(model, m.source) || strings.Contains(m.source, model) {
 			return m.target
@@ -86,6 +83,33 @@ func RedirectModel(model string, upstream *UpstreamConfig) string {
 	}
 
 	return model
+}
+
+// ResolveReasoningEffort 根据原始模型名解析 reasoning effort
+func ResolveReasoningEffort(model string, upstream *UpstreamConfig) string {
+	if upstream == nil || upstream.ReasoningMapping == nil || len(upstream.ReasoningMapping) == 0 {
+		return ""
+	}
+	if effort, ok := upstream.ReasoningMapping[model]; ok {
+		return effort
+	}
+	type mapping struct {
+		source string
+		effort string
+	}
+	mappings := make([]mapping, 0, len(upstream.ReasoningMapping))
+	for source, effort := range upstream.ReasoningMapping {
+		mappings = append(mappings, mapping{source, effort})
+	}
+	sort.Slice(mappings, func(i, j int) bool {
+		return len(mappings[i].source) > len(mappings[j].source)
+	})
+	for _, m := range mappings {
+		if strings.Contains(model, m.source) || strings.Contains(m.source, model) {
+			return m.effort
+		}
+	}
+	return ""
 }
 
 // ============== 渠道状态与优先级辅助函数 ==============

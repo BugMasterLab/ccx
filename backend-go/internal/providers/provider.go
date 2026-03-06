@@ -3,8 +3,10 @@ package providers
 import (
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/session"
 	"github.com/BenedictKing/ccx/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -21,6 +23,10 @@ type Provider interface {
 	HandleStreamResponse(body io.ReadCloser) (<-chan string, <-chan error, error)
 }
 
+func newDefaultSessionManager() *session.SessionManager {
+	return session.NewSessionManager(24*time.Hour, 100, 100000)
+}
+
 // GetProvider 根据服务类型获取提供商
 func GetProvider(serviceType string) Provider {
 	switch serviceType {
@@ -30,6 +36,8 @@ func GetProvider(serviceType string) Provider {
 		return &GeminiProvider{}
 	case "claude":
 		return &ClaudeProvider{}
+	case "responses":
+		return &ResponsesProvider{SessionManager: newDefaultSessionManager()}
 	default:
 		return nil
 	}

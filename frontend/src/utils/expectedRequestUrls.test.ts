@@ -34,6 +34,13 @@ describe('buildExpectedRequestUrls', () => {
     expect(result[0].expectedUrl).toBe('https://api.openai.com/v1/chat/completions')
   })
 
+  it('应为 messages 渠道上的 responses 上游生成 responses 端点', () => {
+    const result = buildExpectedRequestUrls('messages', 'responses', 'https://api.openai.com')
+
+    expect(result).toHaveLength(1)
+    expect(result[0].expectedUrl).toBe('https://api.openai.com/v1/responses')
+  })
+
   it('应为 chat 渠道上的 responses 上游生成 responses 端点', () => {
     const result = buildExpectedRequestUrls('chat', 'responses', 'https://api.openai.com')
 

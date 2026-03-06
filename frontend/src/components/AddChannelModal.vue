@@ -198,6 +198,34 @@
                     <span class="text-caption text-primary">💡 点击目标模型输入框会自动获取上游支持的模型列表,每个 API Key 的检测状态会显示在密钥列表中</span>
                   </div>
 
+                  <v-row class="mb-2">
+                    <v-col cols="12" md="6">
+                      <v-select
+                        v-model="form.textVerbosity"
+                        label="输出冗长度"
+                        :items="textVerbosityOptions"
+                        variant="outlined"
+                        density="comfortable"
+                        hide-details
+                        clearable
+                        :disabled="!supportsOpenAIAdvancedOptions"
+                      />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-switch
+                        v-model="form.fastMode"
+                        label="Fast 模式"
+                        color="primary"
+                        hide-details
+                        inset
+                        :disabled="!supportsOpenAIAdvancedOptions"
+                      />
+                    </v-col>
+                  </v-row>
+                  <div v-if="supportsOpenAIAdvancedOptions" class="text-caption text-medium-emphasis mb-4">
+                    Fast 模式开启后将下发 service_tier=priority；关闭时不下发。
+                  </div>
+
                   <!-- 现有映射列表 -->
                   <div v-if="Object.keys(form.modelMapping).length" class="mb-4">
                     <v-list density="compact" class="bg-transparent">
@@ -213,11 +241,19 @@
                           <v-icon size="small" color="primary">mdi-arrow-right</v-icon>
                         </template>
 
-                        <v-list-item-title>
-                          <div class="d-flex align-center ga-2">
+                      <v-list-item-title>
+                          <div class="d-flex align-center ga-2 flex-wrap">
                             <code class="text-caption">{{ source }}</code>
                             <v-icon size="small" color="primary">mdi-arrow-right</v-icon>
                             <code class="text-caption">{{ target }}</code>
+                            <v-chip
+                              v-if="form.reasoningMapping[source]"
+                              size="x-small"
+                              color="secondary"
+                              variant="tonal"
+                            >
+                              reasoning: {{ form.reasoningMapping[source] }}
+                            </v-chip>
                           </div>
                         </v-list-item-title>
 
@@ -260,6 +296,17 @@
                       clearable
                       @focus="handleTargetModelClick"
                       @keyup.enter="addModelMapping"
+                    />
+                    <v-select
+                      v-model="newMapping.reasoningEffort"
+                      label="思考深度"
+                      :items="reasoningEffortOptions"
+                      variant="outlined"
+                      density="comfortable"
+                      hide-details
+                      clearable
+                      class="flex-1-1"
+                      :disabled="!supportsOpenAIAdvancedOptions"
                     />
                     <v-btn
                       color="secondary"
@@ -705,6 +752,7 @@ import {
   parseQuickInput as parseQuickInputUtil
 } from '../utils/quickInputParser'
 import { buildExpectedRequestUrls } from '../utils/expectedRequestUrls'
+import { buildChannelPayload } from '../utils/channelPayload'
 
 interface Props {
   show: boolean
@@ -1006,9 +1054,7 @@ const serviceTypeOptions = computed(() => {
 
   switch (props.channelType) {
     case 'messages':
-      // Claude Messages API 入口，不支持 responses 上游
-      const messagesOptions = allOptions.filter(o => o.value !== 'responses')
-      return reorder(messagesOptions, 'claude')
+      return reorder(allOptions, 'claude')
     case 'chat':
       // OpenAI Chat API 入口，OpenAI 原生排第一
       return reorder(allOptions, 'openai')
@@ -1115,6 +1161,22 @@ const targetModelPlaceholder = computed(() => {
   }
 })
 
+const reasoningEffortOptions = [
+  { title: 'None', value: 'none' },
+  { title: 'Low', value: 'low' },
+  { title: 'Medium', value: 'medium' },
+  { title: 'High', value: 'high' },
+  { title: 'XHigh', value: 'xhigh' }
+]
+
+const textVerbosityOptions = [
+  { title: 'Low', value: 'low' },
+  { title: 'Medium', value: 'medium' },
+  { title: 'High', value: 'high' }
+]
+
+const supportsOpenAIAdvancedOptions = computed(() => form.serviceType === 'openai' || form.serviceType === 'responses')
+
 // 表单数据
 const form = reactive({
   name: '',
@@ -1129,6 +1191,9 @@ const form = reactive({
   description: '',
   apiKeys: [] as string[],
   modelMapping: {} as Record<string, string>,
+  reasoningMapping: {} as Record<string, 'none' | 'low' | 'medium' | 'high' | 'xhigh'>,
+  textVerbosity: '' as 'low' | 'medium' | 'high' | '',
+  fastMode: false,
   customHeaders: {} as Record<string, string>,
   proxyUrl: '',
   supportedModels: [] as string[]
@@ -1177,7 +1242,8 @@ const copiedKeyIndex = ref<number | null>(null)
 // 新模型映射输入
 const newMapping = reactive({
   source: '',
-  target: ''
+  target: '',
+  reasoningEffort: '' as 'none' | 'low' | 'medium' | 'high' | 'xhigh' | ''
 })
 
 // 自定义请求头输入
@@ -1352,6 +1418,9 @@ const resetForm = () => {
   form.description = ''
   form.apiKeys = []
   form.modelMapping = {}
+  form.reasoningMapping = {}
+  form.textVerbosity = ''
+  form.fastMode = false
   form.customHeaders = {}
   form.proxyUrl = ''
   form.supportedModels = []
@@ -1418,6 +1487,9 @@ const loadChannelData = (channel: Channel) => {
   originalKeyMap.value.clear()
 
   form.modelMapping = { ...(channel.modelMapping || {}) }
+  form.reasoningMapping = { ...(channel.reasoningMapping || {}) }
+  form.textVerbosity = channel.textVerbosity || ''
+  form.fastMode = !!channel.fastMode
   form.customHeaders = { ...(channel.customHeaders || {}) }
   form.proxyUrl = channel.proxyUrl || ''
   form.supportedModels = channel.supportedModels || []
@@ -1557,13 +1629,20 @@ const addModelMapping = () => {
 
   if (source && target && !form.modelMapping[source]) {
     form.modelMapping[source] = target
+    if (newMapping.reasoningEffort) {
+      form.reasoningMapping[source] = newMapping.reasoningEffort
+    } else {
+      delete form.reasoningMapping[source]
+    }
     newMapping.source = ''
     newMapping.target = ''
+    newMapping.reasoningEffort = ''
   }
 }
 
 const removeModelMapping = (source: string) => {
   delete form.modelMapping[source]
+  delete form.reasoningMapping[source]
 }
 
 // 处理目标模型输入框点击事件(仅在首次或有新 key 时触发请求)
@@ -1712,28 +1791,7 @@ const handleSubmit = async () => {
           })
       : [form.baseUrl.trim().replace(/[#/]+$/, '')].filter(Boolean)
 
-  // 构建渠道数据
-  const channelData: Omit<Channel, 'index' | 'latency' | 'status'> = {
-    name: form.name.trim(),
-    serviceType: form.serviceType as 'openai' | 'gemini' | 'claude' | 'responses',
-    baseUrl: deduplicatedUrls[0] || '',
-    website: form.website.trim(), // 空字符串也需要传递，以便清除已有值
-    insecureSkipVerify: form.insecureSkipVerify,
-    lowQuality: form.lowQuality,
-    injectDummyThoughtSignature: form.injectDummyThoughtSignature,
-    stripThoughtSignature: form.stripThoughtSignature,
-    description: form.description.trim(),
-    apiKeys: processedApiKeys,
-    modelMapping: form.modelMapping,
-    customHeaders: form.customHeaders,  // 始终传递，空对象表示清除
-    proxyUrl: form.proxyUrl.trim(),
-    supportedModels: form.supportedModels  // 空数组表示支持所有模型，始终传递以支持清空
-  }
-
-  // 多 BaseURL 支持
-  if (deduplicatedUrls.length > 1) {
-    channelData.baseUrls = deduplicatedUrls
-  }
+  const channelData = buildChannelPayload(form)
 
   emit('save', channelData)
 }

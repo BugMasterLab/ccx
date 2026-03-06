@@ -56,7 +56,28 @@ func (p *OpenAIProvider) ConvertToProviderRequest(c *gin.Context, upstream *conf
 	}
 	// --- 转换逻辑结束 ---
 
-	reqBodyBytes, err := json.Marshal(openaiReq)
+	requestMap := map[string]interface{}{
+		"model":                 openaiReq.Model,
+		"messages":              openaiReq.Messages,
+		"stream":                openaiReq.Stream,
+		"temperature":           openaiReq.Temperature,
+		"max_completion_tokens": openaiReq.MaxCompletionTokens,
+	}
+	if len(openaiReq.Tools) > 0 {
+		requestMap["tools"] = openaiReq.Tools
+		requestMap["tool_choice"] = openaiReq.ToolChoice
+	}
+	if effort := config.ResolveReasoningEffort(claudeReq.Model, upstream); effort != "" {
+		requestMap["reasoning"] = map[string]interface{}{"effort": effort}
+	}
+	if upstream.TextVerbosity != "" {
+		requestMap["text"] = map[string]interface{}{"verbosity": upstream.TextVerbosity}
+	}
+	if upstream.FastMode {
+		requestMap["service_tier"] = "priority"
+	}
+
+	reqBodyBytes, err := json.Marshal(requestMap)
 	if err != nil {
 		return nil, originalBodyBytes, fmt.Errorf("序列化OpenAI请求体失败: %w", err)
 	}
