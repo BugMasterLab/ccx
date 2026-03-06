@@ -1,5 +1,41 @@
 ## [Unreleased]
 
+### 新增
+
+- **4 协议完整互转支持** - 实现 Claude Messages、OpenAI Chat、Gemini、Responses 四种协议的完整双向转换矩阵（12 条转换路径）
+  - 前端：所有渠道类型（messages/chat/responses/gemini）现可选择全部 4 种上游服务类型（claude/openai/gemini/responses）
+  - 后端转换器：新增 `GeminiResponsesConverter`、`gemini_to_responses.go`、`responses_to_gemini.go` 实现 Gemini ↔ Responses 双向转换
+  - Gemini handler：添加 `responses` 上游支持（请求构建、认证、流式/非流式响应转换）
+  - Responses handler：流式处理中按 `upstreamType` 分支，`gemini` 上游调用 `ConvertGeminiStreamToResponses`
+  - 影响文件：
+    - `frontend/src/components/AddChannelModal.vue` - serviceTypeOptions 扩展
+    - `internal/converters/factory.go` - 注册 GeminiResponsesConverter
+    - `internal/converters/gemini_responses_converter.go` - 新增
+    - `internal/converters/gemini_to_responses.go` - 新增
+    - `internal/converters/responses_to_gemini.go` - 新增
+    - `internal/handlers/gemini/handler.go` - 添加 responses case
+    - `internal/handlers/gemini/stream.go` - 添加 streamResponsesToGemini
+    - `internal/handlers/responses/handler.go` - 流式转换分支
+    - `internal/providers/responses.go` - Gemini URL 动态构建
+
+### 修复
+
+- **Responses → Gemini 工具项读取错误（P1）** - `parseResponsesInput` 现在对 `function_call` 和 `function_call_output` 类型保留完整的 itemMap 作为 Content，`responsesItemToGeminiContents` 支持从顶层和嵌套 content 字段读取 name/arguments/call_id/output，确保工具调用链不会因字段丢失而断裂
+- **call_id 与函数名映射不一致（P1）** - Gemini → Responses 转换（非流式和流式）现在使用函数名作为 `call_id`，Responses → Gemini 转换中 `function_call_output` 使用 `name` 字段（而非 `call_id`）作为 `FunctionResponse.Name`，确保工具结果可以稳定匹配 Gemini 函数调用
+- **流式完成状态错误（P2）** - `generateCompletedEvent` 现在使用传入的 `finishReason` 调用 `geminiFinishReasonToResponsesStatus` 进行状态映射，不再硬编码 `"completed"`，正确处理 MAX_TOKENS/SAFETY 等场景
+- **前端 URL 预览与后端能力不一致（P3）** - `responses` 渠道下选择 `serviceType=gemini` 时，URL 预览现在正确显示 `/models/{model}:generateContent` 端点，而非错误回退到 `/chat/completions`
+- **Responses → Gemini 流式转换 SSE 解析** - `ConvertResponsesToGeminiStream` 现在正确处理逐行输入的 SSE 事件（`event:` 和 `data:` 分行），在状态中缓存 `eventType`，避免因事件类型缺失导致流式输出为空
+- **Gemini 流式响应发送增量文本** - `response.output_text.delta` 处理中现在发送增量 delta 而非累计文本，避免客户端拼接时出现重复内容
+- **Gemini URL 自动添加 v1beta 前缀** - Responses provider 构建 Gemini URL 时，当 `baseURL` 不含版本号后缀且未标记 `#` 跳过时，自动添加 `/v1beta` 前缀，避免 404 错误
+- **Responses → Gemini 流式工具调用丢失** - 添加 `CurrentFuncName` 和 `CurrentFuncArgs` 状态字段，在 `response.output_item.added`、`response.function_call_arguments.delta`、`response.function_call_arguments.done` 事件中正确收集工具调用，确保最终 chunk 包含完整 function calls
+- **Gemini → Responses 流式 usage 顺序错误** - 将 `usageMetadata` 处理移至 `generateCompletedEvent` 调用前，避免 usage 信息在 `response.completed` 事件中缺失
+- **Gemini 流式最终 chunk 重复全文** - `buildGeminiFinalChunk` 不再包含文本内容（文本已通过 delta 发送），最终 chunk 仅包含 finishReason、usage 和 function calls，避免客户端末尾重复显示全文
+- **前端 URL 预览 responses 服务类型错误** - 修复非 responses 渠道选择 `serviceType=responses` 时，URL 预览错误显示 `/chat/completions` 的问题，现正确显示 `/responses` 端点
+- **Gemini → Responses 流式转换丢失工具调用（P1）** - 在 `geminiToResponsesStreamState` 中添加 `FunctionCalls` 字段，流式处理中检测 `functionCall` 并收集到状态，在 `generateCompletedEvent` 中输出为 `function_call` 类型的 output item
+- **纯工具调用被误判为空响应（P1）** - 添加 `hasResponsesFunctionCall` 函数检测 `response.completed` 事件中的工具调用，预检逻辑现在识别纯工具调用（无文本）为有效响应，避免触发重试/切换渠道
+- **call_id 不一致导致工具调用关联失败（P1）** - Gemini → Responses 转换中，`function_call` 和 `function_call_output` 现在都使用函数名作为 `call_id`，确保同一次工具调用的请求和响应可以稳定关联
+- **前端允许但后端不支持的配置（P2）** - Messages 渠道现在不再显示 `responses` 上游选项，避免用户配置后端不支持的组合
+
 ## [v2.6.25] - 2026-03-03
 
 ### 修复

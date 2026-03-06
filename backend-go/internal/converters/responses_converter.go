@@ -332,11 +332,23 @@ func parseResponsesInput(input interface{}) ([]types.ResponsesItem, error) {
 
 			itemType, _ := itemMap["type"].(string)
 			content := itemMap["content"]
+			role, _ := itemMap["role"].(string)
 
-			items = append(items, types.ResponsesItem{
-				Type:    itemType,
-				Content: content,
-			})
+			// 对于 function_call 和 function_call_output,保留完整的 itemMap 作为 Content
+			// 这样 responsesItemToGeminiContents 可以从 Content 中读取所有字段
+			if itemType == "function_call" || itemType == "function_call_output" {
+				items = append(items, types.ResponsesItem{
+					Type:    itemType,
+					Role:    role,
+					Content: itemMap, // 保留完整 map,包含 name/arguments/call_id/output 等字段
+				})
+			} else {
+				items = append(items, types.ResponsesItem{
+					Type:    itemType,
+					Role:    role,
+					Content: content,
+				})
+			}
 		}
 		return items, nil
 

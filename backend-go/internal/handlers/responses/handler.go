@@ -545,14 +545,26 @@ func handleStreamSuccess(
 			// 处理转换后的事件用于文本提取
 			var eventsToCheck []string
 			if needConvert {
-				eventsToCheck = converters.ConvertOpenAIChatToResponses(
-					c.Request.Context(),
-					originalReq.Model,
-					originalRequestJSON,
-					nil,
-					[]byte(line),
-					&converterState,
-				)
+				switch upstreamType {
+				case "gemini":
+					eventsToCheck = converters.ConvertGeminiStreamToResponses(
+						c.Request.Context(),
+						originalReq.Model,
+						originalRequestJSON,
+						nil,
+						[]byte(line),
+						&converterState,
+					)
+				default:
+					eventsToCheck = converters.ConvertOpenAIChatToResponses(
+						c.Request.Context(),
+						originalReq.Model,
+						originalRequestJSON,
+						nil,
+						[]byte(line),
+						&converterState,
+					)
+				}
 			} else {
 				eventsToCheck = []string{line + "\n"}
 			}
@@ -571,7 +583,12 @@ func handleStreamSuccess(
 				// 检查是否为 response.completed 事件（流正常结束）
 				if isResponsesCompletedEvent(event) {
 					preflightDone = true
+					// 检查是否有实际内容（文本或工具调用）
 					preflightEmpty = text == "" || strings.TrimSpace(text) == "{"
+					// 如果有工具调用，不算空响应
+					if preflightEmpty && hasResponsesFunctionCall(event) {
+						preflightEmpty = false
+					}
 					break
 				}
 			}
@@ -624,14 +641,27 @@ func handleStreamSuccess(
 		var eventsToProcess []string
 
 		if needConvert {
-			events := converters.ConvertOpenAIChatToResponses(
-				c.Request.Context(),
-				originalReq.Model,
-				originalRequestJSON,
-				nil,
-				[]byte(line),
-				&converterState,
-			)
+			var events []string
+			switch upstreamType {
+			case "gemini":
+				events = converters.ConvertGeminiStreamToResponses(
+					c.Request.Context(),
+					originalReq.Model,
+					originalRequestJSON,
+					nil,
+					[]byte(line),
+					&converterState,
+				)
+			default:
+				events = converters.ConvertOpenAIChatToResponses(
+					c.Request.Context(),
+					originalReq.Model,
+					originalRequestJSON,
+					nil,
+					[]byte(line),
+					&converterState,
+				)
+			}
 			eventsToProcess = events
 		} else {
 			eventsToProcess = []string{line + "\n"}
@@ -1265,4 +1295,37 @@ func parseInputToItems(input interface{}) ([]types.ResponsesItem, error) {
 	default:
 		return nil, fmt.Errorf("unsupported input type")
 	}
+}
+
+// hasResponsesFunctionCall 检查 Responses 事件中是否包含工具调用
+func hasResponsesFunctionCall(event string) bool {
+	lines := strings.Split(event, "\n")
+	for _, line := range lines {
+		var jsonStr string
+		if strings.HasPrefix(line, "data:") {
+			jsonStr = strings.TrimPrefix(line, "data:")
+			jsonStr = strings.TrimPrefix(jsonStr, " ")
+		} else {
+			continue
+		}
+
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			continue
+		}
+
+		// 检查 response.output 中是否有 function_call 类型
+		if response, ok := data["response"].(map[string]interface{}); ok {
+			if output, ok := response["output"].([]interface{}); ok {
+				for _, item := range output {
+					if itemMap, ok := item.(map[string]interface{}); ok {
+						if itemType, ok := itemMap["type"].(string); ok && itemType == "function_call" {
+							return true
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
 }

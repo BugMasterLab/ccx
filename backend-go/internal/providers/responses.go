@@ -85,7 +85,28 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 	}
 
 	// 7. 构建 HTTP 请求
-	targetURL := p.buildTargetURL(upstream)
+	var targetURL string
+	if upstream.ServiceType == "gemini" {
+		// Gemini 使用特殊 URL 格式: {baseURL}/v1beta/models/{model}:{action}
+		var responsesReq types.ResponsesRequest
+		json.Unmarshal(bodyBytes, &responsesReq)
+		model := config.RedirectModel(responsesReq.Model, upstream)
+		action := "generateContent"
+		if responsesReq.Stream {
+			action = "streamGenerateContent?alt=sse"
+		}
+		baseURL := strings.TrimSuffix(upstream.GetEffectiveBaseURL(), "/")
+
+		// 检查是否已包含版本号后缀
+		versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
+		if !versionPattern.MatchString(baseURL) && !strings.HasSuffix(upstream.BaseURL, "#") {
+			baseURL = baseURL + "/v1beta"
+		}
+
+		targetURL = fmt.Sprintf("%s/models/%s:%s", baseURL, model, action)
+	} else {
+		targetURL = p.buildTargetURL(upstream)
+	}
 	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", targetURL, bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, bodyBytes, err
@@ -143,6 +164,10 @@ func (p *ResponsesProvider) buildTargetURL(upstream *config.UpstreamConfig) stri
 		endpoint = "/responses"
 	case "claude":
 		endpoint = "/messages"
+	case "gemini":
+		// Gemini 使用不同的 URL 结构，在 ConvertToProviderRequest 中处理
+		// 这里返回基础 URL，实际 URL 在请求构建时动态生成
+		endpoint = ""
 	default:
 		endpoint = "/chat/completions"
 	}

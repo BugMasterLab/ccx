@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/converters"
 	"github.com/BenedictKing/ccx/internal/types"
 	"github.com/gin-gonic/gin"
 )
@@ -43,6 +44,8 @@ func handleStreamSuccess(
 		totalUsage = streamClaudeToGemini(c, resp, flusher, envCfg, model)
 	case "openai":
 		totalUsage = streamOpenAIToGemini(c, resp, flusher, envCfg, model)
+	case "responses":
+		totalUsage = streamResponsesToGemini(c, resp, flusher, envCfg, model)
 	default:
 		// 默认透传
 		totalUsage = streamGeminiToGemini(c, resp, flusher, envCfg)
@@ -363,4 +366,62 @@ func openaiFinishReasonToGemini(finishReason string) string {
 	default:
 		return "STOP"
 	}
+}
+
+// streamResponsesToGemini Responses 流式响应转换为 Gemini 格式
+func streamResponsesToGemini(
+	c *gin.Context,
+	resp *http.Response,
+	flusher http.Flusher,
+	envCfg *config.EnvConfig,
+	model string,
+) *types.Usage {
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+
+	var totalUsage *types.Usage
+	var converterState any
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		// 使用转换器将 Responses SSE 转换为 Gemini SSE
+		events := converters.ConvertResponsesToGeminiStream(
+			c.Request.Context(),
+			model,
+			[]byte(line),
+			&converterState,
+		)
+
+		for _, event := range events {
+			// 尝试从事件中提取 usage
+			if strings.HasPrefix(event, "data: ") {
+				jsonData := strings.TrimPrefix(event, "data: ")
+				jsonData = strings.TrimSuffix(jsonData, "\n\n")
+				var chunk types.GeminiStreamChunk
+				if err := json.Unmarshal([]byte(jsonData), &chunk); err == nil {
+					if chunk.UsageMetadata != nil {
+						totalUsage = &types.Usage{
+							InputTokens:  chunk.UsageMetadata.PromptTokenCount - chunk.UsageMetadata.CachedContentTokenCount,
+							OutputTokens: chunk.UsageMetadata.CandidatesTokenCount,
+						}
+					}
+				}
+			}
+
+			fmt.Fprint(c.Writer, event)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("[Gemini-Stream] Responses流式转换读取错误: %v", err)
+	}
+
+	return totalUsage
 }

@@ -985,15 +985,19 @@ const formExpectedRequestUrls = computed(() => {
       endpoint = '/responses'
     } else if (form.serviceType === 'claude') {
       endpoint = '/messages'
+    } else if (form.serviceType === 'gemini') {
+      endpoint = '/models/{model}:generateContent'
     } else {
       endpoint = '/chat/completions'
     }
   } else {
-    // messages 渠道
+    // messages, chat, gemini 渠道
     if (form.serviceType === 'claude') {
       endpoint = '/messages'
     } else if (form.serviceType === 'gemini') {
       endpoint = '/models/{model}:generateContent'
+    } else if (form.serviceType === 'responses') {
+      endpoint = '/responses'
     } else {
       endpoint = '/chat/completions'
     }
@@ -1037,35 +1041,39 @@ const handleQuickSubmit = () => {
   emit('save', channelData, { isQuickAdd: true })
 }
 
-// 服务类型选项 - 根据渠道类型动态显示
+// 服务类型选项 - 根据入口接口类型动态调整可用选项
 const serviceTypeOptions = computed(() => {
-  if (props.channelType === 'chat') {
-    return [
-      { title: 'OpenAI', value: 'openai' },
-      { title: 'Claude', value: 'claude' },
-      { title: 'Gemini', value: 'gemini' },
-      { title: 'Responses (原生接口)', value: 'responses' }
-    ]
+  // 全部4种上游服务类型
+  const allOptions = [
+    { title: 'OpenAI', value: 'openai' },
+    { title: 'Claude', value: 'claude' },
+    { title: 'Gemini', value: 'gemini' },
+    { title: 'Responses (原生接口)', value: 'responses' }
+  ]
+
+  // 根据入口接口类型调整排序（原生/默认类型排第一）
+  const reorder = (options: typeof allOptions, first: string) => {
+    const firstOption = options.find(o => o.value === first)
+    const rest = options.filter(o => o.value !== first)
+    return firstOption ? [firstOption, ...rest] : options
   }
-  if (props.channelType === 'gemini') {
-    return [
-      { title: 'Gemini', value: 'gemini' },
-      { title: 'OpenAI', value: 'openai' },
-      { title: 'Claude', value: 'claude' }
-    ]
-  }
-  if (props.channelType === 'responses') {
-    return [
-      { title: 'Responses (原生接口)', value: 'responses' },
-      { title: 'OpenAI', value: 'openai' },
-      { title: 'Claude', value: 'claude' }
-    ]
-  } else {
-    return [
-      { title: 'OpenAI', value: 'openai' },
-      { title: 'Claude', value: 'claude' },
-      { title: 'Gemini', value: 'gemini' }
-    ]
+
+  switch (props.channelType) {
+    case 'messages':
+      // Claude Messages API 入口，不支持 responses 上游
+      const messagesOptions = allOptions.filter(o => o.value !== 'responses')
+      return reorder(messagesOptions, 'claude')
+    case 'chat':
+      // OpenAI Chat API 入口，OpenAI 原生排第一
+      return reorder(allOptions, 'openai')
+    case 'responses':
+      // Responses API 入口，Responses 原生排第一
+      return reorder(allOptions, 'responses')
+    case 'gemini':
+      // Gemini API 入口，Gemini 原生排第一
+      return reorder(allOptions, 'gemini')
+    default:
+      return allOptions
   }
 })
 

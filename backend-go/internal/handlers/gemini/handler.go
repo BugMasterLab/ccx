@@ -392,6 +392,19 @@ func buildProviderRequest(
 		}
 		url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
 
+	case "responses":
+		// Responses 上游：需要转换
+		responsesReq, err := converters.GeminiToResponsesRequest(geminiReq, mappedModel)
+		if err != nil {
+			return nil, err
+		}
+		responsesReq["stream"] = isStream
+		requestBody, err = json.Marshal(responsesReq)
+		if err != nil {
+			return nil, err
+		}
+		url = fmt.Sprintf("%s/v1/responses", strings.TrimRight(baseURL, "/"))
+
 	default:
 		// 默认当作 Gemini 处理，根据配置处理 thought_signature 字段
 		reqToUse := geminiReq
@@ -443,6 +456,8 @@ func buildProviderRequest(
 		utils.SetAuthenticationHeader(req.Header, apiKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
 	case "openai":
+		utils.SetAuthenticationHeader(req.Header, apiKey)
+	case "responses":
 		utils.SetAuthenticationHeader(req.Header, apiKey)
 	default:
 		utils.SetGeminiAuthenticationHeader(req.Header, apiKey)
@@ -535,6 +550,23 @@ func handleSuccess(
 		geminiResp, err = converters.OpenAIResponseToGemini(openaiResp)
 		if err != nil {
 			log.Printf("[Gemini-InvalidBody] OpenAI响应转换失败: %v", err)
+			return nil, fmt.Errorf("%w: %v", common.ErrInvalidResponseBody, err)
+		}
+
+	case "responses":
+		// 转换 Responses 响应为 Gemini 格式
+		var responsesResp map[string]interface{}
+		if err := json.Unmarshal(bodyBytes, &responsesResp); err != nil {
+			preview := bodyBytes
+			if len(preview) > 100 {
+				preview = preview[:100]
+			}
+			log.Printf("[Gemini-InvalidBody] Responses响应体解析失败: %v, body前100字节: %s", err, preview)
+			return nil, fmt.Errorf("%w: %v", common.ErrInvalidResponseBody, err)
+		}
+		geminiResp, err = converters.ResponsesResponseToGemini(responsesResp)
+		if err != nil {
+			log.Printf("[Gemini-InvalidBody] Responses响应转换失败: %v", err)
 			return nil, fmt.Errorf("%w: %v", common.ErrInvalidResponseBody, err)
 		}
 
