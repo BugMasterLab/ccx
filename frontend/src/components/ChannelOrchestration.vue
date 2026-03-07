@@ -2,15 +2,26 @@
   <v-card elevation="0" rounded="lg" class="channel-orchestration" variant="flat">
     <!-- 调度器统计信息 -->
     <v-card-title class="d-flex align-center justify-space-between py-3 px-0">
-      <div class="d-flex align-center">
+      <div class="d-flex align-center" style="flex-shrink: 1; min-width: 0;">
         <v-icon class="mr-2" color="primary">mdi-swap-vertical-bold</v-icon>
-        <span class="text-h6">渠道编排</span>
+        <span class="text-h6" style="white-space: nowrap;">渠道编排</span>
         <v-chip v-if="isMultiChannelMode" size="small" color="success" variant="tonal" class="ml-3">
           多渠道模式
         </v-chip>
         <v-chip v-else size="small" color="warning" variant="tonal" class="ml-3"> 单渠道模式 </v-chip>
       </div>
       <div class="d-flex align-center ga-2">
+        <v-text-field
+          v-model="searchQuery"
+          density="compact"
+          variant="outlined"
+          placeholder="搜索渠道..."
+          prepend-inner-icon="mdi-magnify"
+          clearable
+          hide-details
+          single-line
+          class="channel-search-field"
+        />
         <v-progress-circular v-if="isLoadingMetrics" indeterminate size="16" width="2" color="primary" />
       </div>
     </v-card-title>
@@ -35,13 +46,14 @@
       <draggable
         v-model="activeChannels"
         item-key="index"
-        handle=".drag-handle"
+        :handle="isSearchActive ? '.no-drag' : '.drag-handle'"
         ghost-class="ghost"
         class="channel-list"
+        :disabled="isSearchActive"
         @change="onDragChange"
       >
         <template #item="{ element, index }">
-          <div class="channel-item-wrapper">
+          <div class="channel-item-wrapper" v-show="matchesSearch(element)">
             <div
               class="channel-row"
               :class="{ 'is-suspended': element.status === 'suspended' }"
@@ -407,13 +419,13 @@
         <div class="text-subtitle-2 text-medium-emphasis d-flex align-center">
           <v-icon size="small" class="mr-1" color="grey">mdi-archive-outline</v-icon>
           备用资源池
-          <v-chip size="x-small" class="ml-2">{{ inactiveChannels.length }}</v-chip>
+          <v-chip size="x-small" class="ml-2">{{ filteredInactiveChannels.length }}</v-chip>
         </div>
         <span class="text-caption text-medium-emphasis">启用后将追加到活跃序列末尾</span>
       </div>
 
-      <div v-if="inactiveChannels.length > 0" class="inactive-pool">
-        <div v-for="channel in inactiveChannels" :key="channel.index" class="inactive-channel-row">
+      <div v-if="filteredInactiveChannels.length > 0" class="inactive-pool">
+        <div v-for="channel in filteredInactiveChannels" :key="channel.index" class="inactive-channel-row">
           <!-- 渠道信息 -->
           <div class="channel-info">
             <div class="channel-info-main">
@@ -499,6 +511,7 @@
         </div>
       </div>
 
+      <div v-else-if="isSearchActive && inactiveChannels.length > 0" class="text-center py-4 text-medium-emphasis text-caption">无匹配的备用渠道</div>
       <div v-else class="text-center py-4 text-medium-emphasis text-caption">所有渠道都处于活跃状态</div>
     </div>
     <!-- 渠道日志对话框 -->
@@ -552,6 +565,21 @@ const emit = defineEmits<{
 // 状态
 const metrics = ref<ChannelMetrics[]>([])
 const recentActivity = ref<ChannelRecentActivity[]>([])
+
+// 搜索过滤
+const searchQuery = ref('')
+const isSearchActive = computed(() => !!searchQuery.value?.trim())
+const matchesSearch = (channel: Channel) => {
+  if (!isSearchActive.value) return true
+  const q = searchQuery.value.trim().toLowerCase()
+  return (
+    channel.name?.toLowerCase().includes(q) ||
+    channel.description?.toLowerCase().includes(q) ||
+    channel.serviceType?.toLowerCase().includes(q) ||
+    channel.baseUrl?.toLowerCase().includes(q)
+  )
+}
+
 const schedulerStats = ref<{
   multiChannelMode: boolean
   activeChannelCount: number
@@ -662,6 +690,11 @@ const inactiveChannels = computed(() => {
   return props.channels.filter(ch => ch.status === 'disabled')
 })
 
+// 计算属性：搜索过滤后的非活跃渠道
+const filteredInactiveChannels = computed(() => {
+  return inactiveChannels.value.filter(matchesSearch)
+})
+
 // 计算属性：是否为多渠道模式
 // 多渠道模式判断逻辑：
 // 1. 只有一个启用的渠道 → 单渠道模式
@@ -719,6 +752,7 @@ watch(() => props.dashboardRecentActivity, (newActivity) => {
 
 // 监听 channelType 变化 - 切换时刷新指标并收起图表
 watch(() => props.channelType, () => {
+  searchQuery.value = '' // 切换 tab 时清空搜索
   expandedChannelIndex.value = null // 收起展开的图表
   // 如果没有使用 dashboard props，则自己刷新
   if (!props.dashboardMetrics) {
@@ -1412,6 +1446,12 @@ defineExpose({
   overflow: hidden;
   background: transparent;
   border: none;
+}
+
+.channel-search-field {
+  width: 280px;
+  max-width: 40vw;
+  flex-shrink: 1;
 }
 
 .channel-list {
