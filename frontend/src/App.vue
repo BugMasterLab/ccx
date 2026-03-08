@@ -674,7 +674,6 @@ const handleCopyToTab = async (targetProtocol: string) => {
     }
 
     showToast(`渠道已复制到 ${targetProtocol} Tab`, 'success')
-    showCapabilityTestDialog.value = false
     await refreshChannels()
   } catch (error) {
     showToast(`复制渠道失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
