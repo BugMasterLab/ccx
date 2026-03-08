@@ -208,37 +208,6 @@
                     <span class="text-caption text-primary">💡 点击目标模型输入框会自动获取上游支持的模型列表,每个 API Key 的检测状态会显示在密钥列表中</span>
                   </div>
 
-                  <v-row v-if="supportsOpenAIAdvancedOptions" class="mb-2">
-                    <v-col cols="12" md="6">
-                      <v-select
-                        v-model="form.textVerbosity"
-                        label="输出冗长度"
-                        :items="textVerbosityOptions"
-                        variant="outlined"
-                        density="comfortable"
-                        hide-details
-                        clearable
-                      />
-                    </v-col>
-                    <v-col cols="12" md="6">
-                      <div class="d-flex align-center justify-space-between h-100 advanced-switch-row">
-                        <div>
-                          <div class="text-body-2 font-weight-medium">Fast 模式</div>
-                          <div class="text-caption text-medium-emphasis">开启后下发 service_tier=priority</div>
-                        </div>
-                        <v-switch
-                          v-model="form.fastMode"
-                          color="primary"
-                          hide-details
-                          inset
-                        />
-                      </div>
-                    </v-col>
-                  </v-row>
-                  <div v-if="supportsOpenAIAdvancedOptions" class="text-caption text-medium-emphasis mb-4">
-                    Fast 模式开启后将下发 service_tier=priority；关闭时不下发。
-                  </div>
-
                   <!-- 现有映射列表 -->
                   <div v-if="Object.keys(form.modelMapping).length" class="mb-4">
                     <v-list density="compact" class="bg-transparent">
@@ -280,7 +249,7 @@
                   </div>
 
                   <!-- 添加新映射 -->
-                  <div class="d-flex align-center ga-2">
+                  <div class="d-flex align-center flex-wrap ga-2">
                     <v-combobox
                       v-model="newMapping.source"
                       label="源模型名"
@@ -289,6 +258,7 @@
                       density="comfortable"
                       hide-details
                       class="flex-1-1"
+                      style="min-width: 160px"
                       placeholder="选择或输入源模型名"
                       clearable
                       :error="!!sourceMappingError"
@@ -306,6 +276,7 @@
                       density="comfortable"
                       hide-details
                       class="flex-1-1"
+                      style="min-width: 160px"
                       clearable
                       @focus="handleTargetModelClick"
                       @keyup.enter="addModelMapping"
@@ -337,6 +308,33 @@
                   <div v-if="fetchModelsError" class="text-error text-caption mt-2">
                     {{ fetchModelsError }}
                   </div>
+                  <v-row v-if="supportsOpenAIAdvancedOptions" class="mt-4">
+                    <v-col cols="12" md="6">
+                      <div class="d-flex align-center justify-space-between h-100 advanced-switch-row">
+                        <div>
+                          <div class="text-body-2 font-weight-medium">Fast 模式</div>
+                          <div class="text-caption text-medium-emphasis">开启后下发 service_tier=priority</div>
+                        </div>
+                        <v-switch
+                          v-model="form.fastMode"
+                          color="primary"
+                          hide-details
+                          inset
+                        />
+                      </div>
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-select
+                        v-model="form.textVerbosity"
+                        label="输出冗长度"
+                        :items="textVerbosityOptions"
+                        variant="outlined"
+                        density="comfortable"
+                        hide-details
+                        clearable
+                      />
+                    </v-col>
+                  </v-row>
                 </v-card-text>
               </v-card>
             </v-col>
@@ -357,6 +355,19 @@
                 variant="outlined"
                 density="comfortable"
               />
+              <div class="d-flex align-center flex-wrap ga-2 mt-2">
+                <div class="text-caption text-primary">常用过滤器</div>
+                <v-chip
+                  v-for="filter in commonSupportedModelFilters"
+                  :key="filter"
+                  size="small"
+                  :color="isSupportedModelSelected(filter) ? 'primary' : 'default'"
+                  :variant="isSupportedModelSelected(filter) ? 'flat' : 'tonal'"
+                  @click="appendSupportedModelFilter(filter)"
+                >
+                  {{ filter }}
+                </v-chip>
+              </div>
             </v-col>
 
             <!-- API密钥管理 -->
@@ -1093,10 +1104,7 @@ const allSourceModelOptions = computed(() => {
       { title: 'gpt-4o-mini', value: 'gpt-4o-mini' },
       { title: 'gpt-4.1', value: 'gpt-4.1' },
       { title: 'gpt-4.1-mini', value: 'gpt-4.1-mini' },
-      { title: 'gpt-4.1-nano', value: 'gpt-4.1-nano' },
-      { title: 'o3', value: 'o3' },
-      { title: 'o3-mini', value: 'o3-mini' },
-      { title: 'o4-mini', value: 'o4-mini' }
+      { title: 'o3', value: 'o3' }
     ]
   }
   if (props.channelType === 'gemini') {
@@ -1124,12 +1132,10 @@ const allSourceModelOptions = computed(() => {
     return [
       { title: 'codex', value: 'codex' },
       { title: 'gpt-5', value: 'gpt-5' },
+      { title: 'gpt-5.4', value: 'gpt-5.4' },
+      { title: 'gpt-5.3-codex', value: 'gpt-5.3-codex' },
       { title: 'gpt-5.2-codex', value: 'gpt-5.2-codex' },
-      { title: 'gpt-5.2', value: 'gpt-5.2' },
-      { title: 'gpt-5.1-codex-max', value: 'gpt-5.1-codex-max' },
-      { title: 'gpt-5.1-codex', value: 'gpt-5.1-codex' },
-      { title: 'gpt-5.1-codex-mini', value: 'gpt-5.1-codex-mini' },
-      { title: 'gpt-5.1', value: 'gpt-5.1' }
+      { title: 'gpt-5.2', value: 'gpt-5.2' }
     ]
   } else {
     // Messages API (Claude) 常用模型别名
@@ -1153,12 +1159,12 @@ const modelMappingHint = computed(() => {
     return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "gpt-4o" 重定向到 "gpt-4.1"'
   }
   if (props.channelType === 'gemini') {
-    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "gemini-pro" 重定向到 "gemini-2.0-flash"'
+    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "gemini-pro" 重定向到 "gemini-3-pro"'
   }
   if (props.channelType === 'responses') {
-    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "o3" 重定向到 "gpt-5.1-codex-max"'
+    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "opus" 重定向到 "gpt-5.4"'
   } else {
-    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "opus" 重定向到 "claude-3-5-sonnet"'
+    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "opus" 重定向到 "claude-sonnet-4-5-20250929"'
   }
 })
 
@@ -1167,12 +1173,12 @@ const targetModelPlaceholder = computed(() => {
     return '例如：gpt-4.1'
   }
   if (props.channelType === 'gemini') {
-    return '例如：gemini-2.0-flash'
+    return '例如：gemini-3-pro'
   }
   if (props.channelType === 'responses') {
-    return '例如：gpt-5.1-codex-max'
+    return '例如：gpt-5.4'
   } else {
-    return '例如：claude-3-5-sonnet'
+    return '例如：claude-sonnet-4-5-20250929'
   }
 })
 
@@ -1192,6 +1198,48 @@ const textVerbosityOptions = [
 ]
 
 const supportsOpenAIAdvancedOptions = computed(() => supportsAdvancedChannelOptions(form.serviceType))
+
+const modelNameCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+
+// 模型优先级排序规则（索引越小优先级越高）
+const modelPriorityPatterns: RegExp[] = [
+  /opus-4-6/i,
+  /sonnet-4-6/i,
+  /opus-4-5/i,
+  /sonnet-4-5/i,
+  /haiku-4-6/i,
+  /haiku-4-5/i,
+  /gpt-5\.4/i,
+  /gpt-5\.3/i,
+  /gpt-5\.2/i,
+  /grok-4\.2/i,
+  /grok-4\.1/i,
+  /gemini-3/i,
+  /glm-?5/i,
+  /glm-?4\.7/i,
+  /minimax-?m2\.5/i,
+  /kimi-?k2\.5/i,
+  /m2\.5/i,
+  /k2\.5/i,
+  /deepseek-/i,
+]
+
+const getModelPriority = (name: string): number => {
+  for (let i = 0; i < modelPriorityPatterns.length; i++) {
+    if (modelPriorityPatterns[i].test(name)) return i
+  }
+  return modelPriorityPatterns.length
+}
+
+const sortModelNamesDesc = (models: string[]): string[] => {
+  return [...models].sort((a, b) => {
+    const pa = getModelPriority(a)
+    const pb = getModelPriority(b)
+    if (pa !== pb) return pa - pb
+    // 同优先级组内按自然降序
+    return modelNameCollator.compare(b, a)
+  })
+}
 
 // 表单数据
 const form = reactive({
@@ -1378,6 +1426,10 @@ const rules = {
 
 // 计算属性
 const isEditing = computed(() => !!props.channel)
+
+const commonSupportedModelFilters = ['claude-*', 'gpt-5*', 'grok-4*', 'gemini-3*']
+
+const selectedSupportedModelSet = computed(() => new Set(form.supportedModels))
 
 // 动态header样式
 const headerClasses = computed(() => {
@@ -1661,6 +1713,17 @@ const removeModelMapping = (source: string) => {
   delete form.reasoningMapping[source]
 }
 
+const isSupportedModelSelected = (filter: string): boolean => {
+  return selectedSupportedModelSet.value.has(filter)
+}
+
+const appendSupportedModelFilter = (filter: string) => {
+  if (isSupportedModelSelected(filter)) {
+    return
+  }
+  form.supportedModels.push(filter)
+}
+
 // 处理目标模型输入框点击事件(仅在首次或有新 key 时触发请求)
 const handleTargetModelClick = () => {
   // 如果已经尝试过获取且正在加载中,不重复触发
@@ -1766,9 +1829,7 @@ const fetchTargetModels = async () => {
     const allModels = new Set<string>(targetModelOptions.value.map(opt => opt.value))
     results.forEach(models => models.forEach(m => allModels.add(m.id)))
 
-    targetModelOptions.value = Array.from(allModels)
-      .sort()
-      .map(id => ({ title: id, value: id }))
+    targetModelOptions.value = sortModelNamesDesc(Array.from(allModels)).map(id => ({ title: id, value: id }))
 
     // 所有 key（含已有记录）都失败时才显示错误
     const allFailed = form.apiKeys.every(key => {
