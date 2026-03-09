@@ -88,6 +88,14 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude(t *testing.T) {
 	if len(tools) != 1 || tools[0]["name"] != "weather" {
 		t.Fatalf("tools = %#v, want weather tool", tools)
 	}
+	// 验证 type 字段必须存在且为 "function"
+	if tools[0]["type"] != "function" {
+		t.Fatalf("tools[0][\"type\"] = %v, want \"function\"", tools[0]["type"])
+	}
+	// 验证 parameters 字段必须存在
+	if tools[0]["parameters"] == nil {
+		t.Fatalf("tools[0][\"parameters\"] is nil, want non-nil")
+	}
 }
 
 func TestResponsesProvider_ConvertToClaudeResponse(t *testing.T) {

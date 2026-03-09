@@ -202,6 +202,7 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, up
 		tools := make([]map[string]interface{}, 0, len(claudeReq.Tools))
 		for _, tool := range claudeReq.Tools {
 			item := map[string]interface{}{
+				"type":       "function",
 				"name":       tool.Name,
 				"parameters": tool.InputSchema,
 			}

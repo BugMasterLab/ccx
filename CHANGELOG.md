@@ -9,6 +9,7 @@
   - 补充 `ClaudeContent.Content` 字段以支持 `tool_result` 内容传递
   - 修复 `parseResponsesInput` 解析 `tool_call` 时未填充 `ToolUse` 字段的问题
   - **兼容性修复**：对历史消息中缺少 `tool_use` 的 `tool_call` 跳过而不是报错，避免多轮会话失败
+  - **修复 Claude Messages → Responses 工具定义转换** - 修复 `providers/responses.go:204` 构造 tool 时缺少 `type: "function"` 字段，导致上游报错 "Unsupported tool type: None"
 
 ### 新增
 
