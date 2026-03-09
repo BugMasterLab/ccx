@@ -1100,31 +1100,24 @@ const allSourceModelOptions = computed(() => {
   if (props.channelType === 'chat') {
     // OpenAI Chat Completions 常用模型
     return [
-      { title: 'gpt-4o', value: 'gpt-4o' },
-      { title: 'gpt-4o-mini', value: 'gpt-4o-mini' },
-      { title: 'gpt-4.1', value: 'gpt-4.1' },
-      { title: 'gpt-4.1-mini', value: 'gpt-4.1-mini' },
-      { title: 'o3', value: 'o3' }
+      { title: 'codex', value: 'codex' },
+      { title: 'gpt-5', value: 'gpt-5' },
+      { title: 'gpt-5.4', value: 'gpt-5.4' },
+      { title: 'gpt-5.3-codex', value: 'gpt-5.3-codex' },
+      { title: 'gpt-5.2-codex', value: 'gpt-5.2-codex' },
+      { title: 'gpt-5.2', value: 'gpt-5.2' }
     ]
   }
   if (props.channelType === 'gemini') {
     // Gemini API 常用模型别名
     return [
-      { title: 'gemini-2', value: 'gemini-2' },
+      { title: 'gemini-3.1-pro', value: 'gemini-3.1-pro' },
+      { title: 'gemini-3-pro', value: 'gemini-3-pro' },
+      { title: 'gemini-3-flash', value: 'gemini-3-flash' },
+      { title: 'gemini-2.5-pro', value: 'gemini-2.5-pro' },
       { title: 'gemini-2.5-flash', value: 'gemini-2.5-flash' },
       { title: 'gemini-2.5-flash-lite', value: 'gemini-2.5-flash-lite' },
-      { title: 'gemini-2.5-flash-image', value: 'gemini-2.5-flash-image' },
-      { title: 'gemini-2.5-flash-preview-tts', value: 'gemini-2.5-flash-preview-tts' },
-      { title: 'gemini-2.5-flash-native-audio-preview-12-2025', value: 'gemini-2.5-flash-native-audio-preview-12-2025' },
-      { title: 'gemini-2.5-pro', value: 'gemini-2.5-pro' },
-      { title: 'gemini-2.5-pro-preview-tts', value: 'gemini-2.5-pro-preview-tts' },
-      { title: 'gemini-3-flash', value: 'gemini-3-flash' },
-      { title: 'gemini-3-flash-preview', value: 'gemini-3-flash-preview' },
-      { title: 'gemini-3-pro', value: 'gemini-3-pro' },
-      { title: 'gemini-3-pro-preview', value: 'gemini-3-pro-preview' },
-      { title: 'gemini-3-pro-image-preview', value: 'gemini-3-pro-image-preview' },
-      { title: 'gemini-3.1-pro', value: 'gemini-3.1-pro' },
-      { title: 'gemini-3.1-pro-preview', value: 'gemini-3.1-pro-preview' }
+      { title: 'gemini-2', value: 'gemini-2' }
     ]
   }
   if (props.channelType === 'responses') {
@@ -1156,7 +1149,7 @@ const sourceModelOptions = computed(() => {
 // 模型重定向的示例文本 - 根据渠道类型动态显示
 const modelMappingHint = computed(() => {
   if (props.channelType === 'chat') {
-    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "gpt-4o" 重定向到 "gpt-4.1"'
+    return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "gpt-4o" 重定向到 "gpt-5.4"'
   }
   if (props.channelType === 'gemini') {
     return '配置模型名称映射，将请求中的模型名重定向到目标模型。例如：将 "gemini-pro" 重定向到 "gemini-3-pro"'
@@ -1170,16 +1163,15 @@ const modelMappingHint = computed(() => {
 
 const targetModelPlaceholder = computed(() => {
   if (props.channelType === 'chat') {
-    return '例如：gpt-4.1'
-  }
-  if (props.channelType === 'gemini') {
-    return '例如：gemini-3-pro'
+    return '例如：gpt-5.4'
   }
   if (props.channelType === 'responses') {
     return '例如：gpt-5.4'
-  } else {
-    return '例如：claude-sonnet-4-5-20250929'
   }
+  if (props.channelType === 'gemini') {
+    return '例如：gemini-3.1-pro'
+  }
+  return '例如：claude-opus-4-6'
 })
 
 const reasoningEffortOptions = [
