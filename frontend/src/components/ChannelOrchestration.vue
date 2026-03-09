@@ -53,7 +53,7 @@
         @change="onDragChange"
       >
         <template #item="{ element, index }">
-          <div class="channel-item-wrapper" v-show="matchesSearch(element)">
+          <div v-show="matchesSearch(element)" class="channel-item-wrapper">
             <div
               class="channel-row"
               :class="{ 'is-suspended': element.status === 'suspended' }"

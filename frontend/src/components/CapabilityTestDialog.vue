@@ -1,9 +1,9 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    @update:model-value="$emit('update:modelValue', $event)"
     max-width="700"
     scrollable
+    @update:model-value="$emit('update:modelValue', $event)"
   >
     <v-card rounded="xl">
       <v-card-title class="d-flex align-center justify-space-between pa-4">
