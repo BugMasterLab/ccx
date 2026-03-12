@@ -144,12 +144,25 @@ export interface PingResult {
 
 // ============== 能力测试类型 ==============
 
+export interface ModelTestResult {
+  model: string
+  success: boolean
+  latency: number
+  streamingSupported: boolean
+  error?: string
+  startedAt?: string
+  testedAt: string
+}
+
 export interface ProtocolTestResult {
   protocol: string
   success: boolean
   latency: number
   streamingSupported: boolean
   testedModel: string
+  modelResults?: ModelTestResult[]
+  successCount?: number
+  attemptedModels?: number
   error?: string
   testedAt: string
 }

@@ -45,9 +45,15 @@ export type MessageKey =
   | 'capability.table.protocol'
   | 'capability.table.status'
   | 'capability.table.testModel'
+  | 'capability.table.successCount'
   | 'capability.table.latency'
   | 'capability.table.streaming'
   | 'capability.table.actions'
+  | 'capability.modelDetails'
+  | 'capability.modelDetailsUnavailable'
+  | 'capability.attemptedModels'
+  | 'capability.startedAt'
+  | 'capability.testedAt'
   | 'capability.success'
   | 'capability.failed'
   | 'capability.failedTooltip'
@@ -349,9 +355,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.table.protocol': 'Protocol',
     'capability.table.status': 'Status',
     'capability.table.testModel': 'Test model',
+    'capability.table.successCount': 'Success/Total',
     'capability.table.latency': 'Latency',
     'capability.table.streaming': 'Streaming',
     'capability.table.actions': 'Actions',
+    'capability.modelDetails': 'Model details',
+    'capability.modelDetailsUnavailable': 'Model details unavailable',
+    'capability.attemptedModels': 'Attempted models: {count}',
+    'capability.startedAt': 'Started at',
+    'capability.testedAt': 'Finished at',
     'capability.success': 'Success',
     'capability.failed': 'Failed',
     'capability.failedTooltip': 'Test failed',
@@ -652,9 +664,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.table.protocol': 'Protokol',
     'capability.table.status': 'Status',
     'capability.table.testModel': 'Model uji',
+    'capability.table.successCount': 'Berhasil/Total',
     'capability.table.latency': 'Latensi',
     'capability.table.streaming': 'Streaming',
     'capability.table.actions': 'Aksi',
+    'capability.modelDetails': 'Detail model',
+    'capability.modelDetailsUnavailable': 'Detail model tidak tersedia',
+    'capability.attemptedModels': 'Model dicoba: {count}',
+    'capability.startedAt': 'Dimulai',
+    'capability.testedAt': 'Selesai',
     'capability.success': 'Berhasil',
     'capability.failed': 'Gagal',
     'capability.failedTooltip': 'Tes gagal',
@@ -955,9 +973,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.table.protocol': '协议',
     'capability.table.status': '状态',
     'capability.table.testModel': '测试模型',
+    'capability.table.successCount': '成功数/总数',
     'capability.table.latency': '延迟',
     'capability.table.streaming': '流式',
     'capability.table.actions': '操作',
+    'capability.modelDetails': '模型明细',
+    'capability.modelDetailsUnavailable': '模型明细暂不可用',
+    'capability.attemptedModels': '尝试模型数: {count}',
+    'capability.startedAt': '开始时间',
+    'capability.testedAt': '完成时间',
     'capability.success': '成功',
     'capability.failed': '失败',
     'capability.failedTooltip': '测试失败',

@@ -1,3 +1,19 @@
+## [Unreleased]
+
+### 新增
+
+- **多语言管理界面与文档** - 新增多语言管理 UI 与本地化文档，补充翻译内容
+- **桌面端语言切换器** - 增加桌面端语言切换入口，完善多语言体验
+- **能力测试展示完整模型结果** - 能力测试改为按 500ms 节流启动同协议下的全部候选模型请求，并汇总返回每个模型的可用性、流式支持、延迟与错误信息
+  - 后端：`backend-go/internal/handlers/capability_test_handler.go` 新增 `modelResults` / `successCount` / `attemptedModels`，保留协议级摘要并记录模型级启动与完成时间
+  - 前端：`frontend/src/components/CapabilityTestDialog.vue` 升级为“协议摘要 + 模型明细”视图，支持展示成功数/总数与各模型测试详情
+  - 类型与文案：同步更新 `frontend/src/services/api.ts` 与 `frontend/src/i18n/messages.ts`
+
+### 修复
+
+- **移动端头部与语言回退** - 修正移动端头部样式与语言回退逻辑
+- **频道状态标记遮挡** - 修复暂停状态徽标遮挡频道名称的问题
+
 ## [v2.6.31] - 2026-03-11
 
 ### 修复

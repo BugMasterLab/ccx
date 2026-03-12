@@ -16,6 +16,7 @@ import (
 
 	"github.com/BenedictKing/ccx/internal/config"
 	"github.com/BenedictKing/ccx/internal/httpclient"
+	"github.com/BenedictKing/ccx/internal/metrics"
 	"github.com/BenedictKing/ccx/internal/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -23,8 +24,8 @@ import (
 // ============== 缓存定义 ==============
 
 const (
-	capabilityCacheTTL    = 5 * time.Minute  // 缓存 TTL（每次命中续期）
-	capabilityCacheMaxTTL = 15 * time.Minute // 缓存最大生存时间（从首次创建算起）
+	capabilityCacheTTL    = 30 * time.Minute // 缓存 TTL（每次命中续期）
+	capabilityCacheMaxTTL = 4 * time.Hour    // 缓存最大生存时间（从首次创建算起）
 )
 
 // capabilityCacheEntry 缓存条目
@@ -42,12 +43,13 @@ var capabilityCache = struct {
 	entries: make(map[string]*capabilityCacheEntry),
 }
 
-// buildCapabilityCacheKey 构建缓存 key（包含渠道名称，防止索引重排后命中旧缓存）
-func buildCapabilityCacheKey(channelKind string, channelID int, channelName string, protocols []string) string {
+// buildCapabilityCacheKey 构建缓存 key（基于 baseURL + apiKey 与协议列表）
+func buildCapabilityCacheKey(baseURL string, apiKey string, protocols []string) string {
 	sorted := make([]string, len(protocols))
 	copy(sorted, protocols)
 	sort.Strings(sorted)
-	return fmt.Sprintf("%s:%d:%s:%s", channelKind, channelID, channelName, strings.Join(sorted, ","))
+	metricsKey := metrics.GenerateMetricsKey(baseURL, apiKey)
+	return fmt.Sprintf("%s:%s", metricsKey, strings.Join(sorted, ","))
 }
 
 // getCapabilityCache 读取缓存，命中时自动续期（不超过最大生存期）
@@ -99,15 +101,28 @@ type CapabilityTestRequest struct {
 	Timeout         int      `json:"timeout"` // 毫秒
 }
 
-// ProtocolTestResult 单个协议测试结果
-type ProtocolTestResult struct {
-	Protocol           string  `json:"protocol"`
+type ModelTestResult struct {
+	Model              string  `json:"model"`
 	Success            bool    `json:"success"`
 	Latency            int64   `json:"latency"` // 毫秒
 	StreamingSupported bool    `json:"streamingSupported"`
-	TestedModel        string  `json:"testedModel"` // 测试成功的模型名称
-	Error              *string `json:"error"`
+	Error              *string `json:"error,omitempty"`
+	StartedAt          string  `json:"startedAt,omitempty"`
 	TestedAt           string  `json:"testedAt"`
+}
+
+// ProtocolTestResult 单个协议测试结果
+type ProtocolTestResult struct {
+	Protocol           string            `json:"protocol"`
+	Success            bool              `json:"success"`
+	Latency            int64             `json:"latency"` // 毫秒
+	StreamingSupported bool              `json:"streamingSupported"`
+	TestedModel        string            `json:"testedModel"` // 优先返回首个成功模型名称，兼容旧字段
+	ModelResults       []ModelTestResult `json:"modelResults,omitempty"`
+	SuccessCount       int               `json:"successCount,omitempty"`
+	AttemptedModels    int               `json:"attemptedModels,omitempty"`
+	Error              *string           `json:"error"`
+	TestedAt           string            `json:"testedAt"`
 }
 
 // CapabilityTestResponse 能力测试响应体
@@ -192,14 +207,26 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 		}
 
 		// 检查缓存
-		cacheKey := buildCapabilityCacheKey(channelKind, id, channel.Name, protocols)
+		baseURL := ""
+		if len(channel.GetAllBaseURLs()) > 0 {
+			baseURL = channel.GetAllBaseURLs()[0]
+		}
+		apiKey := ""
+		if len(channel.APIKeys) > 0 {
+			apiKey = channel.APIKeys[0]
+		}
+
+		cacheKey := buildCapabilityCacheKey(baseURL, apiKey, protocols)
 		if cached, ok := getCapabilityCache(cacheKey); ok {
-			log.Printf("[CapabilityTest] 渠道 %s (ID:%d) 命中缓存，返回缓存结果", channel.Name, id)
+			log.Printf("[CapabilityTest-Cache] 渠道 %s (ID:%d) 命中缓存，返回缓存结果", channel.Name, id)
+			cached.ChannelID = id
+			cached.ChannelName = channel.Name
+			cached.SourceType = channel.ServiceType
 			c.JSON(http.StatusOK, *cached)
 			return
 		}
 
-		log.Printf("[CapabilityTest] 开始测试渠道 %s (ID:%d, 类型:%s) 的协议兼容性: %v", channel.Name, id, channel.ServiceType, protocols)
+		log.Printf("[CapabilityTest-Protocol] 开始测试渠道 %s (ID:%d, 类型:%s) 的协议兼容性: %v", channel.Name, id, channel.ServiceType, protocols)
 
 		// 并发测试
 		totalStart := time.Now()
@@ -214,7 +241,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 			}
 		}
 
-		log.Printf("[CapabilityTest] 渠道 %s 测试完成，兼容协议: %v，耗时: %dms", channel.Name, compatible, totalDuration)
+		log.Printf("[CapabilityTest-Protocol] 渠道 %s 测试完成，兼容协议: %v，总耗时: %dms", channel.Name, compatible, totalDuration)
 
 		resp := CapabilityTestResponse{
 			ChannelID:           id,
@@ -228,6 +255,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 		// 只缓存有成功结果的测试（避免因超时等临时原因缓存错误的失败结果）
 		if len(compatible) > 0 {
 			setCapabilityCache(cacheKey, resp)
+			log.Printf("[CapabilityTest-Cache] 渠道 %s (ID:%d) 写入缓存，兼容协议: %v", channel.Name, id, compatible)
 		}
 
 		c.JSON(http.StatusOK, resp)
@@ -253,87 +281,147 @@ func testProtocolCompatibility(ctx context.Context, channel *config.UpstreamConf
 	return results
 }
 
-// testSingleProtocol 测试单个协议的兼容性（支持多模型依次尝试）
+// testSingleProtocol 测试单个协议的兼容性（协议内按固定间隔启动模型测试，已启动请求并发执行）
 func testSingleProtocol(ctx context.Context, channel *config.UpstreamConfig, protocol string, timeout time.Duration) ProtocolTestResult {
 	result := ProtocolTestResult{
 		Protocol: protocol,
 		TestedAt: time.Now().Format(time.RFC3339),
 	}
 
-	log.Printf("[CapabilityTest] 开始测试渠道 %s 的 %s 协议兼容性", channel.Name, protocol)
+	log.Printf("[CapabilityTest-Protocol] 开始测试渠道 %s 的 %s 协议兼容性", channel.Name, protocol)
 
-	// 获取候选模型列表
 	models, err := getCapabilityProbeModels(protocol)
 	if err != nil {
 		errMsg := "no_models_configured"
 		result.Error = &errMsg
-		log.Printf("[CapabilityTest] 渠道 %s 获取 %s 协议测试模型失败: %v", channel.Name, protocol, err)
+		log.Printf("[CapabilityTest-Protocol] 渠道 %s 获取 %s 协议测试模型失败: %v", channel.Name, protocol, err)
 		return result
 	}
 
-	// 依次尝试每个模型，直到成功
-	var lastError error
-	var lastStatusCode int
 	totalStart := time.Now()
+	result.AttemptedModels = len(models)
+	result.ModelResults = make([]ModelTestResult, len(models))
+
+	type modelOutcome struct {
+		index  int
+		result ModelTestResult
+	}
+
+	outcomeCh := make(chan modelOutcome, len(models))
+	var wg sync.WaitGroup
 
 	for i, model := range models {
-		log.Printf("[CapabilityTest] 渠道 %s 尝试模型 %s (%d/%d)", channel.Name, model, i+1, len(models))
-
-		// 构建测试请求
-		req, err := buildTestRequestWithModel(protocol, channel, model)
-		if err != nil {
-			lastError = err
-			log.Printf("[CapabilityTest] 渠道 %s 构建 %s 测试请求失败 (模型: %s): %v", channel.Name, protocol, model, err)
-			continue
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				result.Latency = time.Since(totalStart).Milliseconds()
+				errMsg := classifyError(ctx.Err(), 0, ctx)
+				result.Error = &errMsg
+				log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议在启动模型测试前已取消: %v", channel.Name, protocol, ctx.Err())
+				return result
+			case <-time.After(500 * time.Millisecond):
+			}
 		}
 
-		// 创建带超时的上下文
-		reqCtx, cancel := context.WithTimeout(ctx, timeout)
-		req = req.WithContext(reqCtx)
+		log.Printf("[CapabilityTest-Protocol] 渠道 %s 启动模型 %s (%d/%d)", channel.Name, model, i+1, len(models))
+		wg.Add(1)
+		go func(idx int, modelName string) {
+			defer wg.Done()
+			outcomeCh <- modelOutcome{
+				index:  idx,
+				result: testSingleModel(ctx, channel, protocol, modelName, timeout),
+			}
+		}(i, model)
+	}
 
-		// 获取 HTTP 客户端
-		client := httpclient.GetManager().GetStandardClient(timeout, channel.InsecureSkipVerify, channel.ProxyURL)
+	wg.Wait()
+	close(outcomeCh)
 
-		// 发送请求并检查流式响应
-		startTime := time.Now()
-		success, streamingSupported, statusCode, sendErr := sendAndCheckStream(reqCtx, client, req)
-		latency := time.Since(startTime).Milliseconds()
-
-		cancel() // 释放上下文资源
-
-		if success {
-			// 测试成功，记录结果并返回
-			result.Success = true
-			result.StreamingSupported = streamingSupported
-			result.Latency = latency
-			result.TestedModel = model
-			log.Printf("[CapabilityTest] 渠道 %s 的 %s 协议测试成功 (模型: %s, 流式: %v, 耗时: %dms)",
-				channel.Name, protocol, model, streamingSupported, latency)
-			return result
-		}
-
-		// 测试失败，记录错误并尝试下一个模型
-		lastError = sendErr
-		lastStatusCode = statusCode
-		log.Printf("[CapabilityTest] 渠道 %s 的 %s 协议测试失败 (模型: %s, 耗时: %dms): %v",
-			channel.Name, protocol, model, latency, sendErr)
-
-		// 如果不是最后一个模型，等待 2 秒后再尝试下一个（避免触发上游速率限制）
-		if i < len(models)-1 {
-			log.Printf("[CapabilityTest] 等待 2 秒后尝试下一个模型...")
-			time.Sleep(2 * time.Second)
+	var failureSummaries []string
+	for outcome := range outcomeCh {
+		result.ModelResults[outcome.index] = outcome.result
+		if outcome.result.Success {
+			result.SuccessCount++
 		}
 	}
 
-	// 所有模型都失败
-	result.Success = false
-	result.Latency = time.Since(totalStart).Milliseconds()
-	errMsg := classifyError(lastError, lastStatusCode, ctx)
-	result.Error = &errMsg
-	log.Printf("[CapabilityTest] 渠道 %s 的 %s 协议所有模型测试均失败 (尝试了 %d 个模型, 总耗时: %dms)",
-		channel.Name, protocol, len(models), result.Latency)
+	for _, modelResult := range result.ModelResults {
+		if !modelResult.Success && modelResult.Error != nil && *modelResult.Error != "" {
+			failureSummaries = append(failureSummaries, fmt.Sprintf("%s=%s", modelResult.Model, *modelResult.Error))
+		}
+	}
 
+	result.Success = result.SuccessCount > 0
+	if result.Success {
+		for _, modelResult := range result.ModelResults {
+			if modelResult.Success {
+				result.TestedModel = modelResult.Model
+				result.StreamingSupported = modelResult.StreamingSupported
+				break
+			}
+		}
+	}
+
+	if !result.Success {
+		result.Latency = time.Since(totalStart).Milliseconds()
+		errMsg := "all_models_failed"
+		if len(failureSummaries) > 0 {
+			errMsg = failureSummaries[0]
+		}
+		result.Error = &errMsg
+		log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议全部模型测试失败 (尝试: %d, 总耗时: %dms): %s",
+			channel.Name, protocol, result.AttemptedModels, result.Latency, errMsg)
+		return result
+	}
+
+	result.Latency = time.Since(totalStart).Milliseconds()
+	log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议测试完成 (成功: %d/%d, 首个成功模型: %s, 总耗时: %dms)",
+		channel.Name, protocol, result.SuccessCount, result.AttemptedModels, result.TestedModel, result.Latency)
 	return result
+}
+
+func testSingleModel(ctx context.Context, channel *config.UpstreamConfig, protocol, model string, timeout time.Duration) ModelTestResult {
+	startedAt := time.Now()
+	modelResult := ModelTestResult{
+		Model:     model,
+		StartedAt: startedAt.Format(time.RFC3339Nano),
+	}
+
+	req, err := buildTestRequestWithModel(protocol, channel, model)
+	if err != nil {
+		errMsg := fmt.Sprintf("build_request_failed: %v", err)
+		modelResult.Error = &errMsg
+		modelResult.TestedAt = time.Now().Format(time.RFC3339Nano)
+		log.Printf("[CapabilityTest-Model] 渠道 %s 构建 %s 测试请求失败 (模型: %s): %v", channel.Name, protocol, model, err)
+		return modelResult
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req = req.WithContext(reqCtx)
+
+	client := httpclient.GetManager().GetStandardClient(timeout, channel.InsecureSkipVerify, channel.ProxyURL)
+
+	startTime := time.Now()
+	log.Printf("[CapabilityTest-Model] 渠道 %s 启动 %s 协议模型测试 (模型: %s, startedAt: %s)",
+		channel.Name, protocol, model, modelResult.StartedAt)
+	success, streamingSupported, statusCode, sendErr := sendAndCheckStream(reqCtx, client, req)
+	modelResult.Latency = time.Since(startTime).Milliseconds()
+	modelResult.TestedAt = time.Now().Format(time.RFC3339Nano)
+
+	if success {
+		modelResult.Success = true
+		modelResult.StreamingSupported = streamingSupported
+		log.Printf("[CapabilityTest-Model] 渠道 %s 的 %s 协议测试成功 (模型: %s, 流式: %v, 耗时: %dms)",
+			channel.Name, protocol, model, streamingSupported, modelResult.Latency)
+		return modelResult
+	}
+
+	errMsg := classifyError(sendErr, statusCode, reqCtx)
+	modelResult.Error = &errMsg
+	log.Printf("[CapabilityTest-Model] 渠道 %s 的 %s 协议测试失败 (模型: %s, 耗时: %dms): %s",
+		channel.Name, protocol, model, modelResult.Latency, errMsg)
+	return modelResult
 }
 
 // ============== 请求构建 ==============

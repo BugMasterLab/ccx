@@ -7,7 +7,7 @@ import (
 
 // 能力测试探测模型统一定义（如需切换顶级模型，仅修改这里）
 // 支持多个候选模型，用逗号分隔，按优先级从高到低排列
-// 测试时会依次尝试，一旦某个模型成功就停止
+// 测试时会按顺序分批启动，并汇总所有候选模型的结果
 const (
 	capabilityProbeModelMessages  = "claude-opus-4-6,claude-opus-4-5-20251101,claude-sonnet-4-6,claude-sonnet-4-5-20250929"
 	capabilityProbeModelChat      = "gpt-5.4,gpt-5.3-codex,gpt-5.2"
