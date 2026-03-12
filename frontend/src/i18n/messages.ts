@@ -58,6 +58,7 @@ export type MessageKey =
   | 'capability.failedTooltip'
   | 'capability.tooltipLatency'
   | 'capability.tooltipStreaming'
+  | 'capability.modelsLabel'
   | 'capability.supported'
   | 'capability.unsupported'
   | 'capability.copyToTab'
@@ -369,6 +370,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.failedTooltip': 'Test failed',
     'capability.tooltipLatency': 'Latency',
     'capability.tooltipStreaming': 'Streaming',
+    'capability.modelsLabel': 'Models:',
     'capability.supported': 'Supported',
     'capability.unsupported': 'Unsupported',
     'capability.copyToTab': 'Copy to this tab',
@@ -679,6 +681,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.failedTooltip': 'Tes gagal',
     'capability.tooltipLatency': 'Latensi',
     'capability.tooltipStreaming': 'Streaming',
+    'capability.modelsLabel': 'Model:',
     'capability.supported': 'Didukung',
     'capability.unsupported': 'Tidak didukung',
     'capability.copyToTab': 'Salin ke tab ini',
@@ -989,6 +992,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.failedTooltip': '测试失败',
     'capability.tooltipLatency': '延迟',
     'capability.tooltipStreaming': '流式',
+    'capability.modelsLabel': '模型：',
     'capability.supported': '支持',
     'capability.unsupported': '不支持',
     'capability.copyToTab': '复制到此 Tab',

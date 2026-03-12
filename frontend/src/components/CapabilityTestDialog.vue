@@ -72,37 +72,40 @@
                 </v-tooltip>
               </div>
 
-              <div v-if="getModelResults(test).length > 0" class="model-results-flow mt-3">
-                <v-tooltip
-                  v-for="modelResult in getModelResults(test)"
-                  :key="`${test.protocol}-${modelResult.model}`"
-                  location="top"
-                  :content-class="modelResult.success ? 'success-tooltip' : 'failure-tooltip'"
-                >
-                  <template #activator="{ props }">
-                    <div v-bind="props" :class="['model-result-badge', modelResult.success ? 'success-badge' : 'error-badge']">
-                      <span class="model-name">{{ modelResult.model }}</span>
-                      <v-icon size="16">
-                        {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
-                      </v-icon>
+              <div v-if="getModelResults(test).length > 0" class="model-results-section mt-3">
+                <div class="models-label">{{ t('capability.modelsLabel') }}</div>
+                <div class="model-results-flow">
+                  <v-tooltip
+                    v-for="modelResult in getModelResults(test)"
+                    :key="`${test.protocol}-${modelResult.model}`"
+                    location="top"
+                    :content-class="modelResult.success ? 'success-tooltip' : 'failure-tooltip'"
+                  >
+                    <template #activator="{ props }">
+                      <div v-bind="props" :class="['model-result-badge', modelResult.success ? 'success-badge' : 'error-badge']">
+                        <span class="model-name">{{ modelResult.model }}</span>
+                        <v-icon size="16">
+                          {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                        </v-icon>
+                      </div>
+                    </template>
+                    <div v-if="modelResult.success" class="tooltip-content">
+                      <div class="tooltip-title">{{ modelResult.model }}</div>
+                      <div class="tooltip-row">
+                        <span class="tooltip-label">{{ t('capability.tooltipLatency') }}</span>
+                        <span class="tooltip-value">{{ formatLatency(modelResult.latency) }}</span>
+                      </div>
+                      <div class="tooltip-row">
+                        <span class="tooltip-label">{{ t('capability.tooltipStreaming') }}</span>
+                        <span class="tooltip-value">{{ formatStreaming(modelResult) }}</span>
+                      </div>
                     </div>
-                  </template>
-                  <div v-if="modelResult.success" class="tooltip-content">
-                    <div class="tooltip-title">{{ modelResult.model }}</div>
-                    <div class="tooltip-row">
-                      <span class="tooltip-label">{{ t('capability.tooltipLatency') }}</span>
-                      <span class="tooltip-value">{{ formatLatency(modelResult.latency) }}</span>
+                    <div v-else class="tooltip-content">
+                      <div class="tooltip-title">{{ modelResult.model }}</div>
+                      <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
                     </div>
-                    <div class="tooltip-row">
-                      <span class="tooltip-label">{{ t('capability.tooltipStreaming') }}</span>
-                      <span class="tooltip-value">{{ formatStreaming(modelResult) }}</span>
-                    </div>
-                  </div>
-                  <div v-else class="tooltip-content">
-                    <div class="tooltip-title">{{ modelResult.model }}</div>
-                    <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
-                  </div>
-                </v-tooltip>
+                  </v-tooltip>
+                </div>
               </div>
             </div>
           </div>
@@ -201,37 +204,40 @@
                         {{ t('capability.modelDetailsUnavailable') }}
                       </div>
 
-                      <div v-else class="model-results-flow">
-                        <v-tooltip
-                          v-for="modelResult in getModelResults(test)"
-                          :key="`${test.protocol}-${modelResult.model}`"
-                          location="top"
-                          :content-class="modelResult.success ? 'success-tooltip' : 'failure-tooltip'"
-                        >
-                          <template #activator="{ props }">
-                            <div v-bind="props" :class="['model-result-badge', modelResult.success ? 'success-badge' : 'error-badge']">
-                              <span class="model-name">{{ modelResult.model }}</span>
-                              <v-icon size="16">
-                                {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
-                              </v-icon>
+                      <div v-else>
+                        <div class="models-label">{{ t('capability.modelsLabel') }}</div>
+                        <div class="model-results-flow">
+                          <v-tooltip
+                            v-for="modelResult in getModelResults(test)"
+                            :key="`${test.protocol}-${modelResult.model}`"
+                            location="top"
+                            :content-class="modelResult.success ? 'success-tooltip' : 'failure-tooltip'"
+                          >
+                            <template #activator="{ props }">
+                              <div v-bind="props" :class="['model-result-badge', modelResult.success ? 'success-badge' : 'error-badge']">
+                                <span class="model-name">{{ modelResult.model }}</span>
+                                <v-icon size="16">
+                                  {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                                </v-icon>
+                              </div>
+                            </template>
+                            <div v-if="modelResult.success" class="tooltip-content">
+                              <div class="tooltip-title">{{ modelResult.model }}</div>
+                              <div class="tooltip-row">
+                                <span class="tooltip-label">{{ t('capability.tooltipLatency') }}</span>
+                                <span class="tooltip-value">{{ formatLatency(modelResult.latency) }}</span>
+                              </div>
+                              <div class="tooltip-row">
+                                <span class="tooltip-label">{{ t('capability.tooltipStreaming') }}</span>
+                                <span class="tooltip-value">{{ formatStreaming(modelResult) }}</span>
+                              </div>
                             </div>
-                          </template>
-                          <div v-if="modelResult.success" class="tooltip-content">
-                            <div class="tooltip-title">{{ modelResult.model }}</div>
-                            <div class="tooltip-item">
-                              <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
-                              {{ formatLatency(modelResult.latency) }}
+                            <div v-else class="tooltip-content">
+                              <div class="tooltip-title">{{ modelResult.model }}</div>
+                              <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
                             </div>
-                            <div class="tooltip-item">
-                              <v-icon size="14" class="mr-1">mdi-waves</v-icon>
-                              {{ formatStreaming(modelResult) }}
-                            </div>
-                          </div>
-                          <div v-else class="tooltip-content">
-                            <div class="tooltip-title">{{ modelResult.model }}</div>
-                            <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
-                          </div>
-                        </v-tooltip>
+                          </v-tooltip>
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -446,6 +452,14 @@ defineExpose({ startTest, setLoading, setError })
 
 .model-results-wrapper {
   padding: 14px 16px;
+}
+
+.models-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: rgba(var(--v-theme-on-surface), 0.62);
+  margin-bottom: 8px;
 }
 
 .model-results-flow {

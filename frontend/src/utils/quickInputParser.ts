@@ -189,6 +189,8 @@ const detectServiceTypeAndCleanUrl = (
       '/dashboard',
       '/keys',
       '/panel',
+      '/token',
+      '/log',
       '/pricing'
     ]
     if (dashboardPathPrefixes.some(prefix => path === prefix || path.startsWith(prefix + '/'))) {
