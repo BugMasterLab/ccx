@@ -1878,6 +1878,11 @@ defineExpose({
   .drag-handle {
     display: none;
   }
+
+  .channel-name-link {
+    max-width: 12ch;
+    display: inline-block;
+  }
 }
 
 /* Metrics display styles */

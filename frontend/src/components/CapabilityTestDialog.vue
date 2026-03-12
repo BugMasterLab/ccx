@@ -51,7 +51,66 @@
             </div>
           </div>
 
-          <v-table density="comfortable" class="rounded-lg capability-table">
+          <!-- 移动端卡片布局 -->
+          <div class="mobile-layout">
+            <div v-for="test in sortedTests" :key="test.protocol" class="protocol-card">
+              <div class="protocol-header">
+                <v-chip :color="getProtocolColor(test.protocol)" size="small" variant="tonal">
+                  {{ getProtocolDisplayName(test.protocol) }}
+                </v-chip>
+                <div v-if="test.success" class="d-flex align-center ga-1">
+                  <v-icon color="success" size="small">mdi-check-circle</v-icon>
+                  <span class="text-body-2 text-success">{{ t('capability.success') }}</span>
+                </div>
+                <v-tooltip v-else :text="test.error || t('capability.failedTooltip')" location="top">
+                  <template #activator="{ props }">
+                    <div v-bind="props" class="d-flex align-center ga-1">
+                      <v-icon color="error" size="small">mdi-close-circle</v-icon>
+                      <span class="text-body-2 text-error">{{ t('capability.failed') }}</span>
+                    </div>
+                  </template>
+                </v-tooltip>
+              </div>
+
+              <div v-if="getModelResults(test).length > 0" class="model-results-flow mt-3">
+                <v-tooltip
+                  v-for="modelResult in getModelResults(test)"
+                  :key="`${test.protocol}-${modelResult.model}`"
+                  location="top"
+                >
+                  <template #activator="{ props }">
+                    <div v-bind="props" class="model-result-badge">
+                      <span class="model-name">{{ modelResult.model }}</span>
+                      <v-icon
+                        :color="modelResult.success ? 'success' : 'error'"
+                        size="16"
+                      >
+                        {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                      </v-icon>
+                    </div>
+                  </template>
+                  <div v-if="modelResult.success" class="tooltip-content">
+                    <div class="tooltip-title">{{ modelResult.model }}</div>
+                    <div class="tooltip-item">
+                      <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
+                      {{ formatLatency(modelResult.latency) }}
+                    </div>
+                    <div class="tooltip-item">
+                      <v-icon size="14" class="mr-1">mdi-waves</v-icon>
+                      {{ formatStreaming(modelResult) }}
+                    </div>
+                  </div>
+                  <div v-else class="tooltip-content">
+                    <div class="tooltip-title">{{ modelResult.model }}</div>
+                    <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
+                  </div>
+                </v-tooltip>
+              </div>
+            </div>
+          </div>
+
+          <!-- 桌面端表格布局 -->
+          <v-table density="comfortable" class="rounded-lg capability-table desktop-layout">
             <thead>
               <tr>
                 <th>{{ t('capability.table.protocol') }}</th>
@@ -138,47 +197,43 @@
                 <tr>
                   <td colspan="7" class="model-results-cell">
                     <div class="model-results-wrapper">
-                      <div class="d-flex align-center justify-space-between flex-wrap ga-2 mb-2">
-                        <div class="text-caption font-weight-medium text-medium-emphasis">
-                          {{ t('capability.modelDetails') }}
-                        </div>
-                        <div class="text-caption text-medium-emphasis">
-                          {{ t('capability.attemptedModels', { count: getAttemptedModels(test) }) }}
-                        </div>
-                      </div>
-
                       <div v-if="getModelResults(test).length === 0" class="text-body-2 text-medium-emphasis py-2">
                         {{ t('capability.modelDetailsUnavailable') }}
                       </div>
 
-                      <div v-else class="model-results-list">
-                        <div
+                      <div v-else class="model-results-flow">
+                        <v-tooltip
                           v-for="modelResult in getModelResults(test)"
                           :key="`${test.protocol}-${modelResult.model}`"
-                          class="model-result-item"
+                          location="top"
                         >
-                          <div class="model-result-main">
-                            <div class="d-flex align-center ga-2 flex-wrap">
-                              <span class="text-body-2 font-weight-medium">{{ modelResult.model }}</span>
-                              <v-chip
-                                size="x-small"
+                          <template #activator="{ props }">
+                            <div v-bind="props" class="model-result-badge">
+                              <span class="model-name">{{ modelResult.model }}</span>
+                              <v-icon
                                 :color="modelResult.success ? 'success' : 'error'"
-                                variant="tonal"
+                                size="16"
                               >
-                                {{ modelResult.success ? t('capability.success') : t('capability.failed') }}
-                              </v-chip>
+                                {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                              </v-icon>
                             </div>
-                            <div v-if="modelResult.error" class="text-caption text-error mt-1">
-                              {{ modelResult.error }}
+                          </template>
+                          <div v-if="modelResult.success" class="tooltip-content">
+                            <div class="tooltip-title">{{ modelResult.model }}</div>
+                            <div class="tooltip-item">
+                              <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
+                              {{ formatLatency(modelResult.latency) }}
+                            </div>
+                            <div class="tooltip-item">
+                              <v-icon size="14" class="mr-1">mdi-waves</v-icon>
+                              {{ formatStreaming(modelResult) }}
                             </div>
                           </div>
-                          <div class="model-result-meta text-caption text-medium-emphasis">
-                            <span>{{ formatLatency(modelResult.latency) }}</span>
-                            <span>{{ formatStreaming(modelResult) }}</span>
-                            <span v-if="modelResult.startedAt">{{ t('capability.startedAt') }}: {{ formatTime(modelResult.startedAt) }}</span>
-                            <span v-if="modelResult.testedAt">{{ t('capability.testedAt') }}: {{ formatTime(modelResult.testedAt) }}</span>
+                          <div v-else class="tooltip-content">
+                            <div class="tooltip-title">{{ modelResult.model }}</div>
+                            <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
                           </div>
-                        </div>
+                        </v-tooltip>
                       </div>
                     </div>
                   </td>
@@ -348,6 +403,29 @@ defineExpose({ startTest, setLoading, setError })
   white-space: nowrap;
 }
 
+.mobile-layout {
+  display: none;
+}
+
+.desktop-layout {
+  display: table;
+}
+
+.protocol-card {
+  padding: 16px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: rgba(var(--v-theme-surface-variant), 0.16);
+  border: 1px solid rgba(var(--v-theme-outline), 0.2);
+}
+
+.protocol-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .model-results-cell {
   padding: 0 !important;
   background: rgba(var(--v-theme-surface-variant), 0.16);
@@ -357,43 +435,90 @@ defineExpose({ startTest, setLoading, setError })
   padding: 12px 16px;
 }
 
-.model-results-list {
+.model-results-flow {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.model-result-item {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(var(--v-theme-surface), 0.92);
+.model-result-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-surface), 1);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border: 1.5px solid rgba(var(--v-theme-outline), 0.5);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-.model-result-main {
-  min-width: 0;
-  flex: 1;
+.model-result-badge:hover {
+  background: rgba(var(--v-theme-primary), 0.08);
+  border-color: rgba(var(--v-theme-primary), 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 
-.model-result-meta {
+.model-name {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.92);
+  letter-spacing: 0.01em;
+}
+
+.tooltip-content {
+  padding: 4px 0;
+}
+
+.tooltip-title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  margin-bottom: 6px;
+  color: rgba(var(--v-theme-on-surface), 0.95);
+}
+
+.tooltip-item {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 12px;
-  white-space: nowrap;
+  align-items: center;
+  font-size: 0.8125rem;
+  margin: 4px 0;
+  color: rgba(var(--v-theme-on-surface), 0.75);
+}
+
+.tooltip-error {
+  font-size: 0.8125rem;
+  color: rgb(var(--v-theme-error));
+  margin-top: 4px;
+  max-width: 300px;
+  word-break: break-word;
 }
 
 @media (max-width: 720px) {
-  .model-result-item {
-    flex-direction: column;
+  .mobile-layout {
+    display: block;
   }
 
-  .model-result-meta {
-    justify-content: flex-start;
-    white-space: normal;
+  .desktop-layout {
+    display: none;
+  }
+
+  .model-results-flow {
+    gap: 6px;
+  }
+
+  .model-result-badge {
+    padding: 6px 10px;
+    gap: 6px;
+  }
+
+  .model-name {
+    font-size: 0.8125rem;
+  }
+
+  .model-result-badge:hover {
+    transform: none;
   }
 }
 </style>

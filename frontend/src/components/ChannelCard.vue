@@ -682,4 +682,53 @@ const serviceStyle = computed(() => {
 .v-theme--dark .latency-badge.latency-good { color: #fde68a; background: rgba(251, 191, 36, 0.22); }
 .v-theme--dark .latency-badge.latency-fair { color: #fcd49b; background: rgba(251, 146, 60, 0.25); }
 .v-theme--dark .latency-badge.latency-poor { color: #f4b4b4; background: rgba(248, 113, 113, 0.28); }
+
+/* --- MOBILE RESPONSIVE --- */
+@media (max-width: 720px) {
+  .channel-card:hover {
+    transform: none;
+  }
+
+  .card-header-gradient .v-card-title {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 12px;
+  }
+
+  .card-header-gradient .v-card-title > div:first-child {
+    width: 100%;
+  }
+
+  .card-header-gradient .v-card-title > div:last-child {
+    width: 100%;
+    justify-content: flex-start !important;
+    flex-wrap: wrap;
+  }
+
+  .service-icon-wrapper {
+    width: 40px;
+    height: 40px;
+  }
+
+  .service-icon-wrapper .v-icon {
+    font-size: 20px !important;
+  }
+
+  .channel-title {
+    font-size: 1rem !important;
+    max-width: 16ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .action-buttons {
+    justify-content: flex-start !important;
+  }
+
+  .action-btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
 </style>
