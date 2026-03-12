@@ -104,7 +104,7 @@
             </div>
 
             <!-- Status indicator -->
-            <div @click.stop>
+            <div class="status-badge-wrapper" @click.stop>
               <ChannelStatusBadge :status="element.status || 'active'" :metrics="getChannelMetrics(element.index)" />
             </div>
 
@@ -1591,6 +1591,12 @@ defineExpose({
   font-weight: 700;
   border: 2px solid rgb(var(--v-theme-on-surface));
   text-transform: uppercase;
+}
+
+.status-badge-wrapper {
+  display: flex;
+  align-items: center;
+  align-self: center;
 }
 
 .v-theme--dark .priority-number {

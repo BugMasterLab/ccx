@@ -133,12 +133,22 @@ const formatTime = (dateStr: string): string => {
 .badge-content {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 4px;
   padding: 4px 8px;
   background: rgb(var(--v-theme-surface));
   border: 1px solid rgb(var(--v-theme-on-surface));
   cursor: help;
   transition: all 0.1s ease;
+  line-height: 1;
+}
+
+.badge-content :deep(.v-icon) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  line-height: 1;
 }
 
 .v-theme--dark .badge-content {
@@ -150,6 +160,9 @@ const formatTime = (dateStr: string): string => {
 }
 
 .status-label {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
