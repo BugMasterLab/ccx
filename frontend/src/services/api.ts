@@ -112,6 +112,7 @@ export interface Channel {
   injectDummyThoughtSignature?: boolean  // Gemini 特定：为 functionCall 注入 dummy thought_signature（兼容第三方 API）
   stripThoughtSignature?: boolean        // Gemini 特定：移除 thought_signature 字段（兼容旧版 Gemini API）
   supportedModels?: string[]  // 支持的模型白名单（空=全部），支持通配符如 gpt-4*
+  rpm?: number                // 能力测试发送速率（仅影响能力测试）
 }
 
 export interface ChannelsResponse {
@@ -143,6 +144,69 @@ export interface PingResult {
 }
 
 // ============== 能力测试类型 ==============
+
+export interface CapabilityTestJobStartResponse {
+  jobId: string
+  resumed?: boolean
+}
+
+export type CapabilityTestJobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type CapabilityProtocolJobStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type CapabilityModelJobStatus = 'queued' | 'running' | 'success' | 'failed'
+
+export interface CapabilityJobProgress {
+  totalModels: number
+  queuedModels: number
+  runningModels: number
+  successModels: number
+  failedModels: number
+  completedModels: number
+}
+
+export interface CapabilityModelJobResult {
+  model: string
+  status: CapabilityModelJobStatus
+  success: boolean
+  latency: number
+  streamingSupported: boolean
+  error?: string
+  startedAt?: string
+  testedAt?: string
+}
+
+export interface CapabilityProtocolJobResult {
+  protocol: string
+  status: CapabilityProtocolJobStatus
+  success: boolean
+  latency: number
+  streamingSupported: boolean
+  testedModel: string
+  modelResults?: CapabilityModelJobResult[]
+  successCount?: number
+  attemptedModels?: number
+  error?: string
+  testedAt: string
+}
+
+export interface CapabilityTestJob {
+  jobId: string
+  channelId: number
+  channelName: string
+  channelKind: string
+  sourceType: string
+  status: CapabilityTestJobStatus
+  tests: CapabilityProtocolJobResult[]
+  compatibleProtocols: string[]
+  totalDuration: number
+  startedAt?: string
+  updatedAt: string
+  finishedAt?: string
+  progress: CapabilityJobProgress
+  error?: string
+  cacheHit?: boolean
+  targetProtocols?: string[]
+  timeoutMilliseconds?: number
+}
 
 export interface ModelTestResult {
   model: string
@@ -548,6 +612,20 @@ export class ApiService {
   }
 
   // ============== 能力测试 API ==============
+
+  async startChannelCapabilityTest(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number): Promise<CapabilityTestJobStartResponse> {
+    return this.request(`/${type}/channels/${id}/capability-test`, {
+      method: 'POST',
+      body: JSON.stringify({
+        targetProtocols: ['messages', 'chat', 'gemini', 'responses'],
+        timeout: 10000
+      })
+    })
+  }
+
+  async getChannelCapabilityTestStatus(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number, jobId: string): Promise<CapabilityTestJob> {
+    return this.request(`/${type}/channels/${id}/capability-test/${jobId}`)
+  }
 
   async testChannelCapability(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number): Promise<CapabilityTestResult> {
     return this.request(`/${type}/channels/${id}/capability-test`, {

@@ -20,6 +20,8 @@ export interface ChannelFormLike {
   customHeaders: Record<string, string>
   proxyUrl: string
   supportedModels: string[]
+  rpm?: number
+
 }
 
 export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index' | 'latency' | 'status'> {
@@ -61,7 +63,8 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     fastMode: advancedOptions.fastMode,
     customHeaders: form.customHeaders,
     proxyUrl: form.proxyUrl.trim(),
-    supportedModels: form.supportedModels
+    supportedModels: form.supportedModels,
+    rpm: form.rpm && form.rpm > 0 ? form.rpm : 10
   }
 
   if (deduplicatedUrls.length > 1) {

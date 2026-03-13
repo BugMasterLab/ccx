@@ -427,7 +427,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
 import { useTheme } from 'vuetify'
-import { api, fetchHealth, ApiError, type Channel, type CapabilityTestResult } from './services/api'
+import { api, fetchHealth, ApiError, type Channel, type CapabilityTestJob, type CapabilityTestJobStartResponse } from './services/api'
 import { versionService } from './services/version'
 import { useAuthStore } from './stores/auth'
 import { useChannelStore } from './stores/channel'
@@ -686,23 +686,58 @@ const pingChannel = async (channelId: number) => {
 const showCapabilityTestDialog = ref(false)
 const capabilityTestChannelName = ref('')
 const capabilityTestChannelId = ref(0)
-const capabilityTestResult = ref<CapabilityTestResult | null>(null)
 const capabilityTestDialogRef = ref<InstanceType<typeof CapabilityTestDialog> | null>(null)
+const capabilityTestJobId = ref('')
+const capabilityTestPolling = ref<ReturnType<typeof setInterval> | null>(null)
+const capabilityTestJob = ref<CapabilityTestJob | null>(null)
+
+watch(showCapabilityTestDialog, (open) => {
+  if (!open) {
+    stopCapabilityTestPolling()
+  }
+})
+
+const stopCapabilityTestPolling = () => {
+  if (capabilityTestPolling.value) {
+    clearInterval(capabilityTestPolling.value)
+    capabilityTestPolling.value = null
+  }
+}
+
+const updateCapabilityJob = (job: CapabilityTestJob) => {
+  capabilityTestJob.value = job
+  if (job.status === 'completed' || job.status === 'failed') {
+    stopCapabilityTestPolling()
+  }
+  capabilityTestDialogRef.value?.updateJob(job)
+}
 
 const testChannelCapability = async (channelId: number) => {
-  // 获取渠道信息
   const channel = channelStore.currentChannelsData.channels?.find(ch => ch.index === channelId)
   capabilityTestChannelName.value = channel?.name || t('capability.channelFallback', { id: channelId })
   capabilityTestChannelId.value = channelId
 
-  // 打开对话框并设置加载状态
   showCapabilityTestDialog.value = true
-  capabilityTestDialogRef.value?.setLoading()
+  capabilityTestDialogRef.value?.startInitializing()
+  stopCapabilityTestPolling()
+  capabilityTestJobId.value = ''
+  capabilityTestJob.value = null
 
   try {
-    const result = await api.testChannelCapability(channelStore.activeTab, channelId)
-    capabilityTestResult.value = result
-    capabilityTestDialogRef.value?.startTest(result)
+    const startResp: CapabilityTestJobStartResponse = await api.startChannelCapabilityTest(channelStore.activeTab, channelId)
+    capabilityTestJobId.value = startResp.jobId
+    const job = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, startResp.jobId)
+    updateCapabilityJob(job)
+
+    capabilityTestPolling.value = setInterval(async () => {
+      if (!capabilityTestJobId.value) return
+      try {
+        const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, capabilityTestJobId.value)
+        updateCapabilityJob(latest)
+      } catch (error) {
+        console.error('Failed to poll capability test job:', error)
+      }
+    }, 2000)
   } catch (error) {
     const message = error instanceof Error ? error.message : t('system.unknown')
     capabilityTestDialogRef.value?.setError(t('toast.capabilityFailed', { message }))
@@ -739,6 +774,7 @@ const handleCopyToTab = async (targetProtocol: string) => {
     injectDummyThoughtSignature: sourceChannel.injectDummyThoughtSignature,
     stripThoughtSignature: sourceChannel.stripThoughtSignature,
     supportedModels: sourceChannel.supportedModels,
+    rpm: sourceChannel.rpm ?? 10,
   }
 
   try {
@@ -1131,6 +1167,7 @@ watch(() => channelStore.lastRefreshSuccess, (success) => {
 // 在组件卸载时清除定时器
 onUnmounted(() => {
   channelStore.stopAutoRefresh()
+  stopCapabilityTestPolling()
 })
 </script>
 

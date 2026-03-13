@@ -19,7 +19,7 @@
       <v-divider />
 
       <v-card-text class="pa-4">
-        <div v-if="state === 'loading'" class="d-flex flex-column align-center py-8">
+        <div v-if="state === 'initializing'" class="d-flex flex-column align-center py-8">
           <v-progress-circular indeterminate size="48" color="primary" />
           <p class="text-body-1 mt-4 text-medium-emphasis">{{ t('capability.loadingTitle') }}</p>
           <p class="text-caption text-medium-emphasis">{{ t('capability.loadingBody') }}</p>
@@ -31,12 +31,12 @@
           </v-alert>
         </div>
 
-        <div v-else-if="state === 'result' && result">
+        <div v-else-if="(state === 'running' || state === 'completed') && job">
           <div class="mb-4">
             <div class="text-body-2 font-weight-medium mb-2">{{ t('capability.compatibleProtocols') }}</div>
             <div class="d-flex flex-wrap ga-2">
               <v-chip
-                v-for="proto in result.compatibleProtocols"
+                v-for="proto in job.compatibleProtocols"
                 :key="proto"
                 :color="getProtocolColor(proto)"
                 size="small"
@@ -45,10 +45,14 @@
                 <v-icon start size="small">{{ getProtocolIcon(proto) }}</v-icon>
                 {{ getProtocolDisplayName(proto) }}
               </v-chip>
-              <v-chip v-if="result.compatibleProtocols.length === 0" color="grey" size="small" variant="tonal">
+              <v-chip v-if="job.compatibleProtocols.length === 0" color="grey" size="small" variant="tonal">
                 {{ t('capability.noCompatibleProtocols') }}
               </v-chip>
             </div>
+          </div>
+
+          <div v-if="job.progress.totalModels" class="mb-4 text-caption text-medium-emphasis">
+            {{ t('capability.progressSummary', { done: job.progress.completedModels, total: job.progress.totalModels }) }}
           </div>
 
           <!-- 移动端卡片布局 -->
@@ -58,7 +62,11 @@
                 <v-chip :color="getProtocolColor(test.protocol)" size="small" variant="tonal">
                   {{ getProtocolDisplayName(test.protocol) }}
                 </v-chip>
-                <div v-if="test.success" class="d-flex align-center ga-1">
+                <div v-if="test.status === 'running'" class="d-flex align-center ga-1">
+                  <v-icon color="info" size="small">mdi-progress-clock</v-icon>
+                  <span class="text-body-2 text-info">{{ t('capability.protocolRunning') }}</span>
+                </div>
+                <div v-else-if="test.success" class="d-flex align-center ga-1">
                   <v-icon color="success" size="small">mdi-check-circle</v-icon>
                   <span class="text-body-2 text-success">{{ t('capability.success') }}</span>
                 </div>
@@ -82,10 +90,13 @@
                     :content-class="modelResult.success ? 'success-tooltip' : 'failure-tooltip'"
                   >
                     <template #activator="{ props }">
-                      <div v-bind="props" :class="['model-result-badge', modelResult.success ? 'success-badge' : 'error-badge']">
+                      <div
+                        v-bind="props"
+                        :class="['model-result-badge', modelResult.success ? 'success-badge' : modelResult.status === 'failed' ? 'error-badge' : modelResult.status === 'running' ? 'running-badge' : 'queued-badge']"
+                      >
                         <span class="model-name">{{ modelResult.model }}</span>
                         <v-icon size="16">
-                          {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                          {{ modelResult.status === 'queued' ? 'mdi-timer-sand' : modelResult.status === 'running' ? 'mdi-progress-clock' : modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
                         </v-icon>
                       </div>
                     </template>
@@ -99,9 +110,17 @@
                         <span class="tooltip-label">{{ t('capability.tooltipStreaming') }}</span>
                         <span class="tooltip-value">{{ formatStreaming(modelResult) }}</span>
                       </div>
+                      <div class="tooltip-row">
+                        <span class="tooltip-label">{{ t('capability.modelStatus') }}</span>
+                        <span class="tooltip-value">{{ getModelStatusLabel(modelResult.status) }}</span>
+                      </div>
                     </div>
                     <div v-else class="tooltip-content">
                       <div class="tooltip-title">{{ modelResult.model }}</div>
+                      <div class="tooltip-row">
+                        <span class="tooltip-label">{{ t('capability.modelStatus') }}</span>
+                        <span class="tooltip-value">{{ getModelStatusLabel(modelResult.status) }}</span>
+                      </div>
                       <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
                     </div>
                   </v-tooltip>
@@ -131,7 +150,11 @@
                     </v-chip>
                   </td>
                   <td>
-                    <div v-if="test.success" class="d-flex align-center ga-1">
+                    <div v-if="test.status === 'running'" class="d-flex align-center ga-1">
+                      <v-icon color="info" size="small">mdi-progress-clock</v-icon>
+                      <span class="text-body-2 text-info">{{ t('capability.protocolRunning') }}</span>
+                    </div>
+                    <div v-else-if="test.success" class="d-flex align-center ga-1">
                       <v-icon color="success" size="small">mdi-check-circle</v-icon>
                       <span class="text-body-2 text-success">{{ t('capability.success') }}</span>
                     </div>
@@ -214,10 +237,13 @@
                             :content-class="modelResult.success ? 'success-tooltip' : 'failure-tooltip'"
                           >
                             <template #activator="{ props }">
-                              <div v-bind="props" :class="['model-result-badge', modelResult.success ? 'success-badge' : 'error-badge']">
+                              <div
+                                v-bind="props"
+                                :class="['model-result-badge', modelResult.success ? 'success-badge' : modelResult.status === 'failed' ? 'error-badge' : modelResult.status === 'running' ? 'running-badge' : 'queued-badge']"
+                              >
                                 <span class="model-name">{{ modelResult.model }}</span>
                                 <v-icon size="16">
-                                  {{ modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                                  {{ modelResult.status === 'queued' ? 'mdi-timer-sand' : modelResult.status === 'running' ? 'mdi-progress-clock' : modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
                                 </v-icon>
                               </div>
                             </template>
@@ -231,9 +257,17 @@
                                 <span class="tooltip-label">{{ t('capability.tooltipStreaming') }}</span>
                                 <span class="tooltip-value">{{ formatStreaming(modelResult) }}</span>
                               </div>
+                              <div class="tooltip-row">
+                                <span class="tooltip-label">{{ t('capability.modelStatus') }}</span>
+                                <span class="tooltip-value">{{ getModelStatusLabel(modelResult.status) }}</span>
+                              </div>
                             </div>
                             <div v-else class="tooltip-content">
                               <div class="tooltip-title">{{ modelResult.model }}</div>
+                              <div class="tooltip-row">
+                                <span class="tooltip-label">{{ t('capability.modelStatus') }}</span>
+                                <span class="tooltip-value">{{ getModelStatusLabel(modelResult.status) }}</span>
+                              </div>
                               <div class="tooltip-error">{{ modelResult.error || t('capability.failedTooltip') }}</div>
                             </div>
                           </v-tooltip>
@@ -246,8 +280,8 @@
             </tbody>
           </v-table>
 
-          <div class="text-caption text-medium-emphasis mt-3 text-right">
-            {{ t('capability.totalDuration', { duration: result.totalDuration }) }}
+          <div class="text-caption text-medium-emphasis mt-3 text-right" v-if="state === 'completed'">
+            {{ t('capability.totalDuration', { duration: job.totalDuration }) }}
           </div>
         </div>
       </v-card-text>
@@ -257,7 +291,12 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import type { CapabilityTestResult, ModelTestResult, ProtocolTestResult } from '../services/api'
+import type {
+  CapabilityTestJob,
+  CapabilityProtocolJobResult,
+  CapabilityModelJobResult,
+  CapabilityModelJobStatus
+} from '../services/api'
 import { useI18n } from '../i18n'
 
 interface Props {
@@ -274,8 +313,8 @@ defineEmits<{
 
 const { t } = useI18n()
 
-const state = ref<'loading' | 'error' | 'result'>('loading')
-const result = ref<CapabilityTestResult | null>(null)
+const state = ref<'initializing' | 'running' | 'error' | 'completed'>('initializing')
+const job = ref<CapabilityTestJob | null>(null)
 const errorMessage = ref('')
 
 const getProtocolDisplayName = (protocol: string) => {
@@ -309,8 +348,8 @@ const getProtocolIcon = (protocol: string) => {
 }
 
 const getSuccessfulProtocols = () => {
-  if (!result.value) return []
-  return result.value.tests
+  if (!job.value) return []
+  return job.value.tests
     .filter(t => t.success)
     .map(t => t.protocol)
 }
@@ -318,43 +357,43 @@ const getSuccessfulProtocols = () => {
 const protocolOrder = ['messages', 'chat', 'responses', 'gemini']
 
 const sortedTests = computed(() => {
-  if (!result.value) return []
-  return [...result.value.tests].sort((a, b) => {
+  if (!job.value) return []
+  return [...job.value.tests].sort((a, b) => {
     const indexA = protocolOrder.indexOf(a.protocol)
     const indexB = protocolOrder.indexOf(b.protocol)
     return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB)
   })
 })
 
-const getModelResults = (test: ProtocolTestResult): ModelTestResult[] => {
+const getModelResults = (test: CapabilityProtocolJobResult): CapabilityModelJobResult[] => {
   return Array.isArray(test.modelResults) ? test.modelResults : []
 }
 
-const getAttemptedModels = (test: ProtocolTestResult): number => {
+const getAttemptedModels = (test: CapabilityProtocolJobResult): number => {
   if (typeof test.attemptedModels === 'number') return test.attemptedModels
   const modelResults = getModelResults(test)
   return modelResults.length
 }
 
-const getSuccessCount = (test: ProtocolTestResult): number => {
+const getSuccessCount = (test: CapabilityProtocolJobResult): number => {
   if (typeof test.successCount === 'number') return test.successCount
   return getModelResults(test).filter(modelResult => modelResult.success).length
 }
 
-const getRecommendedModel = (test: ProtocolTestResult): string => {
+const getRecommendedModel = (test: CapabilityProtocolJobResult): string => {
   if (test.testedModel) return test.testedModel
   const firstSuccessfulModel = getModelResults(test).find(modelResult => modelResult.success)
   if (firstSuccessfulModel?.model) return firstSuccessfulModel.model
   return '-'
 }
 
-const formatSuccessRatio = (test: ProtocolTestResult): string => {
+const formatSuccessRatio = (test: CapabilityProtocolJobResult): string => {
   const attemptedModels = getAttemptedModels(test)
   if (attemptedModels <= 0) return '-'
   return `${getSuccessCount(test)}/${attemptedModels}`
 }
 
-const hasProtocolLatency = (test: ProtocolTestResult): boolean => {
+const hasProtocolLatency = (test: CapabilityProtocolJobResult): boolean => {
   return typeof test.latency === 'number' && test.latency >= 0
 }
 
@@ -362,7 +401,7 @@ const formatLatency = (latency: number): string => {
   return latency >= 0 ? `${latency}ms` : '-'
 }
 
-const formatStreaming = (modelResult: ModelTestResult): string => {
+const formatStreaming = (modelResult: CapabilityModelJobResult): string => {
   if (!modelResult.success) return '-'
   return modelResult.streamingSupported ? t('capability.supported') : t('capability.unsupported')
 }
@@ -373,15 +412,22 @@ const formatTime = (value: string): string => {
   return date.toLocaleTimeString()
 }
 
-const setLoading = () => {
-  state.value = 'loading'
-  result.value = null
+const startInitializing = () => {
+  state.value = 'initializing'
+  job.value = null
   errorMessage.value = ''
 }
 
-const startTest = (testResult: CapabilityTestResult) => {
-  result.value = testResult
-  state.value = 'result'
+const updateJob = (nextJob: CapabilityTestJob) => {
+  job.value = nextJob
+  if (nextJob.status === 'completed' || nextJob.status === 'failed') {
+    state.value = nextJob.status === 'completed' ? 'completed' : 'error'
+    if (nextJob.status === 'failed' && !errorMessage.value) {
+      errorMessage.value = t('capability.failedTooltip')
+    }
+  } else {
+    state.value = 'running'
+  }
 }
 
 const setError = (error: string) => {
@@ -389,7 +435,17 @@ const setError = (error: string) => {
   state.value = 'error'
 }
 
-defineExpose({ startTest, setLoading, setError })
+const getModelStatusLabel = (status: CapabilityModelJobStatus) => {
+  switch (status) {
+    case 'queued': return t('capability.modelQueued')
+    case 'running': return t('capability.modelRunning')
+    case 'success': return t('capability.modelSuccess')
+    case 'failed': return t('capability.modelFailed')
+    default: return status
+  }
+}
+
+defineExpose({ startInitializing, updateJob, setError })
 </script>
 
 <style scoped>
@@ -413,6 +469,16 @@ defineExpose({ startTest, setLoading, setError })
   color: #166534;
   background-color: #f6fff8;
   border: 1px solid #bbf7d0;
+}
+
+.queued-badge {
+  background: rgba(var(--v-theme-surface-variant), 0.6);
+  color: rgb(var(--v-theme-on-surface));
+}
+
+.running-badge {
+  background: rgba(var(--v-theme-info), 0.12);
+  color: rgb(var(--v-theme-info));
 }
 
 .capability-table :deep(th) {
