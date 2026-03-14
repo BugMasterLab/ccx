@@ -73,6 +73,7 @@ export type MessageKey =
   | 'capability.modelRunning'
   | 'capability.modelSuccess'
   | 'capability.modelFailed'
+  | 'capability.modelSkipped'
   | 'orchestration.title'
   | 'orchestration.multiChannel'
   | 'orchestration.singleChannel'
@@ -394,6 +395,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.modelRunning': 'Running',
     'capability.modelSuccess': 'Available',
     'capability.modelFailed': 'Failed',
+    'capability.modelSkipped': 'Skipped',
     'orchestration.title': 'Channel orchestration',
     'orchestration.multiChannel': 'Multi-channel mode',
     'orchestration.singleChannel': 'Single-channel mode',
@@ -714,6 +716,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.modelRunning': 'Berjalan',
     'capability.modelSuccess': 'Tersedia',
     'capability.modelFailed': 'Gagal',
+    'capability.modelSkipped': 'Dilewati',
     'orchestration.title': 'Orkestrasi channel',
     'orchestration.multiChannel': 'Mode multi-channel',
     'orchestration.singleChannel': 'Mode single-channel',
@@ -1034,6 +1037,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.modelRunning': '测试中',
     'capability.modelSuccess': '可用',
     'capability.modelFailed': '失败',
+    'capability.modelSkipped': '已跳过',
     'orchestration.title': '渠道编排',
     'orchestration.multiChannel': '多渠道模式',
     'orchestration.singleChannel': '单渠道模式',

@@ -152,7 +152,7 @@ export interface CapabilityTestJobStartResponse {
 
 export type CapabilityTestJobStatus = 'queued' | 'running' | 'completed' | 'failed'
 export type CapabilityProtocolJobStatus = 'queued' | 'running' | 'completed' | 'failed'
-export type CapabilityModelJobStatus = 'queued' | 'running' | 'success' | 'failed'
+export type CapabilityModelJobStatus = 'queued' | 'running' | 'success' | 'failed' | 'skipped'
 
 export interface CapabilityJobProgress {
   totalModels: number
@@ -160,6 +160,7 @@ export interface CapabilityJobProgress {
   runningModels: number
   successModels: number
   failedModels: number
+  skippedModels: number
   completedModels: number
 }
 

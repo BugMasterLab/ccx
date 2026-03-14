@@ -92,11 +92,11 @@
                     <template #activator="{ props }">
                       <div
                         v-bind="props"
-                        :class="['model-result-badge', modelResult.success ? 'success-badge' : modelResult.status === 'failed' ? 'error-badge' : modelResult.status === 'running' ? 'running-badge' : 'queued-badge']"
+                        :class="['model-result-badge', modelResult.success ? 'success-badge' : modelResult.status === 'failed' ? 'error-badge' : modelResult.status === 'running' ? 'running-badge' : modelResult.status === 'skipped' ? 'skipped-badge' : 'queued-badge']"
                       >
                         <span class="model-name">{{ modelResult.model }}</span>
                         <v-icon size="16">
-                          {{ modelResult.status === 'queued' ? 'mdi-timer-sand' : modelResult.status === 'running' ? 'mdi-progress-clock' : modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                          {{ modelResult.status === 'queued' ? 'mdi-timer-sand' : modelResult.status === 'running' ? 'mdi-progress-clock' : modelResult.status === 'skipped' ? 'mdi-skip-next' : modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
                         </v-icon>
                       </div>
                     </template>
@@ -239,11 +239,11 @@
                             <template #activator="{ props }">
                               <div
                                 v-bind="props"
-                                :class="['model-result-badge', modelResult.success ? 'success-badge' : modelResult.status === 'failed' ? 'error-badge' : modelResult.status === 'running' ? 'running-badge' : 'queued-badge']"
+                                :class="['model-result-badge', modelResult.success ? 'success-badge' : modelResult.status === 'failed' ? 'error-badge' : modelResult.status === 'running' ? 'running-badge' : modelResult.status === 'skipped' ? 'skipped-badge' : 'queued-badge']"
                               >
                                 <span class="model-name">{{ modelResult.model }}</span>
                                 <v-icon size="16">
-                                  {{ modelResult.status === 'queued' ? 'mdi-timer-sand' : modelResult.status === 'running' ? 'mdi-progress-clock' : modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
+                                  {{ modelResult.status === 'queued' ? 'mdi-timer-sand' : modelResult.status === 'running' ? 'mdi-progress-clock' : modelResult.status === 'skipped' ? 'mdi-skip-next' : modelResult.success ? 'mdi-check-circle' : 'mdi-close-circle' }}
                                 </v-icon>
                               </div>
                             </template>
@@ -421,10 +421,8 @@ const startInitializing = () => {
 const updateJob = (nextJob: CapabilityTestJob) => {
   job.value = nextJob
   if (nextJob.status === 'completed' || nextJob.status === 'failed') {
-    state.value = nextJob.status === 'completed' ? 'completed' : 'error'
-    if (nextJob.status === 'failed' && !errorMessage.value) {
-      errorMessage.value = t('capability.failedTooltip')
-    }
+    // 无论成功或失败，都展示详细结果（不跳转到 error 页面）
+    state.value = 'completed'
   } else {
     state.value = 'running'
   }
@@ -441,6 +439,7 @@ const getModelStatusLabel = (status: CapabilityModelJobStatus) => {
     case 'running': return t('capability.modelRunning')
     case 'success': return t('capability.modelSuccess')
     case 'failed': return t('capability.modelFailed')
+    case 'skipped': return t('capability.modelSkipped')
     default: return status
   }
 }
@@ -479,6 +478,12 @@ defineExpose({ startInitializing, updateJob, setError })
 .running-badge {
   background: rgba(var(--v-theme-info), 0.12);
   color: rgb(var(--v-theme-info));
+}
+
+.skipped-badge {
+  background: rgba(var(--v-theme-surface-variant), 0.4);
+  color: rgba(var(--v-theme-on-surface), 0.5);
+  text-decoration: line-through;
 }
 
 .capability-table :deep(th) {

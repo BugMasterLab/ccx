@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Changed
+
+- **能力测试 Round-Robin 串行调度** - 将并发竞争模型改为串行 round-robin 编排，跨协议交错调度（messages[0] → chat[0] → gemini[0] → responses[0] → messages[1]...），协议首次成功后自动跳过后续模型
+  - 后端：新增 `runRoundRobinTests()` 编排器和 `executeModelTest()`，全局超时按 `max(interval, perModelTimeout)` 累加，协议早退出机制
+  - 后端：新增 `skipped` 模型状态（`CapabilityModelStatusSkipped`），`ModelTestResult` 增加 `Skipped` 字段确保缓存重建不丢失状态
+  - 后端：收尾逻辑区分「未实际测试」与「测试后全部失败」，回填残留模型结果，守护零时间延迟计算
+  - 前端：新增 skipped 状态展示（灰色删除线 badge + `mdi-skip-next` 图标），三语言 i18n 支持
+  - 前端：`failed` 任务也展示详细协议/模型结果，不再跳转到 error 页面
+
 ## [v2.6.34] - 2026-03-13
 
 ### Added

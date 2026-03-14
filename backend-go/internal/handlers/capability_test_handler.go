@@ -104,6 +104,7 @@ type CapabilityTestRequest struct {
 type ModelTestResult struct {
 	Model              string  `json:"model"`
 	Success            bool    `json:"success"`
+	Skipped            bool    `json:"skipped,omitempty"`
 	Latency            int64   `json:"latency"` // 毫秒
 	StreamingSupported bool    `json:"streamingSupported"`
 	Error              *string `json:"error,omitempty"`
@@ -238,6 +239,39 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 
 // ============== 核心测试逻辑 ==============
 
+// testItem 代表一个 (协议, 模型) 测试单元
+type testItem struct {
+	protocol string
+	model    string
+	index    int // 模型在其协议列表中的索引
+}
+
+// buildRoundRobinQueue 构建交错队列
+// 输出: messages[0], chat[0], gemini[0], responses[0], messages[1], chat[1], ...
+func buildRoundRobinQueue(protocolModels map[string][]string, protocols []string) []testItem {
+	maxModels := 0
+	for _, models := range protocolModels {
+		if len(models) > maxModels {
+			maxModels = len(models)
+		}
+	}
+
+	queue := make([]testItem, 0)
+	for round := 0; round < maxModels; round++ {
+		for _, protocol := range protocols {
+			models := protocolModels[protocol]
+			if round < len(models) {
+				queue = append(queue, testItem{
+					protocol: protocol,
+					model:    models[round],
+					index:    round,
+				})
+			}
+		}
+	}
+	return queue
+}
+
 func runCapabilityTestJob(jobID, channelKind string, channelID int, channel config.UpstreamConfig, protocols []string, timeout time.Duration, cacheKey, lookupKey string) {
 	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 		job.Status = CapabilityJobStatusRunning
@@ -247,7 +281,7 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 	log.Printf("[CapabilityTest-Job] 开始执行能力测试任务 %s，渠道 %s (ID:%d, 类型:%s)，协议: %v", jobID, channel.Name, channelID, channel.ServiceType, protocols)
 
 	totalStart := time.Now()
-	results := testProtocolCompatibility(context.Background(), &channel, protocols, timeout, jobID)
+	results := runRoundRobinTests(context.Background(), &channel, protocols, timeout, jobID)
 	totalDuration := time.Since(totalStart).Milliseconds()
 
 	compatible := make([]string, 0)
@@ -266,10 +300,11 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 		TotalDuration:       totalDuration,
 	}
 
+	// 编排器已在执行过程中通过 capabilityJobs.update 实时维护 job.Tests，
+	// 这里只更新最终元数据，不重建 Tests（避免覆盖编排器维护的 skipped 等中间状态）
 	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 		job.ChannelName = channel.Name
 		job.SourceType = channel.ServiceType
-		job.Tests = capabilityProtocolResultsFromResponse(resp)
 		job.CompatibleProtocols = append([]string(nil), compatible...)
 		job.TotalDuration = totalDuration
 		job.FinishedAt = time.Now().Format(time.RFC3339Nano)
@@ -292,183 +327,269 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 	log.Printf("[CapabilityTest-Job] 能力测试任务 %s 完成，渠道 %s，兼容协议: %v，总耗时: %dms", jobID, channel.Name, compatible, totalDuration)
 }
 
-// testProtocolCompatibility 并发测试多个协议的兼容性
-func testProtocolCompatibility(ctx context.Context, channel *config.UpstreamConfig, protocols []string, timeout time.Duration, jobID string) []ProtocolTestResult {
-	results := make([]ProtocolTestResult, len(protocols))
-	var wg sync.WaitGroup
+// runRoundRobinTests 核心编排器，串行按 round-robin 顺序逐个调度
+func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, protocols []string, perModelTimeout time.Duration, jobID string) []ProtocolTestResult {
+	// 1. 收集各协议模型列表，初始化 job 状态
+	protocolModels := make(map[string][]string)
+	protocolStatus := make(map[string]bool) // true = 已决（成功或全部失败）
+	results := make(map[string]*ProtocolTestResult)
 
-	for i, protocol := range protocols {
-		wg.Add(1)
-		go func(idx int, proto string) {
-			defer wg.Done()
-			results[idx] = testSingleProtocol(ctx, channel, proto, timeout, jobID)
-		}(i, protocol)
-	}
-
-	wg.Wait()
-	return results
-}
-
-// testSingleProtocol 测试单个协议的兼容性（协议内模型全部进入全局 dispatcher 排队）
-func testSingleProtocol(ctx context.Context, channel *config.UpstreamConfig, protocol string, timeout time.Duration, jobID string) ProtocolTestResult {
-	result := ProtocolTestResult{
-		Protocol: protocol,
-		TestedAt: time.Now().Format(time.RFC3339),
-	}
-
-	log.Printf("[CapabilityTest-Protocol] 开始测试渠道 %s 的 %s 协议兼容性", channel.Name, protocol)
-	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-		for i := range job.Tests {
-			if job.Tests[i].Protocol == protocol {
-				job.Tests[i].Status = CapabilityProtocolStatusRunning
-				job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
-				break
+	for _, protocol := range protocols {
+		models, err := getCapabilityProbeModels(protocol)
+		if err != nil {
+			errMsg := "no_models_configured"
+			results[protocol] = &ProtocolTestResult{
+				Protocol: protocol,
+				Error:    &errMsg,
+				TestedAt: time.Now().Format(time.RFC3339),
 			}
+			protocolStatus[protocol] = true
+			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+				for i := range job.Tests {
+					if job.Tests[i].Protocol == protocol {
+						job.Tests[i].Status = CapabilityProtocolStatusFailed
+						job.Tests[i].Error = &errMsg
+						job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
+						break
+					}
+				}
+			})
+			log.Printf("[CapabilityTest-Protocol] 渠道 %s 获取 %s 协议测试模型失败: %v", channel.Name, protocol, err)
+			continue
 		}
-	})
 
-	models, err := getCapabilityProbeModels(protocol)
-	if err != nil {
-		errMsg := "no_models_configured"
-		result.Error = &errMsg
+		protocolModels[protocol] = models
+		protocolStatus[protocol] = false
+		results[protocol] = &ProtocolTestResult{
+			Protocol:        protocol,
+			TestedAt:        time.Now().Format(time.RFC3339),
+			AttemptedModels: len(models),
+			ModelResults:    make([]ModelTestResult, len(models)),
+		}
+
+		// 初始化协议状态和模型列表
 		capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 			for i := range job.Tests {
 				if job.Tests[i].Protocol == protocol {
-					job.Tests[i].Status = CapabilityProtocolStatusFailed
-					job.Tests[i].Error = result.Error
-					job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
-					break
-				}
-			}
-		})
-		log.Printf("[CapabilityTest-Protocol] 渠道 %s 获取 %s 协议测试模型失败: %v", channel.Name, protocol, err)
-		return result
-	}
-
-	totalStart := time.Now()
-	result.AttemptedModels = len(models)
-	result.ModelResults = make([]ModelTestResult, len(models))
-	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-		for i := range job.Tests {
-			if job.Tests[i].Protocol != protocol {
-				continue
-			}
-			job.Tests[i].AttemptedModels = len(models)
-			job.Tests[i].ModelResults = make([]CapabilityModelJobResult, len(models))
-			for idx, modelName := range models {
-				job.Tests[i].ModelResults[idx] = CapabilityModelJobResult{
-					Model:  modelName,
-					Status: CapabilityModelStatusQueued,
-				}
-			}
-			break
-		}
-	})
-
-	type modelOutcome struct {
-		index  int
-		result ModelTestResult
-	}
-
-	outcomeCh := make(chan modelOutcome, len(models))
-	var wg sync.WaitGroup
-
-	for i, model := range models {
-		log.Printf("[CapabilityTest-Protocol] 渠道 %s 启动模型 %s (%d/%d)", channel.Name, model, i+1, len(models))
-		wg.Add(1)
-		go func(idx int, modelName string) {
-			defer wg.Done()
-			outcomeCh <- modelOutcome{
-				index:  idx,
-				result: testSingleModel(ctx, channel, protocol, modelName, timeout, jobID),
-			}
-		}(i, model)
-	}
-
-	wg.Wait()
-	close(outcomeCh)
-
-	var failureSummaries []string
-	for outcome := range outcomeCh {
-		result.ModelResults[outcome.index] = outcome.result
-		if outcome.result.Success {
-			result.SuccessCount++
-		}
-	}
-
-	for _, modelResult := range result.ModelResults {
-		if !modelResult.Success && modelResult.Error != nil && *modelResult.Error != "" {
-			failureSummaries = append(failureSummaries, fmt.Sprintf("%s=%s", modelResult.Model, *modelResult.Error))
-		}
-	}
-
-	result.Success = result.SuccessCount > 0
-	if result.Success {
-		for _, modelResult := range result.ModelResults {
-			if modelResult.Success {
-				result.TestedModel = modelResult.Model
-				result.StreamingSupported = modelResult.StreamingSupported
-				break
-			}
-		}
-	}
-
-	if !result.Success {
-		result.Latency = time.Since(totalStart).Milliseconds()
-		errMsg := "all_models_failed"
-		if len(failureSummaries) > 0 {
-			errMsg = failureSummaries[0]
-		}
-		result.Error = &errMsg
-		capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-			for i := range job.Tests {
-				if job.Tests[i].Protocol == protocol {
-					job.Tests[i].Status = CapabilityProtocolStatusFailed
-					job.Tests[i].Success = false
-					job.Tests[i].Latency = result.Latency
-					job.Tests[i].StreamingSupported = false
-					job.Tests[i].TestedModel = ""
-					job.Tests[i].SuccessCount = result.SuccessCount
-					job.Tests[i].AttemptedModels = result.AttemptedModels
-					job.Tests[i].Error = result.Error
-					job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
-					for j := range job.Tests[i].ModelResults {
-						if job.Tests[i].ModelResults[j].Status == CapabilityModelStatusQueued || job.Tests[i].ModelResults[j].Status == CapabilityModelStatusRunning {
-							job.Tests[i].ModelResults[j].Status = CapabilityModelStatusFailed
+					job.Tests[i].Status = CapabilityProtocolStatusRunning
+					job.Tests[i].AttemptedModels = len(models)
+					job.Tests[i].ModelResults = make([]CapabilityModelJobResult, len(models))
+					for idx, modelName := range models {
+						job.Tests[i].ModelResults[idx] = CapabilityModelJobResult{
+							Model:  modelName,
+							Status: CapabilityModelStatusQueued,
 						}
 					}
+					job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
 					break
 				}
 			}
 		})
-		log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议全部模型测试失败 (尝试: %d, 总耗时: %dms): %s",
-			channel.Name, protocol, result.AttemptedModels, result.Latency, errMsg)
-		return result
+		log.Printf("[CapabilityTest-Protocol] 开始测试渠道 %s 的 %s 协议兼容性", channel.Name, protocol)
 	}
 
-	result.Latency = time.Since(totalStart).Milliseconds()
-	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-		for i := range job.Tests {
-			if job.Tests[i].Protocol == protocol {
-				job.Tests[i].Status = CapabilityProtocolStatusCompleted
-				job.Tests[i].Success = true
-				job.Tests[i].Latency = result.Latency
-				job.Tests[i].StreamingSupported = result.StreamingSupported
-				job.Tests[i].TestedModel = result.TestedModel
-				job.Tests[i].SuccessCount = result.SuccessCount
-				job.Tests[i].AttemptedModels = result.AttemptedModels
-				job.Tests[i].Error = nil
-				job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
+	// 2. 构建交错队列
+	queue := buildRoundRobinQueue(protocolModels, protocols)
+
+	// 3. 计算全局超时
+	// 串行执行中每个模型最多耗时 max(interval, perModelTimeout)，累加所有模型 + 缓冲
+	totalModels := len(queue)
+	interval := time.Minute / time.Duration(channel.RPM)
+	if interval <= 0 {
+		interval = time.Minute / 10
+	}
+	perModelBudget := interval
+	if perModelTimeout > perModelBudget {
+		perModelBudget = perModelTimeout
+	}
+	globalTimeout := time.Duration(totalModels)*perModelBudget + 10*time.Second
+	globalCtx, globalCancel := context.WithTimeout(ctx, globalTimeout)
+	defer globalCancel()
+
+	// 4. 逐项执行
+	protocolStartTime := make(map[string]time.Time)
+	for _, item := range queue {
+		// 检查全局超时
+		if globalCtx.Err() != nil {
+			log.Printf("[CapabilityTest-RoundRobin] 全局超时，终止测试")
+			break
+		}
+
+		// 检查协议早退出
+		if protocolStatus[item.protocol] {
+			// 协议已决，跳过该模型
+			result := results[item.protocol]
+			result.ModelResults[item.index] = ModelTestResult{
+				Model:    item.model,
+				Success:  false,
+				Skipped:  true,
+				TestedAt: time.Now().Format(time.RFC3339),
+			}
+			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+				updateCapabilityJobModelResult(job, item.protocol, item.model, CapabilityModelStatusSkipped, result.ModelResults[item.index])
+			})
+			log.Printf("[CapabilityTest-RoundRobin] 协议 %s 已决，跳过模型 %s", item.protocol, item.model)
+			continue
+		}
+
+		// 记录协议首次测试时间
+		if _, ok := protocolStartTime[item.protocol]; !ok {
+			protocolStartTime[item.protocol] = time.Now()
+		}
+
+		// AcquireSendSlot（限流）
+		if err := GetCapabilityTestDispatcher().AcquireSendSlot(globalCtx, interval); err != nil {
+			log.Printf("[CapabilityTest-RoundRobin] 获取发送槽位失败: %v", err)
+			break
+		}
+
+		// executeModelTest（单模型测试）
+		modelResult := executeModelTest(globalCtx, channel, item.protocol, item.model, perModelTimeout, jobID)
+		result := results[item.protocol]
+		result.ModelResults[item.index] = modelResult
+
+		if modelResult.Success {
+			result.SuccessCount++
+			// 协议首次成功，标记为已决
+			if result.SuccessCount == 1 {
+				protocolStatus[item.protocol] = true
+				result.Success = true
+				result.TestedModel = modelResult.Model
+				result.StreamingSupported = modelResult.StreamingSupported
+				result.Latency = time.Since(protocolStartTime[item.protocol]).Milliseconds()
+				capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+					for i := range job.Tests {
+						if job.Tests[i].Protocol == item.protocol {
+							job.Tests[i].Status = CapabilityProtocolStatusCompleted
+							job.Tests[i].Success = true
+							job.Tests[i].Latency = result.Latency
+							job.Tests[i].StreamingSupported = result.StreamingSupported
+							job.Tests[i].TestedModel = result.TestedModel
+							job.Tests[i].SuccessCount = result.SuccessCount
+							job.Tests[i].Error = nil
+							job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
+							break
+						}
+					}
+				})
+				log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议测试成功 (首个成功模型: %s, 耗时: %dms)",
+					channel.Name, item.protocol, result.TestedModel, result.Latency)
+			}
+		}
+	}
+
+	// 5. 收尾：残留 queued 模型标记 skipped，更新协议状态
+	for protocol, result := range results {
+		models := protocolModels[protocol]
+
+		if protocolStatus[protocol] {
+			// 协议已决，标记残留模型为 skipped
+			for i := range result.ModelResults {
+				if result.ModelResults[i].Model == "" && i < len(models) {
+					result.ModelResults[i] = ModelTestResult{
+						Model:    models[i],
+						Success:  false,
+						Skipped:  true,
+						TestedAt: time.Now().Format(time.RFC3339),
+					}
+					capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+						updateCapabilityJobModelResult(job, protocol, models[i], CapabilityModelStatusSkipped, result.ModelResults[i])
+					})
+				}
+			}
+			continue
+		}
+
+		// 协议未决：回填残留模型为 skipped
+		for i := range result.ModelResults {
+			if result.ModelResults[i].Model == "" && i < len(models) {
+				result.ModelResults[i] = ModelTestResult{
+					Model:    models[i],
+					Success:  false,
+					Skipped:  true,
+					TestedAt: time.Now().Format(time.RFC3339),
+				}
+			}
+		}
+
+		// 判断是否有实际测试过（至少有一个模型被执行）
+		hasTestedModel := false
+		for _, mr := range result.ModelResults {
+			if !mr.Skipped && mr.Model != "" {
+				hasTestedModel = true
 				break
 			}
 		}
-	})
-	log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议测试完成 (成功: %d/%d, 首个成功模型: %s, 总耗时: %dms)",
-		channel.Name, protocol, result.SuccessCount, result.AttemptedModels, result.TestedModel, result.Latency)
-	return result
+
+		// 计算延迟：只有实际开始过测试的协议才计算延迟
+		if startTime, ok := protocolStartTime[protocol]; ok {
+			result.Latency = time.Since(startTime).Milliseconds()
+		}
+
+		if !hasTestedModel {
+			// 协议完全未测试（调度超时导致），标记为 skipped 而非 failed
+			result.Success = false
+			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+				for i := range job.Tests {
+					if job.Tests[i].Protocol == protocol {
+						job.Tests[i].Status = CapabilityProtocolStatusFailed
+						job.Tests[i].Success = false
+						job.Tests[i].Latency = result.Latency
+						job.Tests[i].SuccessCount = 0
+						job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
+						// 标记所有模型为 skipped
+						for j := range job.Tests[i].ModelResults {
+							if job.Tests[i].ModelResults[j].Status == CapabilityModelStatusQueued || job.Tests[i].ModelResults[j].Status == CapabilityModelStatusRunning {
+								job.Tests[i].ModelResults[j].Status = CapabilityModelStatusSkipped
+							}
+						}
+						break
+					}
+				}
+			})
+			log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议未实际测试（调度超时）", channel.Name, protocol)
+		} else {
+			// 协议有实际测试但全部失败
+			result.Success = false
+			errMsg := "all_models_failed"
+			result.Error = &errMsg
+			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+				for i := range job.Tests {
+					if job.Tests[i].Protocol == protocol {
+						job.Tests[i].Status = CapabilityProtocolStatusFailed
+						job.Tests[i].Success = false
+						job.Tests[i].Latency = result.Latency
+						job.Tests[i].SuccessCount = result.SuccessCount
+						job.Tests[i].Error = result.Error
+						job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
+						// 标记残留 queued/running 为 skipped
+						for j := range job.Tests[i].ModelResults {
+							if job.Tests[i].ModelResults[j].Status == CapabilityModelStatusQueued || job.Tests[i].ModelResults[j].Status == CapabilityModelStatusRunning {
+								job.Tests[i].ModelResults[j].Status = CapabilityModelStatusSkipped
+							}
+						}
+						break
+					}
+				}
+			})
+			log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议全部模型测试失败 (尝试: %d, 总耗时: %dms)",
+				channel.Name, protocol, result.AttemptedModels, result.Latency)
+		}
+	}
+
+	// 6. 转换为有序结果
+	orderedResults := make([]ProtocolTestResult, 0, len(protocols))
+	for _, protocol := range protocols {
+		if result, ok := results[protocol]; ok {
+			orderedResults = append(orderedResults, *result)
+		}
+	}
+
+	return orderedResults
 }
 
-func testSingleModel(ctx context.Context, channel *config.UpstreamConfig, protocol, model string, timeout time.Duration, jobID string) ModelTestResult {
+// executeModelTest 单模型测试（不调用 AcquireSendSlot，由编排器负责限流）
+func executeModelTest(ctx context.Context, channel *config.UpstreamConfig, protocol, model string, timeout time.Duration, jobID string) ModelTestResult {
 	startedAt := time.Now()
 	modelResult := ModelTestResult{
 		Model:     model,
@@ -490,24 +611,6 @@ func testSingleModel(ctx context.Context, channel *config.UpstreamConfig, protoc
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	req = req.WithContext(reqCtx)
-
-	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-		updateCapabilityJobModelResult(job, protocol, model, CapabilityModelStatusQueued, modelResult)
-	})
-	interval := time.Minute / time.Duration(channel.RPM)
-	if interval <= 0 {
-		interval = time.Minute / 10
-	}
-	if err := GetCapabilityTestDispatcher().AcquireSendSlot(reqCtx, interval); err != nil {
-		errMsg := classifyError(err, 0, reqCtx)
-		modelResult.Error = &errMsg
-		modelResult.TestedAt = time.Now().Format(time.RFC3339Nano)
-		capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-			updateCapabilityJobModelResult(job, protocol, model, CapabilityModelStatusFailed, modelResult)
-		})
-		log.Printf("[CapabilityTest-Model] 渠道 %s 获取发送槽位失败 (协议: %s, 模型: %s): %s", channel.Name, protocol, model, errMsg)
-		return modelResult
-	}
 
 	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 		updateCapabilityJobModelResult(job, protocol, model, CapabilityModelStatusRunning, modelResult)
@@ -541,6 +644,28 @@ func testSingleModel(ctx context.Context, channel *config.UpstreamConfig, protoc
 	log.Printf("[CapabilityTest-Model] 渠道 %s 的 %s 协议测试失败 (模型: %s, 耗时: %dms): %s",
 		channel.Name, protocol, model, modelResult.Latency, errMsg)
 	return modelResult
+}
+
+// testProtocolCompatibility 并发测试多个协议的兼容性（已废弃，保留用于兼容）
+func testProtocolCompatibility(ctx context.Context, channel *config.UpstreamConfig, protocols []string, timeout time.Duration, jobID string) []ProtocolTestResult {
+	// 已废弃，直接调用新实现
+	return runRoundRobinTests(ctx, channel, protocols, timeout, jobID)
+}
+
+// testSingleProtocol 已废弃，保留用于兼容
+func testSingleProtocol(ctx context.Context, channel *config.UpstreamConfig, protocol string, timeout time.Duration, jobID string) ProtocolTestResult {
+	// 已废弃，直接调用新实现
+	results := runRoundRobinTests(ctx, channel, []string{protocol}, timeout, jobID)
+	if len(results) > 0 {
+		return results[0]
+	}
+	return ProtocolTestResult{Protocol: protocol, TestedAt: time.Now().Format(time.RFC3339)}
+}
+
+// testSingleModel 已废弃，保留用于兼容
+func testSingleModel(ctx context.Context, channel *config.UpstreamConfig, protocol, model string, timeout time.Duration, jobID string) ModelTestResult {
+	// 已废弃，直接调用 executeModelTest
+	return executeModelTest(ctx, channel, protocol, model, timeout, jobID)
 }
 
 func updateCapabilityJobModelResult(job *CapabilityTestJob, protocol, model string, status CapabilityModelStatus, result ModelTestResult) {

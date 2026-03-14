@@ -157,6 +157,9 @@ import {
   mdiTestTube,
   mdiMinusCircle,
   mdiMagnify,
+  mdiSkipNext,
+  mdiTimerSand,
+  mdiProgressClock,
 } from '@mdi/js'
 
 // 图标名称到 SVG path 的映射 (使用 kebab-case)
@@ -329,6 +332,9 @@ const iconMap: Record<string, string> = {
   'test-tube': mdiTestTube,
   'minus-circle': mdiMinusCircle,
   'magnify': mdiMagnify,
+  'skip-next': mdiSkipNext,
+  'timer-sand': mdiTimerSand,
+  'progress-clock': mdiProgressClock,
 }
 
 // 自定义 SVG iconset - 处理 mdi-xxx 字符串格式

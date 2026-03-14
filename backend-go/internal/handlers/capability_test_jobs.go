@@ -37,6 +37,7 @@ const (
 	CapabilityModelStatusRunning CapabilityModelStatus = "running"
 	CapabilityModelStatusSuccess CapabilityModelStatus = "success"
 	CapabilityModelStatusFailed  CapabilityModelStatus = "failed"
+	CapabilityModelStatusSkipped CapabilityModelStatus = "skipped"
 )
 
 type CapabilityTestJobProgress struct {
@@ -45,6 +46,7 @@ type CapabilityTestJobProgress struct {
 	RunningModels   int `json:"runningModels"`
 	SuccessModels   int `json:"successModels"`
 	FailedModels    int `json:"failedModels"`
+	SkippedModels   int `json:"skippedModels"`
 	CompletedModels int `json:"completedModels"`
 }
 
@@ -253,6 +255,9 @@ func recomputeCapabilityJob(job *CapabilityTestJob) {
 			case CapabilityModelStatusFailed:
 				progress.FailedModels++
 				progress.CompletedModels++
+			case CapabilityModelStatusSkipped:
+				progress.SkippedModels++
+				progress.CompletedModels++
 			}
 		}
 	}
@@ -290,6 +295,8 @@ func capabilityProtocolResultsFromResponse(resp CapabilityTestResponse) []Capabi
 			modelStatus := CapabilityModelStatusFailed
 			if modelResult.Success {
 				modelStatus = CapabilityModelStatusSuccess
+			} else if modelResult.Skipped {
+				modelStatus = CapabilityModelStatusSkipped
 			}
 			modelResults = append(modelResults, CapabilityModelJobResult{
 				Model:              modelResult.Model,
