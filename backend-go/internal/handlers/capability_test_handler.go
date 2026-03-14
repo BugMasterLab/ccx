@@ -190,7 +190,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 				CompatibleProtocols: []string{},
 				TotalDuration:       0,
 			}
-			job := createCapabilityJobFromResponse(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout, resp, false, "")
+			job := createCapabilityJobFromResponse(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout, resp, false)
 			capabilityJobs.create(job)
 			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": false})
 			return
@@ -214,7 +214,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 			cached.ChannelName = channel.Name
 			cached.SourceType = channel.ServiceType
 			job, reused := capabilityJobs.getOrCreateByLookupKey(lookupKey, func() *CapabilityTestJob {
-				return createCapabilityJobFromResponse(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout, *cached, true, "")
+				return createCapabilityJobFromResponse(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout, *cached, true)
 			})
 			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": reused})
 			return
@@ -328,10 +328,11 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 }
 
 // runRoundRobinTests 核心编排器，串行按 round-robin 顺序逐个调度
+// 所有模型都会被测试，不会在首次成功后跳过后续模型
 func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, protocols []string, perModelTimeout time.Duration, jobID string) []ProtocolTestResult {
 	// 1. 收集各协议模型列表，初始化 job 状态
 	protocolModels := make(map[string][]string)
-	protocolStatus := make(map[string]bool) // true = 已决（成功或全部失败）
+	protocolTimedOut := make(map[string]bool) // true = 全局超时强制终止
 	results := make(map[string]*ProtocolTestResult)
 
 	for _, protocol := range protocols {
@@ -343,7 +344,7 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 				Error:    &errMsg,
 				TestedAt: time.Now().Format(time.RFC3339),
 			}
-			protocolStatus[protocol] = true
+			protocolTimedOut[protocol] = true // 无模型配置，视为已终止
 			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 				for i := range job.Tests {
 					if job.Tests[i].Protocol == protocol {
@@ -359,7 +360,6 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 		}
 
 		protocolModels[protocol] = models
-		protocolStatus[protocol] = false
 		results[protocol] = &ProtocolTestResult{
 			Protocol:        protocol,
 			TestedAt:        time.Now().Format(time.RFC3339),
@@ -406,30 +406,15 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 	globalCtx, globalCancel := context.WithTimeout(ctx, globalTimeout)
 	defer globalCancel()
 
-	// 4. 逐项执行
+	// 4. 逐项执行（所有模型都测，不早退）
 	protocolStartTime := make(map[string]time.Time)
+	protocolEndTime := make(map[string]time.Time)
 	for _, item := range queue {
 		// 检查全局超时
 		if globalCtx.Err() != nil {
 			log.Printf("[CapabilityTest-RoundRobin] 全局超时，终止测试")
+			protocolTimedOut[item.protocol] = true
 			break
-		}
-
-		// 检查协议早退出
-		if protocolStatus[item.protocol] {
-			// 协议已决，跳过该模型
-			result := results[item.protocol]
-			result.ModelResults[item.index] = ModelTestResult{
-				Model:    item.model,
-				Success:  false,
-				Skipped:  true,
-				TestedAt: time.Now().Format(time.RFC3339),
-			}
-			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-				updateCapabilityJobModelResult(job, item.protocol, item.model, CapabilityModelStatusSkipped, result.ModelResults[item.index])
-			})
-			log.Printf("[CapabilityTest-RoundRobin] 协议 %s 已决，跳过模型 %s", item.protocol, item.model)
-			continue
 		}
 
 		// 记录协议首次测试时间
@@ -447,60 +432,26 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 		modelResult := executeModelTest(globalCtx, channel, item.protocol, item.model, perModelTimeout, jobID)
 		result := results[item.protocol]
 		result.ModelResults[item.index] = modelResult
+		protocolEndTime[item.protocol] = time.Now() // 每次模型完成时更新协议结束时间
 
 		if modelResult.Success {
 			result.SuccessCount++
-			// 协议首次成功，标记为已决
+			// 首个成功模型：记录代表性字段，但继续测其余模型
 			if result.SuccessCount == 1 {
-				protocolStatus[item.protocol] = true
-				result.Success = true
 				result.TestedModel = modelResult.Model
 				result.StreamingSupported = modelResult.StreamingSupported
-				result.Latency = time.Since(protocolStartTime[item.protocol]).Milliseconds()
-				capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-					for i := range job.Tests {
-						if job.Tests[i].Protocol == item.protocol {
-							job.Tests[i].Status = CapabilityProtocolStatusCompleted
-							job.Tests[i].Success = true
-							job.Tests[i].Latency = result.Latency
-							job.Tests[i].StreamingSupported = result.StreamingSupported
-							job.Tests[i].TestedModel = result.TestedModel
-							job.Tests[i].SuccessCount = result.SuccessCount
-							job.Tests[i].Error = nil
-							job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
-							break
-						}
-					}
-				})
-				log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议测试成功 (首个成功模型: %s, 耗时: %dms)",
+				result.Latency = protocolEndTime[item.protocol].Sub(protocolStartTime[item.protocol]).Milliseconds()
+				log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议首个成功模型: %s (耗时: %dms)",
 					channel.Name, item.protocol, result.TestedModel, result.Latency)
 			}
 		}
 	}
 
-	// 5. 收尾：残留 queued 模型标记 skipped，更新协议状态
+	// 5. 收尾：标记残留 queued 模型为 skipped（仅超时时出现），更新协议最终状态
 	for protocol, result := range results {
 		models := protocolModels[protocol]
 
-		if protocolStatus[protocol] {
-			// 协议已决，标记残留模型为 skipped
-			for i := range result.ModelResults {
-				if result.ModelResults[i].Model == "" && i < len(models) {
-					result.ModelResults[i] = ModelTestResult{
-						Model:    models[i],
-						Success:  false,
-						Skipped:  true,
-						TestedAt: time.Now().Format(time.RFC3339),
-					}
-					capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-						updateCapabilityJobModelResult(job, protocol, models[i], CapabilityModelStatusSkipped, result.ModelResults[i])
-					})
-				}
-			}
-			continue
-		}
-
-		// 协议未决：回填残留模型为 skipped
+		// 回填未被调度到的模型（超时导致）为 skipped
 		for i := range result.ModelResults {
 			if result.ModelResults[i].Model == "" && i < len(models) {
 				result.ModelResults[i] = ModelTestResult{
@@ -509,10 +460,22 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 					Skipped:  true,
 					TestedAt: time.Now().Format(time.RFC3339),
 				}
+				capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+					updateCapabilityJobModelResult(job, protocol, models[i], CapabilityModelStatusSkipped, result.ModelResults[i])
+				})
 			}
 		}
 
-		// 判断是否有实际测试过（至少有一个模型被执行）
+		// 计算延迟：用协议的实际开始/结束时间，避免被其他协议的执行时间污染
+		if startTime, ok := protocolStartTime[protocol]; ok {
+			if endTime, ok := protocolEndTime[protocol]; ok {
+				result.Latency = endTime.Sub(startTime).Milliseconds()
+			} else {
+				result.Latency = time.Since(startTime).Milliseconds()
+			}
+		}
+
+		// 判断是否有实际测试过（至少有一个非 skipped 模型）
 		hasTestedModel := false
 		for _, mr := range result.ModelResults {
 			if !mr.Skipped && mr.Model != "" {
@@ -521,13 +484,28 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 			}
 		}
 
-		// 计算延迟：只有实际开始过测试的协议才计算延迟
-		if startTime, ok := protocolStartTime[protocol]; ok {
-			result.Latency = time.Since(startTime).Milliseconds()
-		}
-
-		if !hasTestedModel {
-			// 协议完全未测试（调度超时导致），标记为 skipped 而非 failed
+		if result.SuccessCount > 0 {
+			// 有至少一个成功模型
+			result.Success = true
+			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
+				for i := range job.Tests {
+					if job.Tests[i].Protocol == protocol {
+						job.Tests[i].Status = CapabilityProtocolStatusCompleted
+						job.Tests[i].Success = true
+						job.Tests[i].Latency = result.Latency
+						job.Tests[i].StreamingSupported = result.StreamingSupported
+						job.Tests[i].TestedModel = result.TestedModel
+						job.Tests[i].SuccessCount = result.SuccessCount
+						job.Tests[i].Error = nil
+						job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
+						break
+					}
+				}
+			})
+			log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议测试完成 (成功: %d/%d, 耗时: %dms)",
+				channel.Name, protocol, result.SuccessCount, result.AttemptedModels, result.Latency)
+		} else if !hasTestedModel {
+			// 协议完全未测试（超时）
 			result.Success = false
 			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 				for i := range job.Tests {
@@ -537,7 +515,6 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 						job.Tests[i].Latency = result.Latency
 						job.Tests[i].SuccessCount = 0
 						job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
-						// 标记所有模型为 skipped
 						for j := range job.Tests[i].ModelResults {
 							if job.Tests[i].ModelResults[j].Status == CapabilityModelStatusQueued || job.Tests[i].ModelResults[j].Status == CapabilityModelStatusRunning {
 								job.Tests[i].ModelResults[j].Status = CapabilityModelStatusSkipped
@@ -549,7 +526,7 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 			})
 			log.Printf("[CapabilityTest-Protocol] 渠道 %s 的 %s 协议未实际测试（调度超时）", channel.Name, protocol)
 		} else {
-			// 协议有实际测试但全部失败
+			// 全部模型测试失败
 			result.Success = false
 			errMsg := "all_models_failed"
 			result.Error = &errMsg
@@ -562,7 +539,6 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 						job.Tests[i].SuccessCount = result.SuccessCount
 						job.Tests[i].Error = result.Error
 						job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
-						// 标记残留 queued/running 为 skipped
 						for j := range job.Tests[i].ModelResults {
 							if job.Tests[i].ModelResults[j].Status == CapabilityModelStatusQueued || job.Tests[i].ModelResults[j].Status == CapabilityModelStatusRunning {
 								job.Tests[i].ModelResults[j].Status = CapabilityModelStatusSkipped

@@ -726,8 +726,15 @@ const testChannelCapability = async (channelId: number) => {
   try {
     const startResp: CapabilityTestJobStartResponse = await api.startChannelCapabilityTest(channelStore.activeTab, channelId)
     capabilityTestJobId.value = startResp.jobId
-    const job = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, startResp.jobId)
-    updateCapabilityJob(job)
+
+    // 立即获取初始状态并切换到结果页（所有模型显示 queued）
+    const initial = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, startResp.jobId)
+    updateCapabilityJob(initial)
+
+    // 缓存命中时任务已完成，无需轮询
+    if (initial.status === 'completed' || initial.status === 'failed') {
+      return
+    }
 
     capabilityTestPolling.value = setInterval(async () => {
       if (!capabilityTestJobId.value) return
@@ -737,7 +744,7 @@ const testChannelCapability = async (channelId: number) => {
       } catch (error) {
         console.error('Failed to poll capability test job:', error)
       }
-    }, 2000)
+    }, 1000)
   } catch (error) {
     const message = error instanceof Error ? error.message : t('system.unknown')
     capabilityTestDialogRef.value?.setError(t('toast.capabilityFailed', { message }))

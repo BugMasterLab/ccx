@@ -1,3 +1,18 @@
+## [Unreleased]
+
+### Fixed
+
+- **能力测试 job store 内存泄漏** - 新增定时 GC（每 30 分钟），清理已完成/失败且超过 2 小时的 job，防止长期运行后无限增长
+- **修复缓存命中时的死锁** - `createCapabilityJobFromResponse` 在 `getOrCreateByLookupKey` 持锁期间被调用，内部再次调用 `bindLookupKey` 加同一把锁导致死锁；移除函数内的 `bindLookupKey` 调用，由 `getOrCreateByLookupKey` 统一负责 lookupKey 绑定
+- **缓存命中时 lookupKey 未绑定** - 修复缓存命中分支中 `createCapabilityJobFromResponse` 传空 lookupKey 的问题，同一渠道重复命中缓存时正确复用 job
+- **jobID 极低概率碰撞** - 改用 `crypto/rand` 生成 16 字符随机 hex，消除纳秒级时间戳碰撞风险
+
+### Changed
+
+- **能力测试全量模型扫描** - 移除协议首次成功后跳过后续模型的早退逻辑，所有候选模型均会被逐一测试
+  - 后端：去掉 `protocolStatus` 早退机制，改用 `protocolTimedOut` 仅标记超时强制中断；协议最终状态（completed/failed）在全部模型测完后统一更新
+- **修复协议延迟统计虚高** - 收尾阶段改用每个协议自身的开始/结束时间计算延迟（`protocolEndTime`），避免串行执行时后续协议的耗时被计入先完成的协议
+
 ## [v2.6.35] - 2026-03-14
 
 ### Changed

@@ -1,7 +1,10 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
 	"sort"
 	"strconv"
@@ -101,10 +104,49 @@ type capabilityTestJobStore struct {
 	lookupKey map[string]string
 }
 
-var capabilityJobs = &capabilityTestJobStore{jobs: make(map[string]*CapabilityTestJob), lookupKey: make(map[string]string)}
+var capabilityJobs = newCapabilityTestJobStore()
+
+func newCapabilityTestJobStore() *capabilityTestJobStore {
+	s := &capabilityTestJobStore{
+		jobs:      make(map[string]*CapabilityTestJob),
+		lookupKey: make(map[string]string),
+	}
+	go s.gcLoop()
+	return s
+}
+
+// gcLoop 定期清理已完成且超过 2 小时的 job，防止 job store 无限增长
+func (s *capabilityTestJobStore) gcLoop() {
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.gc()
+	}
+}
+
+func (s *capabilityTestJobStore) gc() {
+	cutoff := time.Now().Add(-2 * time.Hour)
+	s.Lock()
+	defer s.Unlock()
+	for jobID, job := range s.jobs {
+		if job.Status != CapabilityJobStatusCompleted && job.Status != CapabilityJobStatusFailed {
+			continue
+		}
+		t, err := time.Parse(time.RFC3339Nano, job.UpdatedAt)
+		if err != nil || t.Before(cutoff) {
+			delete(s.jobs, jobID)
+		}
+	}
+	log.Printf("[CapabilityTest-GC] job store 清理完成，当前 job 数: %d", len(s.jobs))
+}
 
 func newCapabilityJobID() string {
-	return fmt.Sprintf("cap-%d", time.Now().UnixNano())
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		// 极低概率退化到时间戳
+		return fmt.Sprintf("cap-%d", time.Now().UnixNano())
+	}
+	return "cap-" + hex.EncodeToString(b)
 }
 
 func newCapabilityTestJob(channelID int, channelName, channelKind, sourceType string, protocols []string, timeout time.Duration) *CapabilityTestJob {
@@ -326,7 +368,7 @@ func capabilityProtocolResultsFromResponse(resp CapabilityTestResponse) []Capabi
 	return results
 }
 
-func createCapabilityJobFromResponse(channelID int, channelName, channelKind, sourceType string, protocols []string, timeout time.Duration, resp CapabilityTestResponse, cacheHit bool, lookupKey string) *CapabilityTestJob {
+func createCapabilityJobFromResponse(channelID int, channelName, channelKind, sourceType string, protocols []string, timeout time.Duration, resp CapabilityTestResponse, cacheHit bool) *CapabilityTestJob {
 	now := time.Now().Format(time.RFC3339Nano)
 	job := &CapabilityTestJob{
 		JobID:               newCapabilityJobID(),
@@ -346,9 +388,6 @@ func createCapabilityJobFromResponse(channelID int, channelName, channelKind, so
 		TimeoutMilliseconds: int(timeout / time.Millisecond),
 	}
 	recomputeCapabilityJob(job)
-	if lookupKey != "" {
-		capabilityJobs.bindLookupKey(lookupKey, job.JobID)
-	}
 	return job
 }
 
