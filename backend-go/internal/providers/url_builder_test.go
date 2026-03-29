@@ -52,6 +52,7 @@ func TestOpenAIURL_SkipVersionWithHash(t *testing.T) {
 		{"with_v1", "https://api.openai.com/v1", "https://api.openai.com/v1/chat/completions"},
 		{"hash_skip", "https://api.example.com#", "https://api.example.com/chat/completions"},
 		{"hash_with_slash", "https://api.example.com/#", "https://api.example.com/chat/completions"},
+		{"hash_with_path", "https://core.blink.new/api/v1/ai#", "https://core.blink.new/api/v1/ai/chat/completions"},
 		{"trailing_slash", "https://api.example.com/", "https://api.example.com/v1/chat/completions"},
 	}
 
@@ -112,6 +113,7 @@ func TestBuildTargetURL_SkipVersionWithHash(t *testing.T) {
 		{"hash_skip", "https://api.example.com#", "responses", "https://api.example.com/responses"},
 		{"hash_skip_claude", "https://api.example.com#", "claude", "https://api.example.com/messages"},
 		{"hash_skip_openai", "https://api.example.com#", "openai", "https://api.example.com/chat/completions"},
+		{"hash_with_path_openai", "https://core.blink.new/api/v1/ai#", "openai", "https://core.blink.new/api/v1/ai/chat/completions"},
 
 		// # 结尾 + 末尾斜杠：正确处理
 		{"hash_with_slash", "https://api.example.com/#", "responses", "https://api.example.com/responses"},

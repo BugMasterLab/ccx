@@ -25,7 +25,7 @@ describe('buildChannelPayload', () => {
     })
 
     expect(result.name).toBe('test-channel')
-    expect(result.baseUrl).toBe('https://api.example.com/v1')
+    expect(result.baseUrl).toBe('https://api.example.com/v1#')
     expect(result.website).toBe('https://platform.openai.com')
     expect(result.description).toBe('desc')
     expect(result.apiKeys).toEqual(['sk-1', 'sk-2'])
@@ -58,8 +58,8 @@ describe('buildChannelPayload', () => {
       supportedModels: []
     })
 
-    expect(result.baseUrl).toBe('https://api.example.com/v1')
-    expect(result.baseUrls).toEqual(['https://api.example.com/v1', 'https://backup.example.com/v1'])
+    expect(result.baseUrl).toBe('https://api.example.com/v1#')
+    expect(result.baseUrls).toEqual(['https://api.example.com/v1#', 'https://backup.example.com/v1'])
   })
 
   it('应清空 claude 渠道不支持的高级参数', () => {
