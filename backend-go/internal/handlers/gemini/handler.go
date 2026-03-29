@@ -327,6 +327,7 @@ func buildProviderRequest(
 	model string,
 	isStream bool,
 ) (*http.Request, error) {
+	baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "#")
 	// 应用模型映射
 	mappedModel := config.RedirectModel(model, upstream)
 

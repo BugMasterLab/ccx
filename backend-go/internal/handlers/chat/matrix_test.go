@@ -23,6 +23,7 @@ func TestChatEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 		{"chat_to_claude", "claude", "https://api.example.com/v1/messages", "messages"},
 		{"chat_to_gemini", "gemini", "https://api.example.com/v1/chat/completions", "messages"},
 		{"chat_to_responses", "responses", "https://api.example.com/v1/chat/completions", "messages"},
+		{"chat_hash_baseurl", "openai", "https://core.blink.new/api/v1/ai/chat/completions", "messages"},
 	}
 
 	bodyBytes := []byte(`{"model":"gpt-5","messages":[{"role":"user","content":"hi"}]}`)
@@ -33,6 +34,9 @@ func TestChatEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.Background())
 
 			upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: tt.serviceType}
+			if tt.name == "chat_hash_baseurl" {
+				upstream.BaseURL = "https://core.blink.new/api/v1/ai#"
+			}
 			req, err := buildProviderRequest(c, upstream, upstream.BaseURL, "sk-test", bodyBytes, "gpt-5", false)
 			if err != nil {
 				t.Fatalf("buildProviderRequest() err = %v", err)

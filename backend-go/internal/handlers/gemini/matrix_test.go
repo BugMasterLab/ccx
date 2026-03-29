@@ -31,6 +31,7 @@ func TestGeminiEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 		{"gemini_to_claude", "claude", "https://api.example.com/v1/messages", "messages"},
 		{"gemini_to_openai", "openai", "https://api.example.com/v1/chat/completions", "messages"},
 		{"gemini_to_responses", "responses", "https://api.example.com/v1/responses", "input"},
+		{"gemini_hash_baseurl_openai", "openai", "https://core.blink.new/api/v1/ai/v1/chat/completions", "messages"},
 	}
 
 	for _, tt := range tests {
@@ -40,6 +41,9 @@ func TestGeminiEntry_RequestMatrix_AllFourUpstreams(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-2.0-flash:generateContent", nil).WithContext(context.Background())
 
 			upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: tt.serviceType}
+			if tt.name == "gemini_hash_baseurl_openai" {
+				upstream.BaseURL = "https://core.blink.new/api/v1/ai#"
+			}
 			req, err := buildProviderRequest(c, upstream, upstream.BaseURL, "test-key", geminiReq, "gemini-2.0-flash", false)
 			if err != nil {
 				t.Fatalf("buildProviderRequest() err = %v", err)

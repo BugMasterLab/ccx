@@ -252,6 +252,8 @@ func buildProviderRequest(
 	model string,
 	isStream bool,
 ) (*http.Request, error) {
+	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
+	baseURL = strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "#")
 	// 应用模型映射
 	mappedModel := config.RedirectModel(model, upstream)
 
@@ -280,7 +282,11 @@ func buildProviderRequest(
 		if err != nil {
 			return nil, err
 		}
-		url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
+		if skipVersionPrefix {
+			url = fmt.Sprintf("%s/chat/completions", strings.TrimRight(baseURL, "/"))
+		} else {
+			url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
+		}
 
 	case "claude":
 		// Claude 上游：转换 OpenAI Chat 格式为 Claude Messages 格式
@@ -292,7 +298,11 @@ func buildProviderRequest(
 		if err != nil {
 			return nil, err
 		}
-		url = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
+		if skipVersionPrefix {
+			url = fmt.Sprintf("%s/messages", strings.TrimRight(baseURL, "/"))
+		} else {
+			url = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
+		}
 
 	case "gemini":
 		// Gemini 上游：透传为 OpenAI Chat 格式（大部分 Gemini 兼容端点支持 OpenAI 格式）
@@ -310,7 +320,11 @@ func buildProviderRequest(
 		} else {
 			requestBody = bodyBytes
 		}
-		url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
+		if skipVersionPrefix {
+			url = fmt.Sprintf("%s/chat/completions", strings.TrimRight(baseURL, "/"))
+		} else {
+			url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
+		}
 
 	default:
 		// 默认当作 OpenAI 兼容处理
@@ -328,7 +342,11 @@ func buildProviderRequest(
 		} else {
 			requestBody = bodyBytes
 		}
-		url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
+		if skipVersionPrefix {
+			url = fmt.Sprintf("%s/chat/completions", strings.TrimRight(baseURL, "/"))
+		} else {
+			url = fmt.Sprintf("%s/v1/chat/completions", strings.TrimRight(baseURL, "/"))
+		}
 	}
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), "POST", url, bytes.NewReader(requestBody))
