@@ -511,9 +511,6 @@ const addCustomModel = () => {
 const startSelectedTest = () => {
   emit('startTest', selectedModels.value)
 }
-    cancelling.value = false
-  }
-})
 
 watch(() => props.capabilityJob?.jobId ?? '', (nextJobId, prevJobId) => {
   if (nextJobId !== prevJobId) {
