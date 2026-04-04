@@ -633,9 +633,15 @@ export class ApiService {
 
   // ============== 能力测试 API ==============
 
-  async startChannelCapabilityTest(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number, previousJobId?: string, models?: string[]): Promise<CapabilityTestJobStartResponse> {
+  async startChannelCapabilityTest(
+    type: 'messages' | 'chat' | 'gemini' | 'responses',
+    id: number,
+    previousJobId?: string,
+    models?: string[],
+    targetProtocols?: Array<'messages' | 'chat' | 'gemini' | 'responses'>
+  ): Promise<CapabilityTestJobStartResponse> {
     const body: { targetProtocols: string[]; timeout: number; previousJobId?: string; models?: string[] } = {
-      targetProtocols: ['messages', 'chat', 'gemini', 'responses'],
+      targetProtocols: targetProtocols && targetProtocols.length > 0 ? targetProtocols : ['messages', 'chat', 'gemini', 'responses'],
       timeout: 10000
     }
     if (previousJobId) {
@@ -688,6 +694,14 @@ export class ApiService {
       method: 'POST',
       body: JSON.stringify(channel)
     })
+  }
+
+  async pingResponsesChannel(id: number): Promise<PingResult> {
+    return this.request(`/responses/ping/${id}`)
+  }
+
+  async pingAllResponsesChannels(): Promise<Array<{ id: number; name: string; latency: number; status: string }>> {
+    return this.request('/responses/ping')
   }
 
   async updateResponsesChannel(id: number, channel: Partial<Channel>): Promise<void> {

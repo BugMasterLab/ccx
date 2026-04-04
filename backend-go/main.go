@@ -200,6 +200,8 @@ func main() {
 		apiGroup.GET("/responses/channels/metrics/history", handlers.GetChannelMetricsHistory(responsesMetricsManager, cfgManager, true))
 		apiGroup.GET("/responses/channels/:id/keys/metrics/history", handlers.GetChannelKeyMetricsHistory(responsesMetricsManager, cfgManager, true))
 		apiGroup.GET("/responses/global/stats/history", handlers.GetGlobalStatsHistory(responsesMetricsManager))
+		apiGroup.GET("/responses/ping/:id", responses.PingChannel(cfgManager))
+		apiGroup.GET("/responses/ping", responses.PingAllChannels(cfgManager))
 		apiGroup.POST("/responses/channels/:id/models", responses.GetChannelModels(cfgManager))
 		apiGroup.GET("/responses/models/stats/history", handlers.GetModelStatsHistory(responsesMetricsManager))
 		apiGroup.GET("/responses/channels/:id/logs", handlers.GetChannelLogs(channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses)))

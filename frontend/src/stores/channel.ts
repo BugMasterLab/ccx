@@ -363,7 +363,9 @@ export const useChannelStore = defineStore('channel', () => {
       ? await api.pingChatChannel(channelId)
       : activeTab.value === 'gemini'
         ? await api.pingGeminiChannel(channelId)
-        : await api.pingChannel(channelId)
+        : activeTab.value === 'responses'
+          ? await api.pingResponsesChannel(channelId)
+          : await api.pingChannel(channelId)
 
     const data = activeTab.value === 'chat'
       ? chatChannelsData.value
@@ -392,7 +394,9 @@ export const useChannelStore = defineStore('channel', () => {
         ? await api.pingAllChatChannels()
         : activeTab.value === 'gemini'
           ? await api.pingAllGeminiChannels()
-          : await api.pingAllChannels()
+          : activeTab.value === 'responses'
+            ? await api.pingAllResponsesChannels()
+            : await api.pingAllChannels()
 
       const data = activeTab.value === 'chat'
         ? chatChannelsData.value

@@ -26,6 +26,7 @@ export type MessageKey =
   | 'app.actions.addChannel'
   | 'app.actions.ping'
   | 'app.actions.refresh'
+  | 'app.actions.batchTest'
   | 'app.dialog.addApiKeyTitle'
   | 'app.dialog.apiKeyLabel'
   | 'app.dialog.apiKeyPlaceholder'
@@ -86,6 +87,25 @@ export type MessageKey =
   | 'capability.cancelling'
   | 'capability.cancelled'
   | 'capability.retryModel'
+  | 'batchTest.title'
+  | 'batchTest.selectChannels'
+  | 'batchTest.selectionSummary'
+  | 'batchTest.selectProtocols'
+  | 'batchTest.selectModels'
+  | 'batchTest.noModelsHint'
+  | 'batchTest.batchLatency'
+  | 'batchTest.batchCapability'
+  | 'batchTest.latencyLabel'
+  | 'batchTest.capabilityLabel'
+  | 'batchTest.results'
+  | 'batchTest.empty'
+  | 'batchTest.notTested'
+  | 'batchTest.idle'
+  | 'batchTest.noProtocolSelected'
+  | 'batchTest.creatingJob'
+  | 'batchTest.batchCapabilityFailed'
+  | 'batchTest.cancelAll'
+  | 'batchTest.cancelChannel'
   | 'orchestration.title'
   | 'orchestration.multiChannel'
   | 'orchestration.singleChannel'
@@ -372,6 +392,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'app.actions.addChannel': 'Add channel',
     'app.actions.ping': 'Test latency',
     'app.actions.refresh': 'Refresh',
+    'app.actions.batchTest': 'Batch test',
     'app.dialog.addApiKeyTitle': 'Add API key',
     'app.dialog.apiKeyLabel': 'API key',
     'app.dialog.apiKeyPlaceholder': 'Enter API key',
@@ -432,6 +453,25 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancelling': 'Cancelling...',
     'capability.cancelled': 'Cancelled',
     'capability.retryModel': 'Retry this model',
+    'batchTest.title': 'Batch channel test',
+    'batchTest.selectChannels': 'Select channels',
+    'batchTest.selectionSummary': '{selected}/{total} selected',
+    'batchTest.selectProtocols': 'Select protocols',
+    'batchTest.selectModels': 'Select models',
+    'batchTest.noModelsHint': 'No models fetched yet. You can still type models manually.',
+    'batchTest.batchLatency': 'Batch latency',
+    'batchTest.batchCapability': 'Batch capability',
+    'batchTest.latencyLabel': 'Latency: ',
+    'batchTest.capabilityLabel': 'Capability: ',
+    'batchTest.results': 'Results',
+    'batchTest.empty': 'Select channels and run latency or capability tests in one click.',
+    'batchTest.notTested': 'Not tested',
+    'batchTest.idle': 'Idle',
+    'batchTest.noProtocolSelected': 'Select at least one protocol to test.',
+    'batchTest.creatingJob': 'Creating job...',
+    'batchTest.batchCapabilityFailed': 'Batch capability test failed: {message}',
+    'batchTest.cancelAll': 'Cancel all',
+    'batchTest.cancelChannel': 'Cancel',
     'orchestration.title': 'Channel orchestration',
     'orchestration.multiChannel': 'Multi-channel mode',
     'orchestration.singleChannel': 'Single-channel mode',
@@ -717,6 +757,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'app.actions.addChannel': 'Tambah channel',
     'app.actions.ping': 'Tes latensi',
     'app.actions.refresh': 'Refresh',
+    'app.actions.batchTest': 'Tes massal',
     'app.dialog.addApiKeyTitle': 'Tambah API key',
     'app.dialog.apiKeyLabel': 'API key',
     'app.dialog.apiKeyPlaceholder': 'Masukkan API key',
@@ -777,6 +818,25 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancelling': 'Membatalkan...',
     'capability.cancelled': 'Dibatalkan',
     'capability.retryModel': 'Coba ulang model ini',
+    'batchTest.title': 'Tes channel massal',
+    'batchTest.selectChannels': 'Pilih channel',
+    'batchTest.selectionSummary': '{selected}/{total} dipilih',
+    'batchTest.selectProtocols': 'Pilih protokol',
+    'batchTest.selectModels': 'Pilih model',
+    'batchTest.noModelsHint': 'Belum ada model yang didapat. Anda tetap bisa mengetik model secara manual.',
+    'batchTest.batchLatency': 'Tes latensi massal',
+    'batchTest.batchCapability': 'Tes kemampuan massal',
+    'batchTest.latencyLabel': 'Latensi: ',
+    'batchTest.capabilityLabel': 'Kemampuan: ',
+    'batchTest.results': 'Hasil',
+    'batchTest.empty': 'Pilih channel lalu jalankan tes latensi atau kemampuan sekali klik.',
+    'batchTest.notTested': 'Belum diuji',
+    'batchTest.idle': 'Siap',
+    'batchTest.noProtocolSelected': 'Pilih minimal satu protokol untuk diuji.',
+    'batchTest.creatingJob': 'Membuat tugas...',
+    'batchTest.batchCapabilityFailed': 'Tes kemampuan massal gagal: {message}',
+    'batchTest.cancelAll': 'Batalkan semua',
+    'batchTest.cancelChannel': 'Batalkan',
     'orchestration.title': 'Orkestrasi channel',
     'orchestration.multiChannel': 'Mode multi-channel',
     'orchestration.singleChannel': 'Mode single-channel',
@@ -1062,6 +1122,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'app.actions.addChannel': '添加渠道',
     'app.actions.ping': '测试延迟',
     'app.actions.refresh': '刷新',
+    'app.actions.batchTest': '????',
     'app.dialog.addApiKeyTitle': '添加API密钥',
     'app.dialog.apiKeyLabel': 'API密钥',
     'app.dialog.apiKeyPlaceholder': '输入API密钥',
@@ -1122,6 +1183,25 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancelling': '取消中...',
     'capability.cancelled': '已取消',
     'capability.retryModel': '重测此模型',
+    'batchTest.title': '??????',
+    'batchTest.selectChannels': '????',
+    'batchTest.selectionSummary': '?? {selected}/{total}',
+    'batchTest.selectProtocols': '????',
+    'batchTest.selectModels': '????',
+    'batchTest.noModelsHint': '???????????????????',
+    'batchTest.batchLatency': '??????',
+    'batchTest.batchCapability': '??????',
+    'batchTest.latencyLabel': '???',
+    'batchTest.capabilityLabel': '???',
+    'batchTest.results': '????',
+    'batchTest.empty': '????????????????????',
+    'batchTest.notTested': '???',
+    'batchTest.idle': '???',
+    'batchTest.noProtocolSelected': '??????????????',
+    'batchTest.creatingJob': '??????...',
+    'batchTest.batchCapabilityFailed': '????????: {message}',
+    'batchTest.cancelAll': '????',
+    'batchTest.cancelChannel': '??',
     'orchestration.title': '渠道编排',
     'orchestration.multiChannel': '多渠道模式',
     'orchestration.singleChannel': '单渠道模式',

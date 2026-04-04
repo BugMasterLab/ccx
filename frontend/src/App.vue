@@ -297,6 +297,17 @@
               {{ t('app.actions.ping') }}
             </v-btn>
 
+            <v-btn
+              color="success"
+              size="large"
+              prepend-icon="mdi-flask-outline"
+              variant="tonal"
+              class="action-btn"
+              @click="showBatchChannelTestDialog = true"
+            >
+              {{ t('app.actions.batchTest') }}
+            </v-btn>
+
             <v-btn size="large" prepend-icon="mdi-refresh" variant="text" class="action-btn" @click="refreshChannels">
               {{ t('app.actions.refresh') }}
             </v-btn>
@@ -385,6 +396,13 @@
       @start-test="handleStartCapabilityTest"
     />
 
+    <BatchChannelTestDialog
+      v-model="showBatchChannelTestDialog"
+      :channels="channelStore.currentChannelsData.channels ?? []"
+      :channel-type="channelStore.activeTab"
+      @latency-updated="refreshChannels"
+    />
+
     <!-- 添加API密钥对话框 -->
     <v-dialog v-model="dialogStore.showAddKeyModal" max-width="500">
       <v-card rounded="lg">
@@ -430,7 +448,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent, nextTick } from 'vue'
 import { useTheme } from 'vuetify'
 import { api, fetchHealth, ApiError, type Channel, type CapabilityTestJob, type CapabilityTestJobStartResponse } from './services/api'
 import { versionService } from './services/version'
@@ -442,6 +460,7 @@ import { useSystemStore } from './stores/system'
 import { useI18n } from './i18n'
 import type { SupportedLocale } from './i18n'
 import AddChannelModal from './components/AddChannelModal.vue'
+import BatchChannelTestDialog from './components/BatchChannelTestDialog.vue'
 import CapabilityTestDialog from './components/CapabilityTestDialog.vue'
 // 异步加载图表组件，减少首屏 JS 体积
 const GlobalStatsChart = defineAsyncComponent(() => import('./components/GlobalStatsChart.vue'))
@@ -689,6 +708,7 @@ const pingChannel = async (channelId: number) => {
 // ============== 能力测试 ==============
 
 const showCapabilityTestDialog = ref(false)
+const showBatchChannelTestDialog = ref(false)
 const capabilityTestChannelName = ref('')
 const capabilityTestChannelId = ref(0)
 const capabilityTestDialogRef = ref<InstanceType<typeof CapabilityTestDialog> | null>(null)
@@ -700,13 +720,6 @@ const capabilityTestPreviousJobId = ref('') // 记录上一次的 jobId，用于
 watch(showCapabilityTestDialog, (open) => {
   if (!open) {
     stopCapabilityTestPolling()
-  }
-})
-
-// 关闭编辑渠道弹窗时，同时关闭能力测试弹窗
-watch(() => dialogStore.showAddChannelModal, (open) => {
-  if (!open && showCapabilityTestDialog.value) {
-    showCapabilityTestDialog.value = false
   }
 })
 
@@ -728,6 +741,11 @@ const testChannelCapability = async (channelId: number) => {
   const channel = channelStore.currentChannelsData.channels?.find(ch => ch.index === channelId)
   capabilityTestChannelName.value = channel?.name || t('capability.channelFallback', { id: channelId })
   capabilityTestChannelId.value = channelId
+
+  if (dialogStore.showAddChannelModal) {
+    dialogStore.closeAddChannelModal()
+    await nextTick()
+  }
 
   // 打开对话框，进入模型选择阶段（不立即开始测试）
   showCapabilityTestDialog.value = true

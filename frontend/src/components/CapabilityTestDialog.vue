@@ -509,6 +509,7 @@ const addCustomModel = () => {
 }
 
 const startSelectedTest = () => {
+  modelSelectionPhase.value = false
   emit('startTest', selectedModels.value)
 }
 

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
@@ -29,31 +30,31 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			priority := config.GetChannelPriority(&up, i)
 
 			upstreams[i] = gin.H{
-				"index":              i,
-				"name":               up.Name,
-				"serviceType":        up.ServiceType,
-				"baseUrl":            up.BaseURL,
-				"baseUrls":           up.BaseURLs,
-				"apiKeys":            up.APIKeys,
-				"description":        up.Description,
-				"website":            up.Website,
-				"insecureSkipVerify": up.InsecureSkipVerify,
-				"modelMapping":       up.ModelMapping,
-				"reasoningMapping":   up.ReasoningMapping,
-				"textVerbosity":      up.TextVerbosity,
-				"fastMode":           up.FastMode,
-				"latency":            nil,
-				"status":             status,
-				"priority":           priority,
-				"promotionUntil":     up.PromotionUntil,
-				"lowQuality":         up.LowQuality,
-				"rpm":                up.RPM,
-				"customHeaders":          up.CustomHeaders,
-				"proxyUrl":               up.ProxyURL,
-				"supportedModels":        up.SupportedModels,
-				"routePrefix":            up.RoutePrefix,
-				"disabledApiKeys":        up.DisabledAPIKeys,
-				"autoBlacklistBalance":   up.IsAutoBlacklistBalanceEnabled(),
+				"index":                i,
+				"name":                 up.Name,
+				"serviceType":          up.ServiceType,
+				"baseUrl":              up.BaseURL,
+				"baseUrls":             up.BaseURLs,
+				"apiKeys":              up.APIKeys,
+				"description":          up.Description,
+				"website":              up.Website,
+				"insecureSkipVerify":   up.InsecureSkipVerify,
+				"modelMapping":         up.ModelMapping,
+				"reasoningMapping":     up.ReasoningMapping,
+				"textVerbosity":        up.TextVerbosity,
+				"fastMode":             up.FastMode,
+				"latency":              nil,
+				"status":               status,
+				"priority":             priority,
+				"promotionUntil":       up.PromotionUntil,
+				"lowQuality":           up.LowQuality,
+				"rpm":                  up.RPM,
+				"customHeaders":        up.CustomHeaders,
+				"proxyUrl":             up.ProxyURL,
+				"supportedModels":      up.SupportedModels,
+				"routePrefix":          up.RoutePrefix,
+				"disabledApiKeys":      up.DisabledAPIKeys,
+				"autoBlacklistBalance": up.IsAutoBlacklistBalanceEnabled(),
 			}
 		}
 
@@ -255,6 +256,110 @@ func ReorderChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			"success": true,
 			"message": "Responses 渠道优先级已更新",
 		})
+	}
+}
+
+// PingChannel 测试单个 Responses 渠道连通性
+func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
+			return
+		}
+
+		cfg := cfgManager.GetConfig()
+		if id < 0 || id >= len(cfg.ResponsesUpstream) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
+			return
+		}
+
+		upstream := cfg.ResponsesUpstream[id]
+		result := pingResponsesUpstream(&upstream)
+		c.JSON(http.StatusOK, result)
+	}
+}
+
+// PingAllChannels 测试全部 Responses 渠道连通性
+func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cfg := cfgManager.GetConfig()
+		results := make([]gin.H, len(cfg.ResponsesUpstream))
+		var wg sync.WaitGroup
+
+		for i, upstream := range cfg.ResponsesUpstream {
+			wg.Add(1)
+			go func(index int, up config.UpstreamConfig) {
+				defer wg.Done()
+				result := pingResponsesUpstream(&up)
+				result["id"] = index
+				result["name"] = up.Name
+				results[index] = result
+			}(i, upstream)
+		}
+
+		wg.Wait()
+		c.JSON(http.StatusOK, results)
+	}
+}
+
+func pingResponsesUpstream(upstream *config.UpstreamConfig) gin.H {
+	baseURL := upstream.GetEffectiveBaseURL()
+	if baseURL == "" {
+		return gin.H{
+			"success": false,
+			"error":   "No base URL configured",
+			"latency": 0,
+			"status":  "error",
+		}
+	}
+
+	client := httpclient.GetManager().GetStandardClient(10*time.Second, upstream.InsecureSkipVerify, upstream.ProxyURL)
+
+	var (
+		testURL string
+		req     *http.Request
+	)
+	switch upstream.ServiceType {
+	case "claude":
+		testURL = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
+		req, _ = http.NewRequest("OPTIONS", testURL, nil)
+		if len(upstream.APIKeys) > 0 {
+			utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
+			req.Header.Set("anthropic-version", "2023-06-01")
+		}
+	case "gemini":
+		testURL = fmt.Sprintf("%s/v1beta/models", strings.TrimRight(baseURL, "/"))
+		req, _ = http.NewRequest("GET", testURL, nil)
+		if len(upstream.APIKeys) > 0 {
+			req.Header.Set("x-goog-api-key", upstream.APIKeys[0])
+		}
+	default:
+		testURL = fmt.Sprintf("%s/v1/models", strings.TrimRight(baseURL, "/"))
+		req, _ = http.NewRequest("GET", testURL, nil)
+		if len(upstream.APIKeys) > 0 {
+			utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
+		}
+	}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	latency := time.Since(start).Milliseconds()
+	if err != nil {
+		return gin.H{
+			"success": false,
+			"error":   err.Error(),
+			"latency": latency,
+			"status":  "error",
+		}
+	}
+	defer resp.Body.Close()
+
+	return gin.H{
+		"success":    resp.StatusCode >= 200 && resp.StatusCode < 400,
+		"statusCode": resp.StatusCode,
+		"latency":    latency,
+		"status":     "healthy",
 	}
 }
 
