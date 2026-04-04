@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/BenedictKing/ccx/internal/session"
 	"github.com/BenedictKing/ccx/internal/types"
@@ -448,7 +449,7 @@ func generateResponseID() string {
 
 // getCurrentTimestamp 获取当前时间戳（毫秒）
 func getCurrentTimestamp() int64 {
-	return 0 // 占位符，实际应使用 time.Now().UnixNano() / 1e6
+	return time.Now().UnixNano() / int64(time.Millisecond)
 }
 
 // ExtractTextFromResponses 从 Responses 消息中提取纯文本（用于 OpenAI Completions）

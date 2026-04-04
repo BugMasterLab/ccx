@@ -166,10 +166,11 @@
                           size="x-small"
                           :color="getSuccessRateColor(get15mStats(element.index)?.successRate)"
                           variant="tonal"
+                          class="metrics-chip success-chip"
                         >
                           {{ get15mStats(element.index)?.successRate?.toFixed(0) }}%
                         </v-chip>
-                        <span class="text-caption text-medium-emphasis ml-2 mr-1">
+                        <span class="request-summary ml-2 mr-1">
                           {{ get15mStats(element.index)?.requestCount }} {{ t('orchestration.requests') }}
                         </span>
                         <v-chip
@@ -177,7 +178,7 @@
                           size="x-small"
                           :color="getCacheHitRateColor(get15mStats(element.index)?.cacheHitRate)"
                           variant="tonal"
-                          class="ml-1"
+                          class="ml-1 metrics-chip cache-chip"
                         >
                           {{ t('orchestration.cache') }} {{ get15mStats(element.index)?.cacheHitRate?.toFixed(0) }}%
                         </v-chip>
@@ -1497,7 +1498,16 @@ defineExpose({
 /* Grid content container */
 .channel-row-content {
   display: grid;
-  grid-template-columns: 28px 28px minmax(72px, auto) minmax(0, 1fr) auto 50px 50px 50px auto;
+  grid-template-columns:
+    28px
+    28px
+    minmax(72px, auto)
+    minmax(0, 1fr)
+    minmax(168px, auto)
+    minmax(96px, auto)
+    minmax(64px, auto)
+    minmax(68px, auto)
+    auto;
   align-items: center;
   gap: 6px;
   position: relative;
@@ -1679,6 +1689,8 @@ defineExpose({
   gap: 8px;
   flex-wrap: nowrap;
   white-space: nowrap;
+  justify-content: flex-end;
+  min-width: 168px;
 }
 
 .channel-latency {
@@ -1691,18 +1703,26 @@ defineExpose({
 .channel-rpm-tpm {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  min-width: 60px;
-  margin-left: 8px;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 92px;
+  margin-left: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(var(--v-theme-surface-variant), 0.28);
 }
 
 .rpm-tpm-values {
   display: flex;
   align-items: baseline;
-  gap: 2px;
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(var(--v-theme-on-surface), 0.6);
+  justify-content: flex-end;
+  gap: 4px;
+  width: 100%;
+  font-size: 15px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: rgba(var(--v-theme-on-surface), 0.82);
+  font-variant-numeric: tabular-nums;
 }
 
 .rpm-tpm-values .rpm-value.has-data,
@@ -1711,18 +1731,22 @@ defineExpose({
 }
 
 .rpm-tpm-separator {
-  color: rgba(var(--v-theme-on-surface), 0.3);
-  font-weight: 400;
+  color: rgba(var(--v-theme-on-surface), 0.55);
+  font-weight: 700;
 }
 
 .rpm-tpm-labels {
   display: flex;
   align-items: center;
-  gap: 2px;
-  font-size: 9px;
-  color: rgba(var(--v-theme-on-surface), 0.5);
+  justify-content: flex-end;
+  gap: 4px;
+  width: 100%;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(var(--v-theme-on-surface), 0.72);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
 }
 
 .channel-keys {
@@ -1837,7 +1861,16 @@ defineExpose({
 /* Responsive adjustments */
 @media (max-width: 1400px) {
   .channel-row-content {
-    grid-template-columns: 28px 28px minmax(64px, auto) minmax(0, 1fr) auto 45px 45px 45px auto;
+    grid-template-columns:
+      28px
+      28px
+      minmax(64px, auto)
+      minmax(0, 1fr)
+      minmax(152px, auto)
+      minmax(88px, auto)
+      minmax(60px, auto)
+      minmax(64px, auto)
+      auto;
     gap: 5px;
   }
   .channel-row {
@@ -1847,7 +1880,16 @@ defineExpose({
 
 @media (max-width: 1200px) {
   .channel-row-content {
-    grid-template-columns: 26px 26px minmax(60px, auto) minmax(0, 1fr) auto 40px 40px 40px auto;
+    grid-template-columns:
+      26px
+      26px
+      minmax(60px, auto)
+      minmax(0, 1fr)
+      minmax(136px, auto)
+      minmax(78px, auto)
+      minmax(56px, auto)
+      minmax(60px, auto)
+      auto;
     gap: 4px;
   }
   .channel-row {
@@ -1865,7 +1907,16 @@ defineExpose({
 
 @media (max-width: 960px) {
   .channel-row-content {
-    grid-template-columns: 26px 26px minmax(56px, auto) minmax(0, 1fr) auto 38px 38px 38px auto;
+    grid-template-columns:
+      26px
+      26px
+      minmax(56px, auto)
+      minmax(0, 1fr)
+      minmax(124px, auto)
+      minmax(72px, auto)
+      minmax(52px, auto)
+      minmax(56px, auto)
+      auto;
     gap: 4px;
   }
   .channel-row {
@@ -1912,6 +1963,22 @@ defineExpose({
 /* Metrics display styles */
 .metrics-display {
   cursor: help;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.metrics-chip {
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+
+.request-summary {
+  font-size: 12px;
+  font-weight: 700;
+  color: rgba(var(--v-theme-on-surface), 0.88);
+  white-space: nowrap;
 }
 
 /* Metrics tooltip styles */

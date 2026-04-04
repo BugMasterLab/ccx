@@ -50,6 +50,7 @@ func Handler(
 
 		// 预处理：规范化 metadata.user_id（兼容 Claude Code v2.1.78+ JSON 对象格式）
 		bodyBytes = common.NormalizeMetadataUserID(bodyBytes)
+		c.Set("requestBodyBytes", bodyBytes)
 
 		// 解析 Responses 请求
 		var responsesReq types.ResponsesRequest
@@ -326,11 +327,12 @@ func handleSuccess(
 				sessionManager.AppendMessage(sess.ID, item, responsesResp.Usage.TotalTokens)
 			}
 
+			previousResponseID := sess.LastResponseID
 			sessionManager.UpdateLastResponseID(sess.ID, responsesResp.ID)
 			sessionManager.RecordResponseMapping(responsesResp.ID, sess.ID)
 
-			if sess.LastResponseID != "" {
-				responsesResp.PreviousID = sess.LastResponseID
+			if previousResponseID != "" {
+				responsesResp.PreviousID = previousResponseID
 			}
 		}
 	}

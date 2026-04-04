@@ -98,7 +98,7 @@ export const useChannelStore = defineStore('channel', () => {
   // 自动刷新定时器（串行 setTimeout，避免重入）
   let autoRefreshTimer: ReturnType<typeof setTimeout> | null = null
   let autoRefreshRunning = false
-  const AUTO_REFRESH_INTERVAL = 2000 // 2秒
+  const AUTO_REFRESH_INTERVAL = 5000 // 5秒，降低统计聚合与锁竞争压力
 
   // 刷新并发控制：同一时间只允许一个 refresh 在跑；期间再次调用会被合并成一次后续刷新
   let refreshLoopPromise: Promise<void> | null = null

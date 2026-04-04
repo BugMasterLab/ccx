@@ -49,6 +49,7 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 
 		// 预处理：规范化 metadata.user_id（兼容 Claude Code v2.1.78+ JSON 对象格式）
 		bodyBytes = common.NormalizeMetadataUserID(bodyBytes)
+		c.Set("requestBodyBytes", bodyBytes)
 
 		// 解析请求
 		var claudeReq types.ClaudeRequest
@@ -392,6 +393,7 @@ func CountTokensHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManag
 			// ReadRequestBody 已经返回了错误响应
 			return
 		}
+		c.Set("requestBodyBytes", bodyBytes)
 
 		var req struct {
 			Model    string      `json:"model"`

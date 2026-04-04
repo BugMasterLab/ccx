@@ -52,11 +52,10 @@ func redirectModelInBody(bodyBytes []byte, upstream *config.UpstreamConfig) []by
 // ConvertToProviderRequest 转换为 Claude 请求（实现真正的透传）
 func (p *ClaudeProvider) ConvertToProviderRequest(c *gin.Context, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
 	// 读取原始请求体
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, err := getRequestBodyBytes(c)
 	if err != nil {
 		return nil, nil, err
 	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes)) // 恢复body
 
 	// 模型重定向：仅修改 model 字段，保持其他内容不变
 	if upstream.ModelMapping != nil && len(upstream.ModelMapping) > 0 {

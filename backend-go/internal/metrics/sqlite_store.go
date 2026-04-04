@@ -206,14 +206,7 @@ func (s *SQLiteStore) flush() {
 	// 批量写入
 	if err := s.batchInsertRecords(records); err != nil {
 		log.Printf("[SQLite-Flush] 警告: 批量写入指标记录失败: %v", err)
-		// 失败时将记录放回缓冲区（限制重试，避免无限增长）
-		s.bufferMu.Lock()
-		if len(s.writeBuffer) < s.batchSize*10 { // 最多保留 10 倍缓冲
-			s.writeBuffer = append(records, s.writeBuffer...)
-		} else {
-			log.Printf("[SQLite-Flush] 警告: 写入缓冲区已满，丢弃 %d 条记录", len(records))
-		}
-		s.bufferMu.Unlock()
+		s.requeueRecords(records, "[SQLite-Flush]")
 	}
 }
 
@@ -562,6 +555,23 @@ func (s *SQLiteStore) flushBufferLocked() {
 	if len(records) > 0 {
 		if err := s.batchInsertRecords(records); err != nil {
 			log.Printf("[SQLite-Flush] 手动刷新失败: %v", err)
+			s.requeueRecords(records, "[SQLite-Flush]")
 		}
 	}
+}
+
+func (s *SQLiteStore) requeueRecords(records []PersistentRecord, logPrefix string) {
+	if len(records) == 0 {
+		return
+	}
+
+	s.bufferMu.Lock()
+	defer s.bufferMu.Unlock()
+
+	if len(s.writeBuffer) < s.batchSize*10 {
+		s.writeBuffer = append(records, s.writeBuffer...)
+		return
+	}
+
+	log.Printf("%s 警告: 写入缓冲区已满，丢弃 %d 条记录", logPrefix, len(records))
 }

@@ -3,6 +3,7 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -132,7 +133,32 @@ func (sm *SessionManager) GetSession(sessionID string) (*Session, error) {
 		return nil, fmt.Errorf("会话不存在: %s", sessionID)
 	}
 
-	return session, nil
+	return cloneSession(session)
+}
+
+func cloneSession(src *Session) (*Session, error) {
+	if src == nil {
+		return nil, nil
+	}
+
+	cloned := *src
+	if len(src.Messages) == 0 {
+		cloned.Messages = []types.ResponsesItem{}
+		return &cloned, nil
+	}
+
+	payload, err := json.Marshal(src.Messages)
+	if err != nil {
+		return nil, fmt.Errorf("clone session messages failed: %w", err)
+	}
+
+	var messages []types.ResponsesItem
+	if err := json.Unmarshal(payload, &messages); err != nil {
+		return nil, fmt.Errorf("clone session messages failed: %w", err)
+	}
+
+	cloned.Messages = messages
+	return &cloned, nil
 }
 
 // cleanupLoop 定期清理过期会话

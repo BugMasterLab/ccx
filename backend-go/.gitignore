@@ -27,3 +27,9 @@ Thumbs.db
 tmp/
 
 !docs/
+
+!frontend/
+frontend/*
+!frontend/dist/
+frontend/dist/*
+!frontend/dist/.keep

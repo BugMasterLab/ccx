@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"bytes"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +12,8 @@ import (
 	"github.com/BenedictKing/ccx/internal/types"
 	"github.com/gin-gonic/gin"
 )
+
+const requestBodyBytesContextKey = "requestBodyBytes"
 
 // Provider 提供商接口
 type Provider interface {
@@ -39,6 +42,23 @@ func normalizeSSEFieldLine(line string) string {
 
 func newDefaultSessionManager() *session.SessionManager {
 	return session.NewSessionManager(24*time.Hour, 100, 100000)
+}
+
+func getRequestBodyBytes(c *gin.Context) ([]byte, error) {
+	if cached, ok := c.Get(requestBodyBytesContextKey); ok {
+		if bodyBytes, ok := cached.([]byte); ok {
+			c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+			return bodyBytes, nil
+		}
+	}
+
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return nil, err
+	}
+	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+	c.Set(requestBodyBytesContextKey, bodyBytes)
+	return bodyBytes, nil
 }
 
 // GetProvider 根据服务类型获取提供商

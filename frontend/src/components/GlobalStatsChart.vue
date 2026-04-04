@@ -155,14 +155,16 @@ const errorMessage = ref('')
 // Chart ref for updateSeries
 const chartRef = ref<InstanceType<typeof VueApexCharts> | null>(null)
 
-// Auto refresh timer (2 seconds interval, same as KeyTrendChart)
-const AUTO_REFRESH_INTERVAL = 2000
+// Auto refresh timer
+const AUTO_REFRESH_INTERVAL = 5000
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+const isRefreshing = ref(false)
+let refreshRequestId = 0
 
 const startAutoRefresh = () => {
   stopAutoRefresh()
   autoRefreshTimer = setInterval(() => {
-    if (!isLoading.value) {
+    if (!isRefreshing.value) {
       refreshData(true)
     }
   }, AUTO_REFRESH_INTERVAL)
@@ -515,6 +517,8 @@ const chartSeries = computed(() => {
 
 // Fetch data
 const refreshData = async (isAutoRefresh = false) => {
+  const requestId = ++refreshRequestId
+  isRefreshing.value = true
   if (!isAutoRefresh) {
     isLoading.value = true
   }
@@ -540,6 +544,10 @@ const refreshData = async (isAutoRefresh = false) => {
       historyData.value?.dataPoints?.length === newData.dataPoints?.length &&
       oldModels === newModels
 
+    if (requestId !== refreshRequestId) {
+      return
+    }
+
     if (canUpdateInPlace) {
       historyData.value = newData
       const series = chartSeries.value
@@ -548,13 +556,19 @@ const refreshData = async (isAutoRefresh = false) => {
       historyData.value = newData
     }
   } catch (error) {
+    if (requestId !== refreshRequestId) {
+      return
+    }
     console.error('Failed to fetch global stats:', error)
     errorMessage.value = error instanceof Error ? error.message : t('chart.globalStatsLoadFailed')
     showError.value = true
     historyData.value = null
   } finally {
-    if (!isAutoRefresh) {
+    if (requestId === refreshRequestId && !isAutoRefresh) {
       isLoading.value = false
+    }
+    if (requestId === refreshRequestId) {
+      isRefreshing.value = false
     }
   }
 }

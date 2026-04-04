@@ -48,6 +48,37 @@ func RestoreRequestBody(c *gin.Context, bodyBytes []byte) {
 	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 }
 
+// PassthroughResponse 直接将上游响应转发给客户端，不在内存中整包缓存。
+func PassthroughResponse(c *gin.Context, resp *http.Response) error {
+	utils.ForwardResponseHeaders(resp.Header, c.Writer)
+	c.Status(resp.StatusCode)
+	_, err := io.Copy(c.Writer, resp.Body)
+	return err
+}
+
+// PassthroughJSONResponse 在透传响应给客户端的同时，用流式 Decoder 尝试解析 JSON。
+// 解析失败时会继续排空剩余响应体，确保客户端仍收到完整响应。
+func PassthroughJSONResponse(c *gin.Context, resp *http.Response, target interface{}) error {
+	if target == nil {
+		return PassthroughResponse(c, resp)
+	}
+
+	utils.ForwardResponseHeaders(resp.Header, c.Writer)
+	c.Status(resp.StatusCode)
+
+	tee := io.TeeReader(resp.Body, c.Writer)
+	decoder := json.NewDecoder(tee)
+	if err := decoder.Decode(target); err != nil {
+		if _, copyErr := io.Copy(c.Writer, resp.Body); copyErr != nil {
+			return copyErr
+		}
+		return err
+	}
+
+	_, err := io.Copy(c.Writer, resp.Body)
+	return err
+}
+
 // SendRequest 发送 HTTP 请求到上游
 // isStream: 是否为流式请求（流式请求使用无超时客户端）
 // apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀

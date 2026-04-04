@@ -147,8 +147,8 @@ const chartRef = ref<InstanceType<typeof VueApexCharts> | null>(null)
 // request id for refreshData
 let refreshRequestId = 0
 
-// Auto refresh timer (2 seconds interval, same as global refresh)
-const AUTO_REFRESH_INTERVAL = 2000
+// Auto refresh timer
+const AUTO_REFRESH_INTERVAL = 5000
 let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
 
 const startAutoRefresh = () => {

@@ -42,6 +42,7 @@ func Handler(
 		if err != nil {
 			return
 		}
+		c.Set("requestBodyBytes", bodyBytes)
 
 		// 解析请求中的关键字段
 		var reqMap map[string]interface{}
@@ -595,20 +596,17 @@ func handleSuccess(
 		return usage, nil
 
 	default:
-		// OpenAI / Gemini / Responses 等：直接透传（已经是 OpenAI Chat 格式）
-		c.Data(resp.StatusCode, "application/json", bodyBytes)
-
-		// 尝试提取 usage
 		var respMap map[string]interface{}
-		if err := json.Unmarshal(bodyBytes, &respMap); err == nil {
-			if u, ok := respMap["usage"].(map[string]interface{}); ok {
-				promptTokens, _ := u["prompt_tokens"].(float64)
-				completionTokens, _ := u["completion_tokens"].(float64)
-				return &types.Usage{
-					InputTokens:  int(promptTokens),
-					OutputTokens: int(completionTokens),
-				}, nil
-			}
+		if err := common.PassthroughJSONResponse(c, resp, &respMap); err != nil {
+			return nil, nil
+		}
+		if u, ok := respMap["usage"].(map[string]interface{}); ok {
+			promptTokens, _ := u["prompt_tokens"].(float64)
+			completionTokens, _ := u["completion_tokens"].(float64)
+			return &types.Usage{
+				InputTokens:  int(promptTokens),
+				OutputTokens: int(completionTokens),
+			}, nil
 		}
 		return nil, nil
 	}

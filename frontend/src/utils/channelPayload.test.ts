@@ -89,4 +89,30 @@ describe('buildChannelPayload', () => {
     expect(result.textVerbosity).toBe('')
     expect(result.fastMode).toBe(false)
   })
+
+  it('应携带 autoBlacklistBalance 开关', () => {
+    const result = buildChannelPayload({
+      name: 'balance-guard',
+      serviceType: 'responses',
+      baseUrl: 'https://api.example.com/v1',
+      baseUrls: [],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      supportedModels: [],
+      autoBlacklistBalance: false
+    })
+
+    expect(result.autoBlacklistBalance).toBe(false)
+  })
 })

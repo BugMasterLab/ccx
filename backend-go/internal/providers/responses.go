@@ -29,11 +29,10 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 	upstream *config.UpstreamConfig,
 	apiKey string,
 ) (*http.Request, []byte, error) {
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	bodyBytes, err := getRequestBodyBytes(c)
 	if err != nil {
 		return nil, nil, fmt.Errorf("读取请求体失败: %w", err)
 	}
-	c.Request.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 	if p.SessionManager == nil {
 		p.SessionManager = newDefaultSessionManager()
@@ -114,15 +113,23 @@ func (p *ResponsesProvider) buildProviderRequestBody(requestPath string, bodyByt
 			return nil, nil, fmt.Errorf("解析 Responses 请求失败: %w", err)
 		}
 
-		sess, err := p.SessionManager.GetOrCreateSession(responsesReq.PreviousResponseID)
-		if err != nil {
-			return nil, nil, fmt.Errorf("获取会话失败: %w", err)
+		var (
+			sess *session.Session
+			err  error
+		)
+		if responsesReq.PreviousResponseID != "" {
+			sess, err = p.SessionManager.GetOrCreateSession(responsesReq.PreviousResponseID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("get session failed: %w", err)
+			}
+		} else {
+			sess = &session.Session{}
 		}
 
 		responsesReq.Model = config.RedirectModel(responsesReq.Model, upstream)
 		convertedReq, err := converter.ToProviderRequest(sess, &responsesReq)
 		if err != nil {
-			return nil, nil, fmt.Errorf("转换请求失败: %w", err)
+			return nil, nil, fmt.Errorf("convert request failed: %w", err)
 		}
 		providerReq = convertedReq
 	}

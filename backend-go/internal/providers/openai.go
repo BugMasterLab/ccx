@@ -23,12 +23,10 @@ type OpenAIProvider struct{}
 // ConvertToProviderRequest 转换为 OpenAI 请求
 func (p *OpenAIProvider) ConvertToProviderRequest(c *gin.Context, upstream *config.UpstreamConfig, apiKey string) (*http.Request, []byte, error) {
 	// 读取和解析原始请求体
-	originalBodyBytes, err := io.ReadAll(c.Request.Body)
+	originalBodyBytes, err := getRequestBodyBytes(c)
 	if err != nil {
 		return nil, nil, fmt.Errorf("读取请求体失败: %w", err)
 	}
-	// 恢复请求体，以便gin context可以被其他地方再次读取（尽管这里我们已经完全处理了）
-	c.Request.Body = io.NopCloser(bytes.NewReader(originalBodyBytes))
 
 	var claudeReq types.ClaudeRequest
 	if err := json.Unmarshal(originalBodyBytes, &claudeReq); err != nil {

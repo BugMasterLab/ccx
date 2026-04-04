@@ -1,8 +1,15 @@
 package common
 
 import (
+	"bytes"
+	"errors"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestNormalizeMetadataUserID(t *testing.T) {
@@ -128,4 +135,79 @@ func TestNormalizeMetadataUserID(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPassthroughResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	resp := &http.Response{
+		StatusCode: http.StatusAccepted,
+		Header:     http.Header{"X-Test": []string{"ok"}},
+		Body:       io.NopCloser(bytes.NewBufferString(`{"ok":true}`)),
+	}
+
+	if err := PassthroughResponse(c, resp); err != nil {
+		t.Fatalf("PassthroughResponse() err = %v", err)
+	}
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusAccepted)
+	}
+	if got := w.Header().Get("X-Test"); got != "ok" {
+		t.Fatalf("header X-Test = %q, want ok", got)
+	}
+	if got := w.Body.String(); got != `{"ok":true}` {
+		t.Fatalf("body = %q", got)
+	}
+}
+
+func TestPassthroughJSONResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	t.Run("decode success", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"X-Test": []string{"ok"}},
+			Body:       io.NopCloser(bytes.NewBufferString(`{"usage":{"prompt_tokens":12,"completion_tokens":34}}`)),
+		}
+
+		var got map[string]interface{}
+		if err := PassthroughJSONResponse(c, resp, &got); err != nil {
+			t.Fatalf("PassthroughJSONResponse() err = %v", err)
+		}
+
+		if w.Body.String() != `{"usage":{"prompt_tokens":12,"completion_tokens":34}}` {
+			t.Fatalf("unexpected body: %q", w.Body.String())
+		}
+		usage, ok := got["usage"].(map[string]interface{})
+		if !ok || usage["prompt_tokens"].(float64) != 12 {
+			t.Fatalf("decoded usage = %#v", got["usage"])
+		}
+	})
+
+	t.Run("decode failure still writes full body", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(bytes.NewBufferString(`{"usage": invalid-json}`)),
+		}
+
+		var got map[string]interface{}
+		err := PassthroughJSONResponse(c, resp, &got)
+		if err == nil {
+			t.Fatal("expected decode error")
+		}
+		var syntaxErr *json.SyntaxError
+		if !errors.As(err, &syntaxErr) {
+			t.Fatalf("err = %T, want *json.SyntaxError", err)
+		}
+		if w.Body.String() != `{"usage": invalid-json}` {
+			t.Fatalf("unexpected body: %q", w.Body.String())
+		}
+	})
 }

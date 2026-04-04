@@ -43,6 +43,7 @@ func Handler(
 		if err != nil {
 			return
 		}
+		c.Set("requestBodyBytes", bodyBytes)
 
 		// 解析 Gemini 请求
 		var geminiReq types.GeminiRequest
@@ -572,9 +573,8 @@ func handleSuccess(
 		}
 
 	default:
-		// 默认直接返回
-		c.Data(resp.StatusCode, "application/json", bodyBytes)
-		return nil, nil
+		// 默认直接透传，避免非必要整包读入内存
+		return nil, common.PassthroughResponse(c, resp)
 	}
 
 	// 返回 Gemini 格式响应
