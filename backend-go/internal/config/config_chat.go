@@ -188,6 +188,10 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 	if updates.RPM != nil {
 		upstream.RPM = *updates.RPM
 	}
+	if updates.AutoBlacklistBalance != nil {
+		v := *updates.AutoBlacklistBalance
+		upstream.AutoBlacklistBalance = &v
+	}
 	if updates.CustomHeaders != nil {
 		upstream.CustomHeaders = updates.CustomHeaders
 	}
@@ -248,6 +252,14 @@ func (cm *ConfigManager) AddChatAPIKey(index int, apiKey string) error {
 	}
 
 	cm.config.ChatUpstream[index].APIKeys = append(cm.config.ChatUpstream[index].APIKeys, apiKey)
+
+	var newDisabledKeys []DisabledKeyInfo
+	for _, dk := range cm.config.ChatUpstream[index].DisabledAPIKeys {
+		if dk.Key != apiKey {
+			newDisabledKeys = append(newDisabledKeys, dk)
+		}
+	}
+	cm.config.ChatUpstream[index].DisabledAPIKeys = newDisabledKeys
 
 	var newHistoricalKeys []string
 	for _, hk := range cm.config.ChatUpstream[index].HistoricalAPIKeys {

@@ -43,13 +43,37 @@ var capabilityCache = struct {
 	entries: make(map[string]*capabilityCacheEntry),
 }
 
-// buildCapabilityCacheKey 构建缓存 key（基于 baseURL + apiKey 与协议列表）
-func buildCapabilityCacheKey(baseURL string, apiKey string, protocols []string) string {
+// buildCapabilityCacheKey 构建缓存 key（基于 baseURL + apiKey、协议列表、模型列表）
+func buildCapabilityCacheKey(baseURL string, apiKey string, protocols []string, models []string) string {
 	sorted := make([]string, len(protocols))
 	copy(sorted, protocols)
 	sort.Strings(sorted)
+
+	normalizedModels := normalizeCapabilityModels(models)
 	metricsKey := metrics.GenerateMetricsKey(baseURL, apiKey)
-	return fmt.Sprintf("%s:%s", metricsKey, strings.Join(sorted, ","))
+	return fmt.Sprintf("%s:%s:%s", metricsKey, strings.Join(sorted, ","), strings.Join(normalizedModels, ","))
+}
+
+func normalizeCapabilityModels(models []string) []string {
+	if len(models) == 0 {
+		return nil
+	}
+
+	unique := make(map[string]struct{}, len(models))
+	normalized := make([]string, 0, len(models))
+	for _, model := range models {
+		trimmed := strings.TrimSpace(model)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := unique[trimmed]; exists {
+			continue
+		}
+		unique[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 // getCapabilityCache 读取缓存，命中时自动续期（不超过最大生存期）
@@ -98,9 +122,9 @@ func setCapabilityCache(key string, resp CapabilityTestResponse) {
 // CapabilityTestRequest 能力测试请求体
 type CapabilityTestRequest struct {
 	TargetProtocols []string `json:"targetProtocols"`
-	Models          []string `json:"models"`          // 可选：用户指定要测试的模型列表，为空时使用预定义列表
-	Timeout         int      `json:"timeout"`         // 毫秒
-	PreviousJobID   string   `json:"previousJobId"`   // 可选：上次测试的 jobId，用于复用成功结果
+	Models          []string `json:"models"`        // 可选：用户指定要测试的模型列表，为空时使用预定义列表
+	Timeout         int      `json:"timeout"`       // 毫秒
+	PreviousJobID   string   `json:"previousJobId"` // 可选：上次测试的 jobId，用于复用成功结果
 }
 
 type ModelTestResult struct {
@@ -207,7 +231,8 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 			apiKey = channel.APIKeys[0]
 		}
 
-		cacheKey := buildCapabilityCacheKey(baseURL, apiKey, protocols)
+		normalizedModels := normalizeCapabilityModels(req.Models)
+		cacheKey := buildCapabilityCacheKey(baseURL, apiKey, protocols, normalizedModels)
 		lookupKey := buildCapabilityJobLookupKey(cacheKey, channelKind, id)
 
 		if cached, ok := getCapabilityCache(cacheKey); ok {
@@ -270,7 +295,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 				}
 			})
 
-			go runCapabilityTestJob(job.JobID, channelKind, id, *channel, protocols, timeout, cacheKey, lookupKey, previousResults, req.Models)
+			go runCapabilityTestJob(job.JobID, channelKind, id, *channel, protocols, timeout, cacheKey, lookupKey, previousResults, normalizedModels)
 
 			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": true, "job": job})
 			return
@@ -317,7 +342,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 			}
 		}
 
-		go runCapabilityTestJob(job.JobID, channelKind, id, *channel, protocols, timeout, cacheKey, lookupKey, previousResults, req.Models)
+		go runCapabilityTestJob(job.JobID, channelKind, id, *channel, protocols, timeout, cacheKey, lookupKey, previousResults, normalizedModels)
 
 		c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": false, "job": job})
 		return

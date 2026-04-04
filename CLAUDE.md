@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Claude / OpenAI Chat / Codex Responses / Gemini API Proxy - 支持多上游 AI 服务的协议转换代理，提供 Web 管理界面和统一 API 入口。
 
-**技术栈**: Go 1.25 (后端) + Vue 3 + Vuetify (前端) + Docker
+**技术栈**: Go 1.25 + Gin (后端) + Vue 3 + Vuetify 3 + TypeScript (前端) + Docker
+**版本管理**: 根目录 `VERSION` 文件为唯一版本源，构建时通过 `-ldflags` 注入
 
 ## 常用命令
 
@@ -61,10 +62,12 @@ ccx/
 
 ## 核心设计模式
 
-1. **Provider Pattern** - `internal/providers/`: 所有上游实现统一 `Provider` 接口
-2. **Converter Pattern** - `internal/converters/`: 协议转换，工厂模式创建转换器
+1. **Provider Pattern** - `internal/providers/`: 所有上游实现统一 `Provider` 接口（`ConvertToProviderRequest` / `ConvertToClaudeResponse` / `HandleStreamResponse`）
+2. **Converter Pattern** - `internal/converters/`: Responses API 协议转换，工厂模式 `NewConverter(serviceType)` 创建转换器
 3. **Session Manager** - `internal/session/`: 基于 `previous_response_id` 的多轮对话跟踪
-4. **Scheduler Pattern** - `internal/scheduler/`: 优先级调度、Trace 亲和性、自动熔断
+4. **Scheduler Pattern** - `internal/scheduler/`: 优先级调度（促销期 > Priority > Trace 亲和性），自动熔断
+
+**请求流**: Client → AuthMiddleware → Handler → Scheduler（选渠道）→ Provider（协议转换）→ 上游 API → SSE 流式/非流式响应
 
 ## API 端点
 
@@ -108,6 +111,32 @@ ccx/
 2. **修改协议转换**: 编辑 `internal/converters/` 中的转换器
 3. **调整调度策略**: 修改 `internal/scheduler/channel_scheduler.go`
 4. **前端界面调整**: 编辑 `frontend/src/components/` 中的 Vue 组件
+
+## 编码约定
+
+### 命名规范
+- **Go 文件名**: `snake_case`（如 `channel_scheduler.go`）
+- **Go 函数**: PascalCase 导出 / camelCase 私有
+- **Vue 组件**: PascalCase（如 `ChannelCard.vue`）
+- **TS 文件名**: `kebab-case`（如 `api-service.ts`）
+
+### 日志格式
+所有后端日志使用 `[Component-Action]` 标签格式，**禁止 emoji**：
+```go
+log.Printf("[Scheduler-Channel] 选择渠道: %s", channelName)
+```
+
+### 测试风格
+Go 测试优先使用**表驱动测试** + `httptest`：
+```bash
+go test -v ./internal/converters/...       # 单个包
+go test -v -run TestName ./internal/...    # 单个测试
+```
+
+### 前端注意事项
+- Vuetify 组件使用**手动按需导入**（在 `src/plugins/vuetify.ts` 注册），未注册会报 `Unknown custom element`
+- 图标使用 `@mdi/js` SVG 按需导入，需在 `src/plugins/vuetify.ts` 的 `iconMap` 中注册
+- 前端构建产物通过 `embed.FS` 嵌入 Go 二进制，无需独立部署
 
 ## Git 命令注意事项
 

@@ -496,6 +496,62 @@ func TestShouldRetryWithNextKey(t *testing.T) {
 	}
 }
 
+func TestShouldRetryWithNextKey_TopLevelDetailAndAuthMessages(t *testing.T) {
+	tests := []struct {
+		name         string
+		statusCode   int
+		body         string
+		fuzzyMode    bool
+		wantFailover bool
+		wantQuota    bool
+	}{
+		{
+			name:         "top level detail not found remains non quota failover in fuzzy mode",
+			statusCode:   404,
+			body:         `{"detail":"Not Found"}`,
+			fuzzyMode:    true,
+			wantFailover: true,
+			wantQuota:    false,
+		},
+		{
+			name:         "top level message chinese auth error",
+			statusCode:   401,
+			body:         `{"message":"身份验证失败。","type":"authentication_error"}`,
+			fuzzyMode:    false,
+			wantFailover: true,
+			wantQuota:    false,
+		},
+		{
+			name:         "top level detail chinese invalid token",
+			statusCode:   401,
+			body:         `{"detail":"无效的令牌","type":"authentication_error"}`,
+			fuzzyMode:    false,
+			wantFailover: true,
+			wantQuota:    false,
+		},
+		{
+			name:         "string error field auth message",
+			statusCode:   401,
+			body:         `{"error":"身份验证失败。"}`,
+			fuzzyMode:    false,
+			wantFailover: true,
+			wantQuota:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFailover, gotQuota := ShouldRetryWithNextKey(tt.statusCode, []byte(tt.body), tt.fuzzyMode, "Messages")
+			if gotFailover != tt.wantFailover {
+				t.Fatalf("ShouldRetryWithNextKey(%d, %s, %v) failover = %v, want %v", tt.statusCode, tt.body, tt.fuzzyMode, gotFailover, tt.wantFailover)
+			}
+			if gotQuota != tt.wantQuota {
+				t.Fatalf("ShouldRetryWithNextKey(%d, %s, %v) quota = %v, want %v", tt.statusCode, tt.body, tt.fuzzyMode, gotQuota, tt.wantQuota)
+			}
+		})
+	}
+}
+
 // TestShouldRetryWithNextKeyFuzzyMode 测试 Fuzzy 模式下的错误分类
 // Fuzzy 模式：所有非 2xx 错误都触发 failover
 func TestShouldRetryWithNextKeyFuzzyMode(t *testing.T) {

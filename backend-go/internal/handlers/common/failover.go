@@ -163,14 +163,27 @@ func classifyByErrorMessage(bodyBytes []byte, apiType string) (bool, bool) {
 		return false, false
 	}
 
+	if errValue, ok := errResp["error"].(string); ok {
+		if failover, quota := classifyMessage(errValue); failover {
+			log.Printf("[%s-Failover-Debug] 提取到字符串 error: %s", apiType, errValue)
+			return true, quota
+		}
+	}
+
+	if failover, quota, field := classifyMessageFromMap(errResp); failover {
+		log.Printf("[%s-Failover-Debug] 提取到顶层消息 (字段: %s)", apiType, field)
+		return true, quota
+	}
+	if errType, ok := errResp["type"].(string); ok {
+		if failover, quota := classifyErrorType(errType); failover {
+			log.Printf("[%s-Failover-Debug] 提取到顶层 type: %s", apiType, errType)
+			return true, quota
+		}
+	}
+
 	errObj, ok := errResp["error"].(map[string]interface{})
 	if !ok {
 		log.Printf("[%s-Failover-Debug] 未找到error对象, keys=%v", apiType, getMapKeys(errResp))
-		return false, false
-	}
-
-	if isSchemaValidationError(errObj) {
-		log.Printf("[%s-Failover-Debug] 检测到 schema/invalid_request 错误，不进行 failover", apiType)
 		return false, false
 	}
 
@@ -182,26 +195,21 @@ func classifyByErrorMessage(bodyBytes []byte, apiType string) (bool, bool) {
 		}
 	}
 
-	// 尝试多个可能的消息字段: message, upstream_error, detail
-	messageFields := []string{"message", "upstream_error", "detail"}
-	for _, field := range messageFields {
-		if msg, ok := errObj[field].(string); ok {
-			log.Printf("[%s-Failover-Debug] 提取到消息 (字段: %s): %s", apiType, field, msg)
-			if failover, quota := classifyMessage(msg); failover {
-				log.Printf("[%s-Failover-Debug] 消息分类结果: failover=%v, quota=%v", apiType, failover, quota)
-				return true, quota
-			}
-		}
+	if isSchemaValidationError(errObj) {
+		log.Printf("[%s-Failover-Debug] 检测到 schema/invalid_request 错误，不进行 failover", apiType)
+		return false, false
+	}
+
+	if failover, quota, field := classifyMessageFromMap(errObj); failover {
+		log.Printf("[%s-Failover-Debug] 提取到消息 (字段: %s)", apiType, field)
+		return true, quota
 	}
 
 	// 如果 upstream_error 是嵌套对象，尝试提取其中的消息
 	if upstreamErr, ok := errObj["upstream_error"].(map[string]interface{}); ok {
-		if msg, ok := upstreamErr["message"].(string); ok {
-			log.Printf("[%s-Failover-Debug] 提取到嵌套 upstream_error.message: %s", apiType, msg)
-			if failover, quota := classifyMessage(msg); failover {
-				log.Printf("[%s-Failover-Debug] 消息分类结果: failover=%v, quota=%v", apiType, failover, quota)
-				return true, quota
-			}
+		if failover, quota, field := classifyMessageFromMap(upstreamErr); failover {
+			log.Printf("[%s-Failover-Debug] 提取到嵌套 upstream_error.%s", apiType, field)
+			return true, quota
 		}
 	}
 
@@ -214,6 +222,18 @@ func classifyByErrorMessage(bodyBytes []byte, apiType string) (bool, bool) {
 
 	log.Printf("[%s-Failover-Debug] 未匹配任何关键词, errObj keys=%v", apiType, getMapKeys(errObj))
 	return false, false
+}
+
+func classifyMessageFromMap(m map[string]interface{}) (bool, bool, string) {
+	messageFields := []string{"message", "upstream_error", "detail", "error_description", "msg"}
+	for _, field := range messageFields {
+		if msg, ok := m[field].(string); ok {
+			if failover, quota := classifyMessage(msg); failover {
+				return true, quota, field
+			}
+		}
+	}
+	return false, false, ""
 }
 
 // classifyMessage 基于错误消息内容分类
@@ -243,6 +263,7 @@ func classifyMessage(msg string) (bool, bool) {
 		"api key", "apikey", "token", "expired",
 		"permission", "forbidden", "denied",
 		"密钥无效", "认证失败", "权限不足",
+		"身份验证失败", "身份验证", "无效的令牌", "令牌无效", "未授权", "鉴权失败",
 	}
 	for _, keyword := range authKeywords {
 		if strings.Contains(msgLower, keyword) {

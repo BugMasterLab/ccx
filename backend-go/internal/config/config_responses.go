@@ -195,6 +195,10 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 	if updates.RPM != nil {
 		upstream.RPM = *updates.RPM
 	}
+	if updates.AutoBlacklistBalance != nil {
+		v := *updates.AutoBlacklistBalance
+		upstream.AutoBlacklistBalance = &v
+	}
 	if updates.CustomHeaders != nil {
 		upstream.CustomHeaders = updates.CustomHeaders
 	}
@@ -256,6 +260,14 @@ func (cm *ConfigManager) AddResponsesAPIKey(index int, apiKey string) error {
 	}
 
 	cm.config.ResponsesUpstream[index].APIKeys = append(cm.config.ResponsesUpstream[index].APIKeys, apiKey)
+
+	var newDisabledKeys []DisabledKeyInfo
+	for _, dk := range cm.config.ResponsesUpstream[index].DisabledAPIKeys {
+		if dk.Key != apiKey {
+			newDisabledKeys = append(newDisabledKeys, dk)
+		}
+	}
+	cm.config.ResponsesUpstream[index].DisabledAPIKeys = newDisabledKeys
 
 	// 如果该 Key 在历史列表中，从历史列表移除（换回来了）
 	var newHistoricalKeys []string

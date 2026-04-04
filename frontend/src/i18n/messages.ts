@@ -185,6 +185,8 @@ export type MessageKey =
   | 'addChannel.skipTlsHint'
   | 'addChannel.lowQualityLabel'
   | 'addChannel.lowQualityHint'
+  | 'addChannel.autoBlacklistBalanceLabel'
+  | 'addChannel.autoBlacklistBalanceHint'
   | 'addChannel.injectDummyThoughtSignatureLabel'
   | 'addChannel.injectDummyThoughtSignatureHint'
   | 'addChannel.stripThoughtSignatureLabel'
@@ -529,6 +531,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.skipTlsHint': 'Enable temporarily only for self-signed certificates or domain mismatch. Keep disabled in production.',
     'addChannel.lowQualityLabel': 'Low-quality channel',
     'addChannel.lowQualityHint': 'When enabled, token usage is force-estimated locally and the local value is used if the deviation exceeds 5%.',
+    'addChannel.autoBlacklistBalanceLabel': 'Auto blacklist on insufficient balance',
+    'addChannel.autoBlacklistBalanceHint': 'Automatically move the key to the blacklist when the upstream reports insufficient balance.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Inject dummy thought signature',
     'addChannel.injectDummyThoughtSignatureHint': 'Injects a dummy signature into functionCall for third-party APIs that require this field. Disable it for the official API.',
     'addChannel.stripThoughtSignatureLabel': 'Strip thought signature',
@@ -872,6 +876,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.skipTlsHint': 'Aktifkan sementara hanya untuk sertifikat self-signed atau domain mismatch. Matikan di production.',
     'addChannel.lowQualityLabel': 'Channel kualitas rendah',
     'addChannel.lowQualityHint': 'Jika aktif, token akan diperkirakan secara lokal dan nilai lokal dipakai bila selisihnya lebih dari 5%.',
+    'addChannel.autoBlacklistBalanceLabel': 'Blacklist otomatis saat saldo habis',
+    'addChannel.autoBlacklistBalanceHint': 'Pindahkan key ke daftar blokir otomatis saat upstream melaporkan saldo tidak cukup.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Sisipkan dummy thought signature',
     'addChannel.injectDummyThoughtSignatureHint': 'Menyisipkan dummy signature ke functionCall agar kompatibel dengan API pihak ketiga yang membutuhkan field ini. Matikan untuk API resmi.',
     'addChannel.stripThoughtSignatureLabel': 'Hapus thought signature',
@@ -1215,6 +1221,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.skipTlsHint': '仅在自签名或域名不匹配时临时启用，生产环境请关闭',
     'addChannel.lowQualityLabel': '低质量渠道',
     'addChannel.lowQualityHint': '启用后强制本地估算 token 数量，偏差超过 5% 时使用本地值',
+    'addChannel.autoBlacklistBalanceLabel': '余额不足时自动拉黑',
+    'addChannel.autoBlacklistBalanceHint': '当上游返回余额不足时，自动将该 Key 移入拉黑列表。',
     'addChannel.injectDummyThoughtSignatureLabel': '注入 Dummy Thought Signature',
     'addChannel.injectDummyThoughtSignatureHint': '为 functionCall 注入 dummy signature，兼容需要该字段的第三方 API（官方 API 请关闭）',
     'addChannel.stripThoughtSignatureLabel': '移除 Thought Signature',

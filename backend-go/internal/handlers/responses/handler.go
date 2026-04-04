@@ -542,6 +542,7 @@ func handleStreamSuccess(
 
 	var bufferedLines []string
 	var preflightTextBuf bytes.Buffer
+	preflightHasNonTextContent := false
 	preflightEmpty := false
 	preflightTimeout := time.NewTimer(30 * time.Second)
 	preflightDone := false
@@ -552,8 +553,11 @@ func handleStreamSuccess(
 		case sl := <-lineChan:
 			if !sl.ok {
 				// scanner 结束
-				text := preflightTextBuf.String()
-				preflightEmpty = text == "" || strings.TrimSpace(text) == "{"
+				if preflightHasNonTextContent {
+					preflightEmpty = false
+				} else {
+					preflightEmpty = isResponsesEmptyContent(preflightTextBuf.String())
+				}
 				preflightDone = true
 				break
 			}
@@ -596,12 +600,17 @@ func handleStreamSuccess(
 			}
 
 			for _, event := range eventsToCheck {
+				if !preflightHasNonTextContent && hasResponsesNonTextContent(event) {
+					preflightHasNonTextContent = true
+					preflightEmpty = false
+					preflightDone = true
+					break
+				}
+
 				extractResponsesTextFromEvent(event, &preflightTextBuf)
 
 				// 检查是否有有效内容 delta 事件
-				text := preflightTextBuf.String()
-				textIsEmpty := text == "" || strings.TrimSpace(text) == "{"
-				if !textIsEmpty {
+				if !isResponsesEmptyContent(preflightTextBuf.String()) {
 					preflightDone = true
 					break
 				}
@@ -610,7 +619,7 @@ func handleStreamSuccess(
 				if isResponsesCompletedEvent(event) {
 					preflightDone = true
 					// 检查是否有实际内容（文本或工具调用）
-					preflightEmpty = text == "" || strings.TrimSpace(text) == "{"
+					preflightEmpty = !preflightHasNonTextContent && isResponsesEmptyContent(preflightTextBuf.String())
 					// 如果有工具调用，不算空响应
 					if preflightEmpty && hasResponsesFunctionCall(event) {
 						preflightEmpty = false
@@ -779,7 +788,11 @@ func handleStreamSuccess(
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Printf("[Responses-Stream] 警告: 流式响应读取错误: %v", err)
+		if !isClientDisconnectError(err) {
+			log.Printf("[Responses-Stream] 警告: 流式响应读取错误: %v", err)
+		} else if envCfg.ShouldLog("info") {
+			log.Printf("[Responses-Stream] 上游读取因客户端取消而结束")
+		}
 	}
 
 	if envCfg.EnableResponseLogs {
@@ -836,6 +849,10 @@ type responsesStreamUsage struct {
 }
 
 // extractResponsesTextFromEvent 从 Responses SSE 事件中提取文本内容
+func isResponsesEmptyContent(text string) bool {
+	return text == "" || strings.TrimSpace(text) == "{"
+}
+
 func extractResponsesTextFromEvent(event string, buf *bytes.Buffer) {
 	for _, line := range strings.Split(event, "\n") {
 		// 支持 "data:" 和 "data: " 两种格式（有些上游不带空格）
@@ -887,6 +904,39 @@ func extractResponsesTextFromEvent(event string, buf *bytes.Buffer) {
 			}
 		}
 	}
+}
+
+func hasResponsesNonTextContent(event string) bool {
+	lines := strings.Split(event, "\n")
+	for _, line := range lines {
+		var jsonStr string
+		if strings.HasPrefix(line, "data:") {
+			jsonStr = strings.TrimPrefix(line, "data:")
+			jsonStr = strings.TrimPrefix(jsonStr, " ")
+		} else {
+			continue
+		}
+
+		var data map[string]interface{}
+		if err := json.Unmarshal([]byte(jsonStr), &data); err != nil {
+			continue
+		}
+
+		switch data["type"] {
+		case "response.function_call_arguments.delta", "response.function_call_arguments.done":
+			return true
+		case "response.output_item.added", "response.output_item.done":
+			item, _ := data["item"].(map[string]interface{})
+			if itemType, _ := item["type"].(string); itemType == "function_call" {
+				return true
+			}
+		case "response.completed":
+			if hasResponsesFunctionCall(event) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // checkResponsesEventUsage 检测 Responses 事件是否包含 usage
@@ -1052,7 +1102,9 @@ func isResponsesCompletedEvent(event string) bool {
 // isClientDisconnectError 判断是否为客户端断开连接错误
 func isClientDisconnectError(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "broken pipe") || strings.Contains(msg, "connection reset")
+	return strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "context canceled")
 }
 
 func effectiveCacheCreationTokens(cacheCreation, cacheCreation5m, cacheCreation1h int) int {

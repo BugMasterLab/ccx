@@ -195,6 +195,10 @@ func (cm *ConfigManager) UpdateGeminiUpstream(index int, updates UpstreamUpdate)
 	if updates.RPM != nil {
 		upstream.RPM = *updates.RPM
 	}
+	if updates.AutoBlacklistBalance != nil {
+		v := *updates.AutoBlacklistBalance
+		upstream.AutoBlacklistBalance = &v
+	}
 	if updates.InjectDummyThoughtSignature != nil {
 		upstream.InjectDummyThoughtSignature = *updates.InjectDummyThoughtSignature
 	}
@@ -262,6 +266,14 @@ func (cm *ConfigManager) AddGeminiAPIKey(index int, apiKey string) error {
 	}
 
 	cm.config.GeminiUpstream[index].APIKeys = append(cm.config.GeminiUpstream[index].APIKeys, apiKey)
+
+	var newDisabledKeys []DisabledKeyInfo
+	for _, dk := range cm.config.GeminiUpstream[index].DisabledAPIKeys {
+		if dk.Key != apiKey {
+			newDisabledKeys = append(newDisabledKeys, dk)
+		}
+	}
+	cm.config.GeminiUpstream[index].DisabledAPIKeys = newDisabledKeys
 
 	// 如果该 Key 在历史列表中，从历史列表移除（换回来了）
 	var newHistoricalKeys []string

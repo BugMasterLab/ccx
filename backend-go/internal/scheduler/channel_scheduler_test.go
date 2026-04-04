@@ -275,6 +275,37 @@ func TestExpiredPromotionNotBypassHealthCheck(t *testing.T) {
 	}
 }
 
+func TestSelectChannel_DefaultRouteRejectsPrefixedOnlyChannels(t *testing.T) {
+	cfg := config.Config{
+		Upstream: []config.UpstreamConfig{
+			{
+				Name:        "kimi-only",
+				BaseURL:     "https://kimi.example.com",
+				APIKeys:     []string{"sk-kimi"},
+				Status:      "active",
+				Priority:    1,
+				RoutePrefix: "kimi",
+			},
+			{
+				Name:        "deepseek-only",
+				BaseURL:     "https://deepseek.example.com",
+				APIKeys:     []string{"sk-deepseek"},
+				Status:      "active",
+				Priority:    2,
+				RoutePrefix: "deepseek",
+			},
+		},
+	}
+
+	scheduler, cleanup := createTestScheduler(t, cfg)
+	defer cleanup()
+
+	_, err := scheduler.SelectChannel(context.Background(), "test-user", map[int]bool{}, ChannelKindMessages, "", "")
+	if err == nil {
+		t.Fatal("SelectChannel() error = nil, want default route rejection")
+	}
+}
+
 // TestDeleteChannelMetrics_SharedMetricsKeyPreserved 测试删除渠道时共享的 metricsKey 被保留
 func TestDeleteChannelMetrics_SharedMetricsKeyPreserved(t *testing.T) {
 	// 场景：两个渠道共享同一个 (BaseURL, APIKey) 组合

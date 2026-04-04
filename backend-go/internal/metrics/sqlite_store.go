@@ -493,8 +493,12 @@ type AggregatedBucket struct {
 // QueryAggregatedHistory 从 SQLite 查询聚合历史数据
 // 按指定时间间隔聚合，可选按 apiType、metricsKey、baseURL 过滤
 func (s *SQLiteStore) QueryAggregatedHistory(apiType string, since time.Time, intervalSeconds int64, metricsKey string, baseURL string) ([]AggregatedBucket, error) {
-	// 先刷新缓冲区，确保查询到最新数据
-	s.flushBuffer()
+	// 先等待在途 flush 完成，再刷新当前缓冲区，确保查询视图尽可能完整。
+	// 这里串行化查询前刷新，可避免高并发下异步 flush 已取走 writeBuffer
+	// 但尚未提交事务时，查询漏读最新数据。
+	s.flushMu.Lock()
+	s.flushBufferLocked()
+	s.flushMu.Unlock()
 
 	query := `
 		SELECT
@@ -542,6 +546,13 @@ func (s *SQLiteStore) QueryAggregatedHistory(apiType string, since time.Time, in
 
 // flushBuffer 手动刷新写入缓冲区（查询前调用，确保数据完整性）
 func (s *SQLiteStore) flushBuffer() {
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+	s.flushBufferLocked()
+}
+
+// flushBufferLocked 在调用方已持有 flushMu 时刷新写入缓冲区
+func (s *SQLiteStore) flushBufferLocked() {
 	s.bufferMu.Lock()
 	records := make([]PersistentRecord, len(s.writeBuffer))
 	copy(records, s.writeBuffer)
@@ -549,8 +560,6 @@ func (s *SQLiteStore) flushBuffer() {
 	s.bufferMu.Unlock()
 
 	if len(records) > 0 {
-		s.flushMu.Lock()
-		defer s.flushMu.Unlock()
 		if err := s.batchInsertRecords(records); err != nil {
 			log.Printf("[SQLite-Flush] 手动刷新失败: %v", err)
 		}

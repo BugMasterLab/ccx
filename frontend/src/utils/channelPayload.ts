@@ -21,6 +21,7 @@ export interface ChannelFormLike {
   proxyUrl: string
   routePrefix: string
   supportedModels: string[]
+  autoBlacklistBalance: boolean
   rpm?: number
 
 }
@@ -81,6 +82,7 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     proxyUrl: form.proxyUrl.trim(),
     routePrefix: form.routePrefix.trim(),
     supportedModels: form.supportedModels,
+    autoBlacklistBalance: form.autoBlacklistBalance,
     rpm: form.rpm && form.rpm > 0 ? form.rpm : 10
   }
 

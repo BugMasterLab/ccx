@@ -20,7 +20,7 @@ type UpstreamConfig struct {
 	BaseURLs           []string          `json:"baseUrls,omitempty"` // 多 BaseURL 支持（failover 模式）
 	APIKeys            []string          `json:"apiKeys"`
 	HistoricalAPIKeys  []string          `json:"historicalApiKeys,omitempty"` // 历史 API Key（用于统计聚合，换 Key 后保留旧 Key 的统计数据）
-	DisabledAPIKeys    []DisabledKeyInfo `json:"disabledApiKeys,omitempty"`  // 被拉黑的 API Key（持久化，需手动恢复）
+	DisabledAPIKeys    []DisabledKeyInfo `json:"disabledApiKeys,omitempty"`   // 被拉黑的 API Key（持久化，需手动恢复）
 	ServiceType        string            `json:"serviceType"`                 // gemini, openai, claude
 	Name               string            `json:"name,omitempty"`
 	Description        string            `json:"description,omitempty"`
@@ -82,11 +82,12 @@ type UpstreamUpdate struct {
 	TextVerbosity      *string           `json:"textVerbosity"`
 	FastMode           *bool             `json:"fastMode"`
 	// 多渠道调度相关字段
-	Priority       *int       `json:"priority"`
-	Status         *string    `json:"status"`
-	PromotionUntil *time.Time `json:"promotionUntil"`
-	LowQuality     *bool      `json:"lowQuality"`
-	RPM            *int       `json:"rpm"`
+	Priority             *int       `json:"priority"`
+	Status               *string    `json:"status"`
+	PromotionUntil       *time.Time `json:"promotionUntil"`
+	LowQuality           *bool      `json:"lowQuality"`
+	RPM                  *int       `json:"rpm"`
+	AutoBlacklistBalance *bool      `json:"autoBlacklistBalance"`
 	// Gemini 特定配置
 	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
 	StripThoughtSignature       *bool `json:"stripThoughtSignature"`
@@ -479,7 +480,9 @@ func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey str
 	}
 
 	upstream.DisabledAPIKeys = append(upstream.DisabledAPIKeys[:disabledIdx], upstream.DisabledAPIKeys[disabledIdx+1:]...)
-	upstream.APIKeys = append(upstream.APIKeys, apiKey)
+	if !slices.Contains(upstream.APIKeys, apiKey) {
+		upstream.APIKeys = append(upstream.APIKeys, apiKey)
+	}
 
 	// 清除内存中的失败记录
 	cacheKey := failedKeyCacheKey(apiType, apiKey)

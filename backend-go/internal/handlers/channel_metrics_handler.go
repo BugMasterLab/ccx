@@ -358,7 +358,7 @@ func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager
 			for i, upstream := range upstreams {
 				// 过滤属于此渠道的数据（按 baseURL 匹配）
 				allURLs := upstream.GetAllBaseURLs()
-				channelBuckets := filterBucketsByURLs(store, apiType, since, intervalSec, allURLs)
+				channelBuckets := filterBucketsByURLs(store, apiType, since, intervalSec, allURLs, upstream.APIKeys)
 
 				dataPoints := convertBucketsToDataPoints(channelBuckets)
 				result = append(result, MetricsHistoryResponse{
@@ -615,21 +615,21 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 			priority := config.GetChannelPriority(&up, i)
 
 			channel := gin.H{
-				"index":              i,
-				"name":               up.Name,
-				"serviceType":        up.ServiceType,
-				"baseUrl":            up.BaseURL,
-				"baseUrls":           up.BaseURLs,
-				"apiKeys":            up.APIKeys,
-				"description":        up.Description,
-				"website":            up.Website,
-				"insecureSkipVerify": up.InsecureSkipVerify,
-				"modelMapping":       up.ModelMapping,
-				"reasoningMapping":   up.ReasoningMapping,
-				"textVerbosity":      up.TextVerbosity,
-				"fastMode":           up.FastMode,
-				"customHeaders":      up.CustomHeaders,
-				"proxyUrl":           up.ProxyURL,
+				"index":                i,
+				"name":                 up.Name,
+				"serviceType":          up.ServiceType,
+				"baseUrl":              up.BaseURL,
+				"baseUrls":             up.BaseURLs,
+				"apiKeys":              up.APIKeys,
+				"description":          up.Description,
+				"website":              up.Website,
+				"insecureSkipVerify":   up.InsecureSkipVerify,
+				"modelMapping":         up.ModelMapping,
+				"reasoningMapping":     up.ReasoningMapping,
+				"textVerbosity":        up.TextVerbosity,
+				"fastMode":             up.FastMode,
+				"customHeaders":        up.CustomHeaders,
+				"proxyUrl":             up.ProxyURL,
 				"supportedModels":      up.SupportedModels,
 				"routePrefix":          up.RoutePrefix,
 				"disabledApiKeys":      up.DisabledAPIKeys,
@@ -638,8 +638,8 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 				"status":               status,
 				"priority":             priority,
 				"promotionUntil":       up.PromotionUntil,
-				"lowQuality":         up.LowQuality,
-				"rpm":                up.RPM,
+				"lowQuality":           up.LowQuality,
+				"rpm":                  up.RPM,
 			}
 
 			// Gemini 特有字段
@@ -742,7 +742,7 @@ func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgM
 			intervalSec := int64(interval.Seconds())
 			result := make([]MetricsHistoryResponse, 0, len(upstreams))
 			for i, upstream := range upstreams {
-				channelBuckets := filterBucketsByURLs(store, apiType, since, intervalSec, upstream.GetAllBaseURLs())
+				channelBuckets := filterBucketsByURLs(store, apiType, since, intervalSec, upstream.GetAllBaseURLs(), upstream.APIKeys)
 				result = append(result, MetricsHistoryResponse{
 					ChannelIndex: i,
 					ChannelName:  upstream.Name,
@@ -970,7 +970,7 @@ func GetChatChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgMan
 			intervalSec := int64(interval.Seconds())
 			result := make([]MetricsHistoryResponse, 0, len(cfg.ChatUpstream))
 			for i, upstream := range cfg.ChatUpstream {
-				channelBuckets := filterBucketsByURLs(store, apiType, since, intervalSec, upstream.GetAllBaseURLs())
+				channelBuckets := filterBucketsByURLs(store, apiType, since, intervalSec, upstream.GetAllBaseURLs(), upstream.APIKeys)
 				result = append(result, MetricsHistoryResponse{ChannelIndex: i, ChannelName: upstream.Name, DataPoints: convertBucketsToDataPoints(channelBuckets)})
 			}
 			c.JSON(200, result)
@@ -1094,33 +1094,33 @@ func parseExtendedDuration(s string) time.Duration {
 }
 
 // filterBucketsByURLs 按渠道的 URL 和 Key 过滤 SQLite 聚合数据
-func filterBucketsByURLs(store metrics.PersistenceStore, apiType string, since time.Time, intervalSec int64, baseURLs []string) []metrics.AggregatedBucket {
-	// 由于 SQLite 中存储的是 metrics_key（hash(baseURL+apiKey)），
-	// 我们需要计算渠道所有 URL+Key 的 metricsKey 然后逐个查询并合并
-	// 简化方案：不按 metricsKey 过滤，直接查全部，因为 apiType 已经隔离了不同接口
-	// 但如果需要按渠道过滤，需要用 metricsKey
-
-	// 为每个 baseURL+apiKey 组合查询并合并
+func filterBucketsByURLs(store metrics.PersistenceStore, apiType string, since time.Time, intervalSec int64, baseURLs []string, apiKeys []string) []metrics.AggregatedBucket {
+	// SQLite 里的聚合记录是按 metrics_key(baseURL + apiKey) 归属的。
+	// 因此这里必须按当前渠道的 URL+Key 组合逐个查询并汇总，
+	// 不能只按 baseURL 过滤，否则多个共用 baseURL 的渠道会串数据。
 	bucketMap := make(map[int64]*metrics.AggregatedBucket)
 
 	for _, baseURL := range baseURLs {
-		buckets, err := store.QueryAggregatedHistory(apiType, since, intervalSec, "", baseURL)
-		if err != nil {
-			log.Printf("[Metrics-History] 查询 baseURL %s 失败: %v", baseURL, err)
-			continue
-		}
-		for _, b := range buckets {
-			ts := b.Timestamp.Unix()
-			if existing, ok := bucketMap[ts]; ok {
-				existing.TotalRequests += b.TotalRequests
-				existing.SuccessCount += b.SuccessCount
-				existing.InputTokens += b.InputTokens
-				existing.OutputTokens += b.OutputTokens
-				existing.CacheCreationTokens += b.CacheCreationTokens
-				existing.CacheReadTokens += b.CacheReadTokens
-			} else {
-				copy := b
-				bucketMap[ts] = &copy
+		for _, apiKey := range apiKeys {
+			metricsKey := metrics.GenerateMetricsKey(baseURL, apiKey)
+			buckets, err := store.QueryAggregatedHistory(apiType, since, intervalSec, metricsKey, "")
+			if err != nil {
+				log.Printf("[Metrics-History] 查询 metricsKey %s 失败(baseURL=%s): %v", metricsKey, baseURL, err)
+				continue
+			}
+			for _, b := range buckets {
+				ts := b.Timestamp.Unix()
+				if existing, ok := bucketMap[ts]; ok {
+					existing.TotalRequests += b.TotalRequests
+					existing.SuccessCount += b.SuccessCount
+					existing.InputTokens += b.InputTokens
+					existing.OutputTokens += b.OutputTokens
+					existing.CacheCreationTokens += b.CacheCreationTokens
+					existing.CacheReadTokens += b.CacheReadTokens
+				} else {
+					copy := b
+					bucketMap[ts] = &copy
+				}
 			}
 		}
 	}

@@ -143,10 +143,19 @@ func (s *ChannelScheduler) SelectChannel(
 				filtered = append(filtered, ch)
 			}
 		}
-		if len(filtered) > 0 {
-			activeChannels = filtered
+		if len(filtered) == 0 {
+			kindName := "Messages"
+			switch kind {
+			case ChannelKindGemini:
+				kindName = "Gemini"
+			case ChannelKindResponses:
+				kindName = "Responses"
+			case ChannelKindChat:
+				kindName = "Chat"
+			}
+			return nil, fmt.Errorf("没有可用于默认路由的 %s 渠道，请使用带前缀路由访问", kindName)
 		}
-		// 如果过滤后为空（所有渠道都有前缀），则保留全部渠道作为 fallback
+		activeChannels = filtered
 	}
 
 	// 获取对应类型的指标管理器

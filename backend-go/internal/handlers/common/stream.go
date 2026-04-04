@@ -720,7 +720,9 @@ func logSynthesizedContent(ctx *StreamContext) {
 // IsClientDisconnectError 判断是否为客户端断开连接错误
 func IsClientDisconnectError(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "broken pipe") || strings.Contains(msg, "connection reset")
+	return strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "context canceled")
 }
 
 // HandleStreamResponse 处理流式响应（Messages API）
