@@ -54,6 +54,9 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				"customHeaders":               up.CustomHeaders,
 				"proxyUrl":                    up.ProxyURL,
 				"supportedModels":             up.SupportedModels,
+				"routePrefix":                 up.RoutePrefix,
+				"disabledApiKeys":             up.DisabledAPIKeys,
+				"autoBlacklistBalance":        up.IsAutoBlacklistBalanceEnabled(),
 			}
 		}
 
