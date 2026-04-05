@@ -166,6 +166,7 @@ import {
   mdiKeyRemove,
   mdiKeyAlert,
   mdiFlaskOutline,
+  mdiCashRemove,
 } from '@mdi/js'
 
 // 图标名称到 SVG path 的映射 (使用 kebab-case)
@@ -347,6 +348,7 @@ const iconMap: Record<string, string> = {
   'key-remove': mdiKeyRemove,
   'key-alert': mdiKeyAlert,
   'flask-outline': mdiFlaskOutline,
+  'cash-remove': mdiCashRemove,
 }
 
 // 自定义 SVG iconset - 处理 mdi-xxx 字符串格式
