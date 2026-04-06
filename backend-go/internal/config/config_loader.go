@@ -12,19 +12,28 @@ import (
 )
 
 const (
-	maxBackups      = 10
-	keyRecoveryTime = 5 * time.Minute
-	maxFailureCount = 3
+	maxBackups = 10
 )
+
+// keyBackoffDurations 定义各档失败冷却时间（指数退避，最大 120 分钟）
+// 第1次失败→5分钟，第2次→10分钟，第3次→20分钟，第4次→30分钟，第5次→60分钟，第6次及以上→120分钟
+var keyBackoffDurations = []time.Duration{
+	5 * time.Minute,
+	10 * time.Minute,
+	20 * time.Minute,
+	30 * time.Minute,
+	60 * time.Minute,
+	120 * time.Minute,
+}
 
 // NewConfigManager 创建配置管理器
 func NewConfigManager(configFile string) (*ConfigManager, error) {
 	cm := &ConfigManager{
-		configFile:      configFile,
-		failedKeysCache: make(map[string]*FailedKey),
-		keyRecoveryTime: keyRecoveryTime,
-		maxFailureCount: maxFailureCount,
-		stopChan:        make(chan struct{}),
+		configFile:         configFile,
+		failedKeysCache:    make(map[string]*FailedKey),
+		keyBackoffDurations: keyBackoffDurations,
+		roundRobinCounters: make(map[string]*uint64),
+		stopChan:           make(chan struct{}),
 	}
 
 	// 加载配置

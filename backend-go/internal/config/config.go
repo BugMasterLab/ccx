@@ -5,6 +5,7 @@ import (
 	"log"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/utils"
@@ -131,20 +132,44 @@ type FailedKey struct {
 
 // ConfigManager 配置管理器
 type ConfigManager struct {
-	mu              sync.RWMutex
-	config          Config
-	configFile      string
-	watcher         *fsnotify.Watcher
-	failedKeysCache map[string]*FailedKey
-	keyRecoveryTime time.Duration
-	maxFailureCount int
-	stopChan        chan struct{} // 用于通知 goroutine 停止
-	closeOnce       sync.Once     // 确保 Close 只执行一次
+	mu                  sync.RWMutex
+	config              Config
+	configFile          string
+	watcher             *fsnotify.Watcher
+	failedKeysCache     map[string]*FailedKey
+	keyBackoffDurations []time.Duration   // 各档冷却时间
+	roundRobinCounters  map[string]*uint64 // upstream.Name → 轮询计数器
+	stopChan            chan struct{}       // 用于通知 goroutine 停止
+	closeOnce           sync.Once          // 确保 Close 只执行一次
 }
 
 // failedKeyCacheKey 构造 FailedKeysCache 的复合键（apiType:apiKey）
 func failedKeyCacheKey(apiType, apiKey string) string {
 	return apiType + ":" + apiKey
+}
+
+// backoffDuration 根据失败次数返回对应冷却时间（指数退避，超出档位取最后一档）
+func (cm *ConfigManager) backoffDuration(failureCount int) time.Duration {
+	idx := failureCount - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(cm.keyBackoffDurations) {
+		idx = len(cm.keyBackoffDurations) - 1
+	}
+	return cm.keyBackoffDurations[idx]
+}
+
+// getOrCreateCounter 获取或创建 upstream 的轮询计数器
+func (cm *ConfigManager) getOrCreateCounter(upstreamName string) *uint64 {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if c, ok := cm.roundRobinCounters[upstreamName]; ok {
+		return c
+	}
+	var c uint64
+	cm.roundRobinCounters[upstreamName] = &c
+	return &c
 }
 
 // ============== 核心共享方法 ==============
@@ -239,8 +264,10 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 		return "", fmt.Errorf("上游 %s 的所有API密钥都暂时不可用", upstream.Name)
 	}
 
-	// 纯 failover：按优先级顺序选择第一个可用密钥
-	selectedKey := availableKeys[0]
+	// 轮询：按计数器均匀分配，每次取下一个可用 key
+	counter := cm.getOrCreateCounter(upstream.Name)
+	idx := int(atomic.AddUint64(counter, 1)-1) % len(availableKeys)
+	selectedKey := availableKeys[idx]
 	// 获取该密钥在原始列表中的索引
 	keyIndex := 0
 	for i, key := range upstream.APIKeys {
@@ -249,7 +276,7 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 			break
 		}
 	}
-	log.Printf("[%s-Key] 故障转移选择密钥 %s (%d/%d)", apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
+	log.Printf("[%s-Key] 轮询选择密钥 %s (%d/%d)", apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
 	return selectedKey, nil
 }
 
@@ -271,10 +298,7 @@ func (cm *ConfigManager) MarkKeyAsFailed(apiKey string, apiType string) {
 	}
 
 	failure := cm.failedKeysCache[cacheKey]
-	recoveryTime := cm.keyRecoveryTime
-	if failure.FailureCount > cm.maxFailureCount {
-		recoveryTime = cm.keyRecoveryTime * 2
-	}
+	recoveryTime := cm.backoffDuration(failure.FailureCount)
 
 	log.Printf("[%s-Key] 标记API密钥失败: %s (失败次数: %d, 恢复时间: %v)",
 		apiType, utils.MaskAPIKey(apiKey), failure.FailureCount, recoveryTime)
@@ -291,10 +315,7 @@ func (cm *ConfigManager) isKeyFailed(apiKey, apiType string) bool {
 		return false
 	}
 
-	recoveryTime := cm.keyRecoveryTime
-	if failure.FailureCount > cm.maxFailureCount {
-		recoveryTime = cm.keyRecoveryTime * 2
-	}
+	recoveryTime := cm.backoffDuration(failure.FailureCount)
 
 	return time.Since(failure.Timestamp) < recoveryTime
 }
@@ -330,10 +351,7 @@ func (cm *ConfigManager) cleanupExpiredFailures() {
 			cm.mu.Lock()
 			now := time.Now()
 			for key, failure := range cm.failedKeysCache {
-				recoveryTime := cm.keyRecoveryTime
-				if failure.FailureCount > cm.maxFailureCount {
-					recoveryTime = cm.keyRecoveryTime * 2
-				}
+				recoveryTime := cm.backoffDuration(failure.FailureCount)
 
 				if now.Sub(failure.Timestamp) > recoveryTime {
 					delete(cm.failedKeysCache, key)
