@@ -1,8 +1,51 @@
-## [v2.6.45] - 2026-04-03
+## [v2.6.44-fix23] - 2026-04-06
 
-### Fixed
+### 修复
 
-- **自动补全消息内容数组** - 修复对 Claude Code 新版请求中 `message.content` 为 `null` 或省略时的解析兼容性，避免 Messages 请求在进入转换链路前被错误拒绝
+- **Claude 渠道响应完全透传** - 跳过所有 token 修补和事件处理，直接透传上游 SSE 流，消除因二次处理导致的兼容性问题
+- **extractErrorInfo 支持扁平格式错误响应** - 修复 401 响应未能正确解析导致 key 未被拉黑的问题
+- **透传兼容优化** - UA 透传、认证头顺序修正、thinking 消息保留骨架，提升与各上游的协议兼容性
+- **清理 thinking 历史并修复 400 重试判定** - 转发 messages 请求时正确剔除历史 thinking 块，避免触发上游 400 错误后误判重试条件
+- **修复批量测试中文乱码** - 前端批量能力测试结果中文字符显示异常，补注册 flask-outline 图标
+- **Responses ping 端点与批量测试对话框修复** - 修复 Responses 协议 ping 端点异常，批量测试对话框交互问题及图标注册补全
+- **session 深拷贝防并发修改** - 修复 session 并发读写竞态，提取 SQLite 重试逻辑为公共函数，前端刷新去重优化
+- **SSE 标准化扩展至全部 provider** - 统一各 provider 的 SSE 解析行为，新增诊断日志和共享语义检测函数
+- **修复工具调用响应被误判为空流** - responses provider 正确识别工具调用响应，完善 failover 错误分类和相关测试
+- **拉黑 Key 数量标签优化** - 去掉数量标签中的图标减少占位，改为 hover 显示提示文字
+- **修复 disabledApiKeys 直接改 props 的 Vue 反模式** - 前端组件改用本地状态管理，避免直接修改 props
+- **补充 routePrefix/disabledApiKeys 字段到 Dashboard 响应** - Dashboard API 返回完整渠道字段，修复前端字段缺失问题
+- **messages 渠道补充 routePrefix 字段返回** - 修复渠道配置带前缀路由时 URL 构建错误
+- **GetUpstreams 响应补充 routePrefix/disabledApiKeys 字段** - 确保渠道列表接口返回完整字段
+- **默认路由排除有前缀的渠道** - scheduler 调度时默认路由不再选中配置了路由前缀的渠道
+- **注册缺失的 MDI 图标** - 补全前端 Vuetify 图标映射，修复图标渲染异常
+- **修复 CapabilityTestDialog 语法错误** - 修复能力测试对话框组件语法问题导致的渲染失败
+- **新增 API Key 持久化拉黑功能** - 支持将失效 API Key 持久化记录并在后续请求中跳过
+- **规范化 SSE 字段行解析** - 处理冒号后缺少空格的非标准 SSE 格式，增强 provider 兼容性
+
+## [v2.6.45] - 2026-04-06
+
+### 修复
+
+- **Claude 渠道响应完全透传** - 跳过所有 token 修补和事件处理，直接透传上游 SSE 流，消除因二次处理导致的兼容性问题
+- **extractErrorInfo 支持扁平格式错误响应** - 修复 401 响应未能正确解析导致 key 未被拉黑的问题
+- **透传兼容优化** - UA 透传、认证头顺序修正、thinking 消息保留骨架，提升与各上游的协议兼容性
+- **清理 thinking 历史并修复 400 重试判定** - 转发 messages 请求时正确剔除历史 thinking 块，避免触发上游 400 错误后误判重试条件
+- **修复批量测试中文乱码** - 前端批量能力测试结果中文字符显示异常，补注册 flask-outline 图标
+- **Responses ping 端点与批量测试对话框修复** - 修复 Responses 协议 ping 端点异常，批量测试对话框交互问题及图标注册补全
+- **session 深拷贝防并发修改** - 修复 session 并发读写竞态，提取 SQLite 重试逻辑为公共函数，前端刷新去重优化
+- **SSE 标准化扩展至全部 provider** - 统一各 provider 的 SSE 解析行为，新增诊断日志和共享语义检测函数
+- **修复工具调用响应被误判为空流** - responses provider 正确识别工具调用响应，完善 failover 错误分类和相关测试
+- **拉黑 Key 数量标签优化** - 去掉数量标签中的图标减少占位，改为 hover 显示提示文字
+- **修复 disabledApiKeys 直接改 props 的 Vue 反模式** - 前端组件改用本地状态管理，避免直接修改 props
+- **补充 routePrefix/disabledApiKeys 字段到 Dashboard 响应** - Dashboard API 返回完整渠道字段，修复前端字段缺失问题
+- **messages 渠道补充 routePrefix 字段返回** - 修复渠道配置带前缀路由时 URL 构建错误
+- **GetUpstreams 响应补充 routePrefix/disabledApiKeys 字段** - 确保渠道列表接口返回完整字段
+- **默认路由排除有前缀的渠道** - scheduler 调度时默认路由不再选中配置了路由前缀的渠道
+- **注册缺失的 MDI 图标** - 补全前端 Vuetify 图标映射，修复图标渲染异常
+- **修复 CapabilityTestDialog 语法错误** - 修复能力测试对话框组件语法问题导致的渲染失败
+- **新增四项功能** - 多项前端与后端功能修复及优化
+- **新增 API Key 持久化拉黑功能** - 支持将失效 API Key 持久化记录并在后续请求中跳过
+- **规范化 SSE 字段行解析** - 处理冒号后缺少空格的非标准 SSE 格式，增强 provider 兼容性
 
 ## [v2.6.44] - 2026-03-31
 

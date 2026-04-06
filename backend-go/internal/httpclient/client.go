@@ -124,6 +124,10 @@ func (cm *ClientManager) GetStreamClient(insecure bool, proxyURL ...string) *htt
 	}
 
 	transport := &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second, // 每 30s 发一次 TCP 探测包，检测僵尸连接
+		}).DialContext,
 		MaxIdleConns:          200, // 流式连接池更大
 		MaxIdleConnsPerHost:   20,
 		IdleConnTimeout:       120 * time.Second,

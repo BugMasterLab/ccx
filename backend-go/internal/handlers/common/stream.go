@@ -3,6 +3,7 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -484,6 +485,12 @@ func ProcessStreamEvents(
 
 				return nil, err
 			}
+
+		case <-c.Request.Context().Done():
+			log.Printf("[Messages-Stream] 客户端已断开，停止流处理")
+			ctx.ClientGone = true
+			go drainChannels(eventChan, errChan)
+			return nil, context.Canceled
 		}
 	}
 }
