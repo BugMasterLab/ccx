@@ -1621,9 +1621,19 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 			if errObj, ok := data["error"].(map[string]interface{}); ok {
 				errType, _ := errObj["type"].(string)
 				errMsg, _ := errObj["message"].(string)
-				errCode, _ := errObj["code"].(string)
+				// code 字段可能是字符串或数字，统一转为字符串
+				var errCode string
+				switch v := errObj["code"].(type) {
+				case string:
+					errCode = v
+				case float64:
+					errCode = fmt.Sprintf("%.0f", v)
+				case json.Number:
+					errCode = v.String()
+				}
 
 				typeLower := strings.ToLower(errType)
+				msgLower := strings.ToLower(errMsg)
 
 				// 认证错误
 				if typeLower == "authentication_error" || typeLower == "invalid_api_key" {
@@ -1637,8 +1647,13 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 				if typeLower == "insufficient_balance" || typeLower == "insufficient_quota" || typeLower == "billing_error" {
 					return "insufficient_balance", truncateMsg(errMsg)
 				}
-				// 已知的余额不足错误码（如 Kimi 的 1113）
+				// 已知的余额不足错误码（如 bigmodel/Kimi 的 1113）
 				if isInsufficientBalanceCode(errCode) {
+					return "insufficient_balance", truncateMsg(errMsg)
+				}
+				// 中文余额关键词兜底（覆盖 bigmodel 等国产模型）
+				if strings.Contains(msgLower, "余额不足") || strings.Contains(msgLower, "余额") && strings.Contains(msgLower, "充值") ||
+					strings.Contains(msgLower, "无可用资源包") || strings.Contains(msgLower, "额度不足") {
 					return "insufficient_balance", truncateMsg(errMsg)
 				}
 			}
