@@ -64,10 +64,10 @@ export default defineConfig(({ mode }) => {
       // 优化代码分割
       rollupOptions: {
         output: {
-          manualChunks: {
-            'vue-vendor': ['vue', 'vue-router', 'pinia'],
-            'vuetify': ['vuetify'],
-            'charts': ['apexcharts', 'vue3-apexcharts'],
+          manualChunks(id) {
+            if (id.includes('apexcharts') || id.includes('vue3-apexcharts')) return 'charts'
+            if (id.includes('vuetify')) return 'vuetify'
+            if (id.includes('vue') || id.includes('pinia')) return 'vue-vendor'
           }
         }
       }

@@ -1,6 +1,16 @@
 /// <reference types="vite/client" />
 
-declare const __APP_UI_LANGUAGE__: string
+declare module 'vuetify/styles' {}
+
+declare global {
+  var __APP_UI_LANGUAGE__: string
+
+  interface Window {
+    __CCX_RUNTIME_CONFIG__?: {
+      uiLanguage?: string
+    }
+  }
+}
 
 // Allow importing .vue files in TS
 declare module '*.vue' {
@@ -10,8 +20,4 @@ declare module '*.vue' {
   export default component
 }
 
-interface Window {
-  __CCX_RUNTIME_CONFIG__?: {
-    uiLanguage?: string
-  }
-}
+export {}
