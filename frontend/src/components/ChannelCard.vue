@@ -30,7 +30,7 @@
               </div>
             </div>
             <!-- 官网图标按钮（紧贴标题右侧） -->
-            <v-tooltip v-if="channel.website" :text="t('channelCard.openWebsite')" location="bottom" :open-delay="150">
+            <v-tooltip v-if="channel.website" :text="t('channelCard.openWebsite')" location="bottom" :open-delay="150" content-class="ccx-tooltip">
               <template #activator="{ props: tooltipProps }">
                 <v-btn v-bind="tooltipProps" :href="channel.website" target="_blank" rel="noopener" size="small" variant="text" color="primary" icon>
                   <v-icon size="18">mdi-open-in-new</v-icon>
@@ -113,7 +113,7 @@
       <!-- 状态和延迟（右对齐、间距更紧凑） -->
       <div class="d-flex align-center justify-end ga-4 mb-4">
         <div class="status-indicator">
-          <v-tooltip :text="getStatusTooltip()" location="bottom" :open-delay="150">
+          <v-tooltip :text="getStatusTooltip()" location="bottom" :open-delay="150" content-class="ccx-tooltip">
             <template #activator="{ props: tooltipProps }">
               <div class="status-badge cursor-help" v-bind="tooltipProps" :class="`status-${channel.status || 'unknown'}`">
                 <v-icon 
@@ -183,7 +183,7 @@
                 <code class="text-caption flex-1-1 text-truncate mr-2">{{ maskApiKey(key) }}</code>
                 <div class="d-flex align-center ga-1">
                   <!-- 置顶按钮：仅最后一个 key 显示 -->
-                  <v-tooltip v-if="index === channel.apiKeys.length - 1 && channel.apiKeys.length > 1" :text="t('channelCard.moveTop')" location="top" :open-delay="150">
+                  <v-tooltip v-if="index === channel.apiKeys.length - 1 && channel.apiKeys.length > 1" :text="t('channelCard.moveTop')" location="top" :open-delay="150" content-class="ccx-tooltip">
                     <template #activator="{ props: tooltipProps }">
                       <v-btn v-bind="tooltipProps" size="x-small" color="warning" icon variant="text" rounded="md" @click="$emit('moveKeyToTop', channel.index, key)">
                         <v-icon size="small">mdi-arrow-up-bold</v-icon>
@@ -191,14 +191,14 @@
                     </template>
                   </v-tooltip>
                   <!-- 置底按钮：仅第一个 key 显示 -->
-                  <v-tooltip v-if="index === 0 && channel.apiKeys.length > 1" :text="t('channelCard.moveBottom')" location="top" :open-delay="150">
+                  <v-tooltip v-if="index === 0 && channel.apiKeys.length > 1" :text="t('channelCard.moveBottom')" location="top" :open-delay="150" content-class="ccx-tooltip">
                     <template #activator="{ props: tooltipProps }">
                       <v-btn v-bind="tooltipProps" size="x-small" color="warning" icon variant="text" rounded="md" @click="$emit('moveKeyToBottom', channel.index, key)">
                         <v-icon size="small">mdi-arrow-down-bold</v-icon>
                       </v-btn>
                     </template>
                   </v-tooltip>
-                  <v-tooltip :text="copiedKeyIndex === index ? t('channelCard.copied') : t('channelCard.copyKey')" location="top" :open-delay="150">
+                  <v-tooltip :text="copiedKeyIndex === index ? t('channelCard.copied') : t('channelCard.copyKey')" location="top" :open-delay="150" content-class="ccx-tooltip">
                     <template #activator="{ props: tooltipProps }">
                       <v-btn
                         v-bind="tooltipProps"
@@ -254,7 +254,7 @@
                       <span class="text-caption text-medium-emphasis">{{ formatDisabledTime(dk.disabledAt) }}</span>
                     </div>
                   </div>
-                  <v-tooltip :text="t('channelCard.restoreKey')" location="top" :open-delay="150">
+                  <v-tooltip :text="t('channelCard.restoreKey')" location="top" :open-delay="150" content-class="ccx-tooltip">
                     <template #activator="{ props: tooltipProps }">
                       <v-btn
                         v-bind="tooltipProps"

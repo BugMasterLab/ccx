@@ -145,7 +145,7 @@
                   <v-icon color="success" size="small">mdi-check-circle</v-icon>
                   <span class="text-body-2 text-success">{{ t('capability.success') }}</span>
                 </div>
-                <v-tooltip v-else :text="test.error || t('capability.failedTooltip')" location="top">
+                <v-tooltip v-else :text="test.error || t('capability.failedTooltip')" location="top" content-class="error-tooltip">
                   <template #activator="{ props }">
                     <div v-bind="props" class="d-flex align-center ga-1">
                       <v-icon color="error" size="small">mdi-close-circle</v-icon>
