@@ -244,7 +244,10 @@ func TryUpstreamWithAllKeys(
 				if shouldFailover {
 					lastError = fmt.Errorf("上游错误: %d", resp.StatusCode)
 					failedKeys[apiKey] = true
-					cfgManager.MarkKeyAsFailed(apiKey, apiType)
+					// 已拉黑的 key 不需要再冷却
+					if !blResult.ShouldBlacklist {
+						cfgManager.MarkKeyAsFailed(apiKey, apiType)
+					}
 					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
@@ -368,14 +371,15 @@ func TryUpstreamWithAllKeys(
 					isBalanceError := blErr.Reason == "insufficient_balance"
 					isRateLimit := blErr.Reason == "rate_limit"
 					// 速率限制只冷却不拉黑，其他错误按原逻辑拉黑
-					if !isRateLimit {
+					if isRateLimit {
+						cfgManager.MarkKeyAsFailed(apiKey, apiType)
+					} else {
 						if !isBalanceError || upstream.IsAutoBlacklistBalanceEnabled() {
 							if blacklistErr := cfgManager.BlacklistKey(apiType, channelIndex, apiKey, blErr.Reason, blErr.Message); blacklistErr != nil {
 								log.Printf("[%s-Blacklist] 拉黑 Key 失败: %v", apiType, blacklistErr)
 							}
 						}
 					}
-					cfgManager.MarkKeyAsFailed(apiKey, apiType)
 					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
