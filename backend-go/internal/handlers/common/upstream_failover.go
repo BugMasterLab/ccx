@@ -332,9 +332,13 @@ func TryUpstreamWithAllKeys(
 					// SSE 流内检测到拉黑条件：Header 未发送，可安全 failover + 拉黑 Key
 					failedKeys[apiKey] = true
 					isBalanceError := blErr.Reason == "insufficient_balance"
-					if !isBalanceError || upstream.IsAutoBlacklistBalanceEnabled() {
-						if blacklistErr := cfgManager.BlacklistKey(apiType, channelIndex, apiKey, blErr.Reason, blErr.Message); blacklistErr != nil {
-							log.Printf("[%s-Blacklist] 拉黑 Key 失败: %v", apiType, blacklistErr)
+					isRateLimit := blErr.Reason == "rate_limit"
+					// 速率限制只冷却不拉黑，其他错误按原逻辑拉黑
+					if !isRateLimit {
+						if !isBalanceError || upstream.IsAutoBlacklistBalanceEnabled() {
+							if blacklistErr := cfgManager.BlacklistKey(apiType, channelIndex, apiKey, blErr.Reason, blErr.Message); blacklistErr != nil {
+								log.Printf("[%s-Blacklist] 拉黑 Key 失败: %v", apiType, blacklistErr)
+							}
 						}
 					}
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
@@ -342,6 +346,10 @@ func TryUpstreamWithAllKeys(
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
+					}
+					logAction := "blacklisted"
+					if isRateLimit {
+						logAction = "rate_limited"
 					}
 					if channelLogStore != nil {
 						channelLogStore.Record(channelIndex, &metrics.ChannelLog{
@@ -353,12 +361,12 @@ func TryUpstreamWithAllKeys(
 							Success:       false,
 							KeyMask:       utils.MaskAPIKey(apiKey),
 							BaseURL:       currentBaseURL,
-							ErrorInfo:     fmt.Sprintf("key blacklisted: %s - %s", blErr.Reason, blErr.Message),
+							ErrorInfo:     fmt.Sprintf("key %s: %s - %s", logAction, blErr.Reason, blErr.Message),
 							IsRetry:       attempt > 0 || urlIdx > 0,
 							InterfaceType: apiType,
 						})
 					}
-					log.Printf("[%s-Blacklist] SSE 流内错误触发拉黑 (Key: %s, 原因: %s)，尝试下一个密钥", apiType, utils.MaskAPIKey(apiKey), blErr.Reason)
+					log.Printf("[%s-Blacklist] SSE 流内错误触发%s (Key: %s, 原因: %s)，尝试下一个密钥", apiType, logAction, utils.MaskAPIKey(apiKey), blErr.Reason)
 					continue
 				} else {
 					// 真实渠道故障：计入失败指标

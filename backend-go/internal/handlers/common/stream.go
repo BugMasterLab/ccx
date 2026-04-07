@@ -1685,6 +1685,16 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 				strings.Contains(msgLower, "无可用资源包") || strings.Contains(msgLower, "额度不足") {
 				return "insufficient_balance", truncateMsg(errMsg)
 			}
+			// 速率限制（临时冷却，非永久拉黑）
+			if isRateLimitCode(errCode) {
+				return "rate_limit", truncateMsg(errMsg)
+			}
+			if typeLower == "rate_limit_error" || typeLower == "rate_limit" {
+				return "rate_limit", truncateMsg(errMsg)
+			}
+			if strings.Contains(msgLower, "速率限制") || strings.Contains(msgLower, "请求频率") {
+				return "rate_limit", truncateMsg(errMsg)
+			}
 		}
 	}
 	return "", ""
@@ -1694,8 +1704,20 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 func isInsufficientBalanceCode(code string) bool {
 	knownCodes := []string{
 		"1113", // bigmodel/Kimi: 余额不足或无可用资源包
-		"1302", // bigmodel: 账户已达到速率限制（账号级限速，需拉黑）
 		"1305", // bigmodel: 该模型当前访问量过大（账号级限速，需拉黑）
+	}
+	for _, c := range knownCodes {
+		if code == c {
+			return true
+		}
+	}
+	return false
+}
+
+// isRateLimitCode 检查错误码是否为已知的速率限制代码（触发冷却重试，非永久拉黑）
+func isRateLimitCode(code string) bool {
+	knownCodes := []string{
+		"1302", // bigmodel: 账户已达到速率限制
 	}
 	for _, c := range knownCodes {
 		if code == c {
