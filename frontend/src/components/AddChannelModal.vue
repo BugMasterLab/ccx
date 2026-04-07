@@ -1519,6 +1519,8 @@ const restoreDisabledKeyLabelMap = {
   unavailable: 'channelCard.blacklistReason.unavailable',
   rate_limited: 'channelCard.blacklistReason.rate_limited',
   invalid: 'channelCard.blacklistReason.invalid',
+  authentication_error: 'channelCard.blacklistReason.authentication_error',
+  permission_error: 'channelCard.blacklistReason.permission_error',
   unknown: 'channelCard.blacklistReason.unknown',
 } as const
 
