@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -911,13 +910,37 @@ func HandleStreamResponse(
 ) (*types.Usage, error) {
 	defer resp.Body.Close()
 
-	// claude serviceType: 完全透传，跳过所有事件处理和 token 修补
+	// claude serviceType: 透传，但需经 preflight 检测拉黑条件
 	if upstream != nil && upstream.ServiceType == "claude" {
-		SetupStreamHeaders(c, resp)
-		if f, ok := c.Writer.(http.Flusher); ok {
-			f.Flush()
+		eventChan0, errChan0, err0 := provider.HandleStreamResponse(resp.Body)
+		if err0 != nil {
+			c.JSON(500, gin.H{"error": "Failed to handle stream response"})
+			return nil, err0
 		}
-		io.Copy(c.Writer, resp.Body) //nolint:errcheck
+		preflight0 := PreflightStreamEvents(eventChan0, errChan0)
+		if preflight0.HasError {
+			drainChannels(eventChan0, errChan0)
+			return nil, preflight0.Error
+		}
+		if preflight0.BlacklistReason != "" {
+			drainChannels(eventChan0, errChan0)
+			return nil, &ErrBlacklistKey{Reason: preflight0.BlacklistReason, Message: preflight0.BlacklistMessage}
+		}
+		SetupStreamHeaders(c, resp)
+		flusher0, ok := c.Writer.(http.Flusher)
+		if !ok {
+			drainChannels(eventChan0, errChan0)
+			return nil, fmt.Errorf("ResponseWriter不支持Flush接口")
+		}
+		flusher0.Flush()
+		for _, buffered := range preflight0.BufferedEvents {
+			fmt.Fprint(c.Writer, buffered) //nolint:errcheck
+			flusher0.Flush()
+		}
+		for event := range eventChan0 {
+			fmt.Fprint(c.Writer, event) //nolint:errcheck
+			flusher0.Flush()
+		}
 		return nil, nil
 	}
 
@@ -1636,8 +1659,6 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 				errCode = v
 			case float64:
 				errCode = fmt.Sprintf("%.0f", v)
-			case json.Number:
-				errCode = v.String()
 			}
 
 			typeLower := strings.ToLower(errType)
@@ -1673,6 +1694,7 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 func isInsufficientBalanceCode(code string) bool {
 	knownCodes := []string{
 		"1113", // bigmodel/Kimi: 余额不足或无可用资源包
+		"1302", // bigmodel: 账户已达到速率限制（账号级限速，需拉黑）
 		"1305", // bigmodel: 该模型当前访问量过大（账号级限速，需拉黑）
 	}
 	for _, c := range knownCodes {
