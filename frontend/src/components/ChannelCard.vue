@@ -249,7 +249,7 @@
                     <code class="text-caption text-truncate">{{ maskApiKey(dk.key) }}</code>
                     <div class="d-flex align-center ga-1 mt-1">
                       <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : 'error'" variant="tonal">
-                        {{ t('channelCard.blacklistReason.' + dk.reason) }}
+                        {{ t(getDisabledKeyReasonLabel(dk.reason)) }}
                       </v-chip>
                       <span class="text-caption text-medium-emphasis">{{ formatDisabledTime(dk.disabledAt) }}</span>
                     </div>
@@ -335,6 +335,14 @@ import { computed, ref } from 'vue'
 import type { Channel } from '../services/api'
 import { useI18n } from '../i18n'
 
+const disabledKeyReasonLabelMap = {
+  insufficient_balance: 'channelCard.blacklistReason.insufficient_balance',
+  unavailable: 'channelCard.blacklistReason.unavailable',
+  rate_limited: 'channelCard.blacklistReason.rate_limited',
+  invalid: 'channelCard.blacklistReason.invalid',
+  unknown: 'channelCard.blacklistReason.unknown',
+} as const
+
 interface Props {
   channel: Channel
 }
@@ -342,7 +350,10 @@ interface Props {
 const props = defineProps<Props>()
 const { t } = useI18n()
 
-// 复制功能相关状态
+const getDisabledKeyReasonLabel = (reason?: string) => {
+  return disabledKeyReasonLabelMap[reason as keyof typeof disabledKeyReasonLabelMap] || disabledKeyReasonLabelMap.unknown
+}
+
 const copiedKeyIndex = ref<number | null>(null)
 
 defineEmits<{

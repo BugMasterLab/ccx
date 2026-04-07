@@ -478,29 +478,19 @@ const buildChartSeries = (data: ChannelKeyMetricsHistoryResponse | null) => {
       // Forward direction (Input/Read)
       result.push({
         name: `${displayName} ${inLabel}`,
-        data: keyData.dataPoints.map(dp => {
-          let value = 0
-          if (mode === 'tokens') {
-            value = dp.inputTokens
-          } else {
-            value = dp.cacheReadTokens
-          }
-          return { x: new Date(dp.timestamp).getTime(), y: value }
-        })
+        data: keyData.dataPoints.map(dp => ({
+          x: new Date(dp.timestamp).getTime(),
+          y: mode === 'tokens' ? dp.inputTokens : dp.cacheReadTokens
+        }))
       })
 
       // Output/Write - distinguish with a dashed line
       result.push({
         name: `${displayName} ${outLabel}`,
-        data: keyData.dataPoints.map(dp => {
-          let value = 0
-          if (mode === 'tokens') {
-            value = dp.outputTokens
-          } else {
-            value = dp.cacheCreationTokens
-          }
-          return { x: new Date(dp.timestamp).getTime(), y: value }
-        })
+        data: keyData.dataPoints.map(dp => ({
+          x: new Date(dp.timestamp).getTime(),
+          y: mode === 'tokens' ? dp.outputTokens : dp.cacheCreationTokens
+        }))
       })
     }
   })

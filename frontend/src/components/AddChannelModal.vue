@@ -610,7 +610,7 @@
                         </v-list-item-title>
                         <v-list-item-subtitle class="d-flex align-center ga-1">
                           <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : 'error'" variant="tonal">
-                            {{ t('channelCard.blacklistReason.' + dk.reason) }}
+                            {{ t(getRestoreDisabledKeyLabel(dk.reason)) }}
                           </v-chip>
                           <span class="text-caption">{{ new Date(dk.disabledAt).toLocaleDateString() }}</span>
                         </v-list-item-subtitle>
@@ -891,6 +891,7 @@ const emit = defineEmits<{
   testCapability: [channelId: number]
 }>()
 const { t } = useI18n()
+const apiService = new ApiService()
 
 // 主题
 const theme = useTheme()
@@ -1055,26 +1056,18 @@ const _expectedRequestUrl = computed(() => {
 
   // 根据渠道类型和服务类型确定端点（与后端逻辑一致）
   const serviceType = detectedServiceType.value || getDefaultServiceTypeValue()
-  let endpoint = ''
-  if (props.channelType === 'responses') {
-    // responses 渠道根据 serviceType 决定端点
-    if (serviceType === 'responses') {
-      endpoint = '/responses'
-    } else if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  } else {
-    // messages 渠道：根据检测到的服务类型决定端点
-    if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else if (serviceType === 'gemini') {
-      endpoint = '/models/{model}:generateContent'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  }
+  const endpoint =
+    props.channelType === 'responses'
+      ? serviceType === 'responses'
+        ? '/responses'
+        : serviceType === 'claude'
+          ? '/messages'
+          : '/chat/completions'
+      : serviceType === 'claude'
+        ? '/messages'
+        : serviceType === 'gemini'
+          ? '/models/{model}:generateContent'
+          : '/chat/completions'
 
   if (hasVersion || skipVersion) {
     return baseUrl + endpoint
@@ -1097,24 +1090,18 @@ const getExpectedRequestUrl = (inputBaseUrl: string): string => {
   const hasVersion = /\/v\d+[a-z]*$/.test(baseUrl)
 
   const serviceType = detectedServiceType.value || getDefaultServiceTypeValue()
-  let endpoint = ''
-  if (props.channelType === 'responses') {
-    if (serviceType === 'responses') {
-      endpoint = '/responses'
-    } else if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  } else {
-    if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else if (serviceType === 'gemini') {
-      endpoint = '/models/{model}:generateContent'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  }
+  const endpoint =
+    props.channelType === 'responses'
+      ? serviceType === 'responses'
+        ? '/responses'
+        : serviceType === 'claude'
+          ? '/messages'
+          : '/chat/completions'
+      : serviceType === 'claude'
+        ? '/messages'
+        : serviceType === 'gemini'
+          ? '/models/{model}:generateContent'
+          : '/chat/completions'
 
   if (hasVersion || skipVersion) {
     return baseUrl + endpoint
@@ -1527,6 +1514,18 @@ interface KeyModelsStatus {
 }
 const keyModelsStatus = ref<Map<string, KeyModelsStatus>>(new Map())
 
+const restoreDisabledKeyLabelMap = {
+  insufficient_balance: 'channelCard.blacklistReason.insufficient_balance',
+  unavailable: 'channelCard.blacklistReason.unavailable',
+  rate_limited: 'channelCard.blacklistReason.rate_limited',
+  invalid: 'channelCard.blacklistReason.invalid',
+  unknown: 'channelCard.blacklistReason.unknown',
+} as const
+
+const getRestoreDisabledKeyLabel = (reason?: string) => {
+  return restoreDisabledKeyLabelMap[reason as keyof typeof restoreDisabledKeyLabelMap] || restoreDisabledKeyLabelMap.unknown
+}
+
 // 表单验证错误
 const errors = reactive({
   name: '',
@@ -1806,13 +1805,13 @@ const restoreDisabledKey = async (apiKey: string) => {
   try {
     const channelId = props.channel.index
     if (props.channelType === 'chat') {
-      await api.restoreChatApiKey(channelId, apiKey)
+      await apiService.restoreChatApiKey(channelId, apiKey)
     } else if (props.channelType === 'gemini') {
-      await api.restoreGeminiApiKey(channelId, apiKey)
+      await apiService.restoreGeminiApiKey(channelId, apiKey)
     } else if (props.channelType === 'responses') {
-      await api.restoreResponsesApiKey(channelId, apiKey)
+      await apiService.restoreResponsesApiKey(channelId, apiKey)
     } else {
-      await api.restoreApiKey(channelId, apiKey)
+      await apiService.restoreApiKey(channelId, apiKey)
     }
     // 本地标记已恢复，加入活跃列表
     localRestoredKeys.value.add(apiKey)
@@ -1942,7 +1941,6 @@ const fetchTargetModels = async () => {
   fetchingModels.value = true
   fetchModelsError.value = ''
 
-  const apiService = new ApiService()
   const channelId = props.channel?.index
 
   // modelsApiType 决定请求协议（Bearer/x-goog-api-key、/v1/models vs /v1beta/models）

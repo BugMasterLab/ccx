@@ -260,6 +260,10 @@ export type MessageKey =
   | 'channelCard.blacklistReason.authentication_error'
   | 'channelCard.blacklistReason.permission_error'
   | 'channelCard.blacklistReason.insufficient_balance'
+  | 'channelCard.blacklistReason.unavailable'
+  | 'channelCard.blacklistReason.rate_limited'
+  | 'channelCard.blacklistReason.invalid'
+  | 'channelCard.blacklistReason.unknown'
   | 'channelCard.notChecked'
   | 'channelCard.statusHealthy'
   | 'channelCard.statusError'
@@ -626,6 +630,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': 'Auth error',
     'channelCard.blacklistReason.permission_error': 'Permission denied',
     'channelCard.blacklistReason.insufficient_balance': 'No balance',
+    'channelCard.blacklistReason.unavailable': 'Unavailable',
+    'channelCard.blacklistReason.rate_limited': 'Rate limited',
+    'channelCard.blacklistReason.invalid': 'Invalid key',
+    'channelCard.blacklistReason.unknown': 'Unknown',
     'channelCard.notChecked': 'Not checked',
     'channelCard.statusHealthy': 'Healthy',
     'channelCard.statusError': 'Error',
@@ -991,6 +999,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': 'Auth error',
     'channelCard.blacklistReason.permission_error': 'Izin ditolak',
     'channelCard.blacklistReason.insufficient_balance': 'Saldo habis',
+    'channelCard.blacklistReason.unavailable': 'Tidak tersedia',
+    'channelCard.blacklistReason.rate_limited': 'Batas rate',
+    'channelCard.blacklistReason.invalid': 'Key tidak valid',
+    'channelCard.blacklistReason.unknown': 'Tidak diketahui',
     'channelCard.notChecked': 'Belum dicek',
     'channelCard.statusHealthy': 'Sehat',
     'channelCard.statusError': 'Error',
@@ -1356,6 +1368,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': '认证失败',
     'channelCard.blacklistReason.permission_error': '权限不足',
     'channelCard.blacklistReason.insufficient_balance': '余额不足',
+    'channelCard.blacklistReason.unavailable': '不可用',
+    'channelCard.blacklistReason.rate_limited': '频率限制',
+    'channelCard.blacklistReason.invalid': '密钥无效',
+    'channelCard.blacklistReason.unknown': '未知原因',
     'channelCard.notChecked': '未检测',
     'channelCard.statusHealthy': '健康',
     'channelCard.statusError': '错误',

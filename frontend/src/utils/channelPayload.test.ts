@@ -21,7 +21,9 @@ describe('buildChannelPayload', () => {
       fastMode: true,
       customHeaders: { 'x-test': '1' },
       proxyUrl: ' http://127.0.0.1:7890 ',
-      supportedModels: ['gpt-5']
+      routePrefix: '',
+      supportedModels: ['gpt-5'],
+      autoBlacklistBalance: true
     })
 
     expect(result.name).toBe('test-channel')
@@ -55,7 +57,9 @@ describe('buildChannelPayload', () => {
       fastMode: false,
       customHeaders: {},
       proxyUrl: '',
-      supportedModels: []
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true
     })
 
     expect(result.baseUrl).toBe('https://api.example.com/v1#')
@@ -81,7 +85,9 @@ describe('buildChannelPayload', () => {
       fastMode: true,
       customHeaders: {},
       proxyUrl: '',
-      supportedModels: ['opus']
+      routePrefix: '',
+      supportedModels: ['opus'],
+      autoBlacklistBalance: true
     })
 
     expect(result.modelMapping).toEqual({ opus: 'claude-3-7-sonnet' })
@@ -109,6 +115,7 @@ describe('buildChannelPayload', () => {
       fastMode: false,
       customHeaders: {},
       proxyUrl: '',
+      routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: false
     })
