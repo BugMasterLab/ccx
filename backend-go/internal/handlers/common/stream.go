@@ -392,49 +392,6 @@ func NewStreamContext(envCfg *config.EnvConfig) *StreamContext {
 	return ctx
 }
 
-// seedSynthesizerFromRequest 将请求里预置的 assistant 文本拼接进合成器（仅用于日志可读性）
-//
-// Claude Code 的部分内部调用会在 messages 里预置一条 assistant 内容（例如 "{"），让模型只输出“续写”部分。
-// 这会导致我们仅基于 SSE delta 合成的日志缺失开头。这里用请求体做一次轻量补齐。
-func seedSynthesizerFromRequest(ctx *StreamContext, requestBody []byte) {
-	if ctx == nil || ctx.Synthesizer == nil || len(requestBody) == 0 {
-		return
-	}
-
-	var req struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(requestBody, &req); err != nil {
-		return
-	}
-
-	// 只取最后一条 assistant，避免把历史上下文都拼进日志
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		msg := req.Messages[i]
-		if msg.Role != "assistant" {
-			continue
-		}
-		var b strings.Builder
-		for _, c := range msg.Content {
-			if c.Type == "text" && c.Text != "" {
-				b.WriteString(c.Text)
-			}
-		}
-		prefill := b.String()
-		// 防止把很长的预置内容刷进日志
-		if len(prefill) > 0 && len(prefill) <= 256 {
-			ctx.LogPrefillText = prefill
-		}
-		return
-	}
-}
-
 // SetupStreamHeaders 设置流式响应头
 func SetupStreamHeaders(c *gin.Context, resp *http.Response) {
 	utils.ForwardResponseHeaders(resp.Header, c.Writer)
@@ -895,110 +852,56 @@ func IsClientDisconnectError(err error) bool {
 
 // HandleStreamResponse 处理流式响应（Messages API）
 //
-// 流程：provider.HandleStreamResponse → PreflightStreamEvents（预检测）
+// 流程：provider.HandleStreamResponse → PreflightStreamEvents（预检测）→ 直接透传
 //   - 空响应 → return nil, ErrEmptyStreamResponse（Header 未发送，可安全重试）
-//   - 非空   → SetupStreamHeaders → 回放缓冲事件 → ProcessStreamEvents
+//   - 拉黑错误 → return nil, ErrBlacklistKey（触发 failover + 拉黑）
+//   - 正常 → SetupStreamHeaders → 回放缓冲事件 → 透传后续事件
 func HandleStreamResponse(
 	c *gin.Context,
 	resp *http.Response,
 	provider providers.Provider,
-	envCfg *config.EnvConfig,
-	startTime time.Time,
-	upstream *config.UpstreamConfig,
-	requestBody []byte,
-	requestModel string,
 ) (*types.Usage, error) {
 	defer resp.Body.Close()
 
-	// claude serviceType: 透传，但需经 preflight 检测拉黑条件
-	if upstream != nil && upstream.ServiceType == "claude" {
-		eventChan0, errChan0, err0 := provider.HandleStreamResponse(resp.Body)
-		if err0 != nil {
-			c.JSON(500, gin.H{"error": "Failed to handle stream response"})
-			return nil, err0
-		}
-		preflight0 := PreflightStreamEvents(eventChan0, errChan0)
-		if preflight0.HasError {
-			drainChannels(eventChan0, errChan0)
-			return nil, preflight0.Error
-		}
-		if preflight0.BlacklistReason != "" {
-			drainChannels(eventChan0, errChan0)
-			return nil, &ErrBlacklistKey{Reason: preflight0.BlacklistReason, Message: preflight0.BlacklistMessage}
-		}
-		SetupStreamHeaders(c, resp)
-		flusher0, ok := c.Writer.(http.Flusher)
-		if !ok {
-			drainChannels(eventChan0, errChan0)
-			return nil, fmt.Errorf("ResponseWriter不支持Flush接口")
-		}
-		flusher0.Flush()
-		for _, buffered := range preflight0.BufferedEvents {
-			fmt.Fprint(c.Writer, buffered) //nolint:errcheck
-			flusher0.Flush()
-		}
-		for event := range eventChan0 {
-			fmt.Fprint(c.Writer, event) //nolint:errcheck
-			flusher0.Flush()
-		}
-		return nil, nil
-	}
-
+	// 所有 serviceType 统一透传：provider 层完成格式转换，这里只做 preflight 检测 + 直接转发
 	eventChan, errChan, err := provider.HandleStreamResponse(resp.Body)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to handle stream response"})
 		return nil, err
 	}
-
-	// 预检测：在发送 HTTP Header 之前缓冲事件并检查是否为空响应
 	preflight := PreflightStreamEvents(eventChan, errChan)
-
-	// 流错误：排空 channel 后返回错误
 	if preflight.HasError {
 		drainChannels(eventChan, errChan)
 		return nil, preflight.Error
 	}
-
-	// 空响应：Header 未发送，可安全重试
 	if preflight.IsEmpty {
 		log.Printf("[Messages-EmptyResponse] 上游返回空响应 (缓冲事件数: %d, 诊断: %s)，触发重试", len(preflight.BufferedEvents), preflight.Diagnostic)
 		drainChannels(eventChan, errChan)
-		// 如果同时检测到拉黑条件，优先返回拉黑错误
 		if preflight.BlacklistReason != "" {
 			return nil, &ErrBlacklistKey{Reason: preflight.BlacklistReason, Message: preflight.BlacklistMessage}
 		}
 		return nil, ErrEmptyStreamResponse
 	}
-
-	// 流中有拉黑错误但内容非空（如错误前有部分输出）：仍返回拉黑错误以触发 Key 拉黑
 	if preflight.BlacklistReason != "" {
 		drainChannels(eventChan, errChan)
 		return nil, &ErrBlacklistKey{Reason: preflight.BlacklistReason, Message: preflight.BlacklistMessage}
 	}
-
-	// 非空响应：正常流程
 	SetupStreamHeaders(c, resp)
-
-	w := c.Writer
-	flusher, ok := w.(http.Flusher)
+	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		log.Printf("[Messages-Stream] 警告: ResponseWriter不支持Flush接口")
 		drainChannels(eventChan, errChan)
 		return nil, fmt.Errorf("ResponseWriter不支持Flush接口")
 	}
 	flusher.Flush()
-
-	ctx := NewStreamContext(envCfg)
-	ctx.RequestModel = requestModel
-	ctx.LowQuality = upstream.LowQuality
-	seedSynthesizerFromRequest(ctx, requestBody)
-
-	// 回放预检测期间缓冲的事件
-	for _, bufferedEvent := range preflight.BufferedEvents {
-		ProcessStreamEvent(c, w, flusher, bufferedEvent, ctx, envCfg, requestBody)
+	for _, buffered := range preflight.BufferedEvents {
+		fmt.Fprint(c.Writer, buffered) //nolint:errcheck
+		flusher.Flush()
 	}
-
-	return ProcessStreamEvents(c, w, flusher, eventChan, errChan, ctx, envCfg, startTime, requestBody)
+	for event := range eventChan {
+		fmt.Fprint(c.Writer, event) //nolint:errcheck
+		flusher.Flush()
+	}
+	return nil, nil
 }
 
 // ========== Token 检测和修补相关函数 ==========

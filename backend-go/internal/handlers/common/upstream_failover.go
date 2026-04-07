@@ -194,6 +194,40 @@ func TryUpstreamWithAllKeys(
 				resp.Body.Close()
 				respBodyBytes = utils.DecompressGzipIfNeeded(resp, respBodyBytes)
 
+				// 优先检查全局暂停规则（状态码 + 关键词匹配 → 自定义暂停时间）
+				if pauseRule := cfgManager.MatchPauseRule(resp.StatusCode, respBodyBytes); pauseRule != nil {
+					duration := time.Duration(pauseRule.DurationMinutes) * time.Minute
+					failedKeys[apiKey] = true
+					cfgManager.MarkKeyAsFailedWithDuration(apiKey, apiType, duration)
+					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
+					if markURLFailure != nil {
+						markURLFailure(currentBaseURL)
+					}
+					lastError = fmt.Errorf("暂停规则命中: %d - %s", resp.StatusCode, pauseRule.Description)
+					if channelLogStore != nil {
+						errInfo := string(respBodyBytes)
+						if len(errInfo) > 200 {
+							errInfo = errInfo[:200]
+						}
+						channelLogStore.Record(channelIndex, &metrics.ChannelLog{
+							Timestamp:     time.Now(),
+							Model:         redirectedModel,
+							OriginalModel: originalModel,
+							StatusCode:    resp.StatusCode,
+							DurationMs:    time.Since(attemptStart).Milliseconds(),
+							Success:       false,
+							KeyMask:       utils.MaskAPIKey(apiKey),
+							BaseURL:       currentBaseURL,
+							ErrorInfo:     fmt.Sprintf("pause_rule: %s (%d min)", pauseRule.Description, pauseRule.DurationMinutes),
+							IsRetry:       attempt > 0 || urlIdx > 0,
+							InterfaceType: apiType,
+						})
+					}
+					log.Printf("[%s-PauseRule] 命中暂停规则 (Key: %s, 状态码: %d, 暂停: %d分钟, 规则: %s)", apiType, utils.MaskAPIKey(apiKey), resp.StatusCode, pauseRule.DurationMinutes, pauseRule.Description)
+					continue
+				}
+
 				shouldFailover, isQuotaRelated := ShouldRetryWithNextKey(resp.StatusCode, respBodyBytes, cfgManager.GetFuzzyModeEnabled(), apiType)
 
 				// 检查是否应永久拉黑该 Key（认证/权限/余额错误）

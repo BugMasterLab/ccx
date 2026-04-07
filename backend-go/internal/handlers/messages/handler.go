@@ -146,7 +146,7 @@ func handleMultiChannel(
 				},
 				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
 					if claudeReq.Stream {
-						return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, claudeReq.Model)
+						return common.HandleStreamResponse(c, resp, provider)
 					}
 					return handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, upstreamCopy, apiKey)
 				},
@@ -238,7 +238,7 @@ func handleSingleChannel(
 		nil,
 		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
 			if claudeReq.Stream {
-				return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, claudeReq.Model)
+				return common.HandleStreamResponse(c, resp, provider)
 			}
 			return handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, upstreamCopy, apiKey)
 		},

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -122,12 +123,24 @@ type Config struct {
 
 	// 移除计费头中的 cch= 参数：启用时自动从 system 数组中移除 cch=xxx; 部分
 	StripBillingHeader bool `json:"stripBillingHeader"`
+
+	// 全局暂停规则：HTTP 状态码 + 关键词匹配 → 自定义暂停时间
+	PauseRules []PauseRule `json:"pauseRules,omitempty"`
+}
+
+// PauseRule 全局暂停规则：HTTP 状态码 + 关键词匹配 → 自定义暂停时间
+type PauseRule struct {
+	Description     string   `json:"description"`
+	ErrorCode       int      `json:"error_code"`
+	Keywords        []string `json:"keywords"`
+	DurationMinutes int      `json:"duration_minutes"`
 }
 
 // FailedKey 失败密钥记录
 type FailedKey struct {
-	Timestamp    time.Time
-	FailureCount int
+	Timestamp     time.Time
+	FailureCount  int
+	FixedDuration time.Duration // 非零时使用固定冷却时间，忽略指数退避
 }
 
 // ConfigManager 配置管理器
@@ -315,7 +328,13 @@ func (cm *ConfigManager) isKeyFailed(apiKey, apiType string) bool {
 		return false
 	}
 
-	recoveryTime := cm.backoffDuration(failure.FailureCount)
+	// 优先使用固定冷却时间（暂停规则触发），否则使用指数退避
+	var recoveryTime time.Duration
+	if failure.FixedDuration > 0 {
+		recoveryTime = failure.FixedDuration
+	} else {
+		recoveryTime = cm.backoffDuration(failure.FailureCount)
+	}
 
 	return time.Since(failure.Timestamp) < recoveryTime
 }
@@ -323,6 +342,56 @@ func (cm *ConfigManager) isKeyFailed(apiKey, apiType string) bool {
 // IsKeyFailed 检查 Key 是否在冷却期（公开方法）
 func (cm *ConfigManager) IsKeyFailed(apiKey, apiType string) bool {
 	return cm.isKeyFailed(apiKey, apiType)
+}
+
+// MarkKeyAsFailedWithDuration 标记密钥失败，使用固定冷却时间（暂停规则触发）
+func (cm *ConfigManager) MarkKeyAsFailedWithDuration(apiKey, apiType string, duration time.Duration) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cacheKey := failedKeyCacheKey(apiType, apiKey)
+	cm.failedKeysCache[cacheKey] = &FailedKey{
+		Timestamp:     time.Now(),
+		FailureCount:  1,
+		FixedDuration: duration,
+	}
+
+	log.Printf("[%s-PauseRule] 暂停 API 密钥: %s (时长: %v)",
+		apiType, utils.MaskAPIKey(apiKey), duration)
+}
+
+// GetPauseRules 获取全局暂停规则
+func (cm *ConfigManager) GetPauseRules() []PauseRule {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.config.PauseRules
+}
+
+// MatchPauseRule 根据 HTTP 状态码和响应体匹配暂停规则
+// 返回匹配的规则，未匹配返回 nil
+func (cm *ConfigManager) MatchPauseRule(statusCode int, body []byte) *PauseRule {
+	rules := cm.GetPauseRules()
+	if len(rules) == 0 {
+		return nil
+	}
+	bodyLower := strings.ToLower(string(body))
+	for i := range rules {
+		rule := &rules[i]
+		if rule.ErrorCode != statusCode {
+			continue
+		}
+		// 无关键词要求时，仅状态码匹配即可
+		if len(rule.Keywords) == 0 {
+			return rule
+		}
+		// 任一关键词命中即匹配
+		for _, kw := range rule.Keywords {
+			if strings.Contains(bodyLower, strings.ToLower(kw)) {
+				return rule
+			}
+		}
+	}
+	return nil
 }
 
 // clearFailedKeysForUpstream 清理指定渠道的所有失败 key 记录
