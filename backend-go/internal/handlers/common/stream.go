@@ -1669,10 +1669,11 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 	return "", ""
 }
 
-// isInsufficientBalanceCode 检查错误码是否为已知的余额不足代码
+// isInsufficientBalanceCode 检查错误码是否为已知的余额/限额不足代码（触发永久拉黑）
 func isInsufficientBalanceCode(code string) bool {
 	knownCodes := []string{
-		"1113", // Kimi: 余额不足或无可用资源包
+		"1113", // bigmodel/Kimi: 余额不足或无可用资源包
+		"1305", // bigmodel: 该模型当前访问量过大（账号级限速，需拉黑）
 	}
 	for _, c := range knownCodes {
 		if code == c {
