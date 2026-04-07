@@ -1606,9 +1606,15 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 
 	// 即使不是显式的 event: error，也检查 data 中的 type == "error"
 	for _, line := range strings.Split(event, "\n") {
+		line = strings.TrimSpace(line)
 		jsonStr, ok := extractSSEJSONLine(line)
 		if !ok {
-			continue
+			// 兜底：裸 JSON（bigmodel 等不规范 SSE，error 对象直接作为行内容，无 data: 前缀）
+			if strings.HasPrefix(line, "{") {
+				jsonStr = line
+			} else {
+				continue
+			}
 		}
 
 		var data map[string]interface{}
