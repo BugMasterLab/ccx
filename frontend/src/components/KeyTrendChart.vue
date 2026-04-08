@@ -17,6 +17,8 @@
           <v-btn value="6h" size="x-small" class="chart-control-btn">{{ t('chart.6h') }}</v-btn>
           <v-btn value="24h" size="x-small" class="chart-control-btn">{{ t('chart.24h') }}</v-btn>
           <v-btn value="today" size="x-small" class="chart-control-btn">{{ t('chart.today') }}</v-btn>
+          <v-btn value="7d" size="x-small" class="chart-control-btn">{{ t('chart.7d') }}</v-btn>
+          <v-btn value="30d" size="x-small" class="chart-control-btn">{{ t('chart.30d') }}</v-btn>
         </v-btn-toggle>
 
         <v-btn icon size="x-small" variant="text" :loading="isLoading" :disabled="isLoading" @click="refreshData">
@@ -86,7 +88,7 @@ const { t } = useI18n()
 
 // View mode type
 type ViewMode = 'traffic' | 'tokens' | 'cache'
-type Duration = '1h' | '6h' | '24h' | 'today'
+type Duration = '1h' | '6h' | '24h' | 'today' | '7d' | '30d'
 
 // LocalStorage keys for preferences (per channelType)
 const getStorageKey = (channelType: string, key: string) => `keyTrendChart:${channelType}:${key}`
@@ -109,7 +111,7 @@ const loadSavedPreferences = (channelType: string): { view: ViewMode; duration: 
     const savedDuration = window.localStorage.getItem(getStorageKey(channelType, 'duration')) as Duration | null
     return {
       view: savedView && ['traffic', 'tokens', 'cache'].includes(savedView) ? savedView : 'traffic',
-      duration: savedDuration && ['1h', '6h', '24h', 'today'].includes(savedDuration) ? savedDuration : '1h'
+      duration: savedDuration && ['1h', '6h', '24h', 'today', '7d', '30d'].includes(savedDuration) ? savedDuration : '1h'
     }
   } catch {
     return { view: 'traffic', duration: '1h' }
@@ -421,7 +423,7 @@ const chartOptions = computed<ApexOptions>(() => {
       type: 'datetime',
       labels: {
         datetimeUTC: false,
-        format: selectedDuration.value === '1h' ? 'HH:mm' : 'HH:mm',
+        format: selectedDuration.value === '7d' || selectedDuration.value === '30d' ? 'MM-dd HH:mm' : 'HH:mm',
         style: { fontSize: '11px', colors: theme.global.current.value.dark ? '#9ca3af' : '#6b7280' }
       },
       axisBorder: { show: false },
