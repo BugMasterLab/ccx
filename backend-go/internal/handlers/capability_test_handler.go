@@ -212,11 +212,13 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 				ChannelID:           id,
 				ChannelName:         channel.Name,
 				SourceType:          channel.ServiceType,
-				Tests:               []ProtocolTestResult{{Protocol: "all", Error: &errMsg, TestedAt: time.Now().Format(time.RFC3339)}},
+				Tests:               []ProtocolTestResult{},
 				CompatibleProtocols: []string{},
 				TotalDuration:       0,
 			}
 			job := createCapabilityJobFromResponse(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout, resp, false)
+			job.Status = CapabilityJobStatusFailed
+			job.Error = &errMsg
 			capabilityJobs.create(job)
 			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": false, "job": job})
 			return

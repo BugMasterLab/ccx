@@ -217,7 +217,6 @@ export interface CapabilityTestJob {
   progress: CapabilityJobProgress
   error?: string
   cacheHit?: boolean
-  targetProtocols?: string[]
   timeoutMilliseconds?: number
 }
 
@@ -636,19 +635,14 @@ export class ApiService {
   async startChannelCapabilityTest(
     type: 'messages' | 'chat' | 'gemini' | 'responses',
     id: number,
-    previousJobId?: string,
-    models?: string[],
-    targetProtocols?: Array<'messages' | 'chat' | 'gemini' | 'responses'>
+    previousJobId?: string
   ): Promise<CapabilityTestJobStartResponse> {
-    const body: { targetProtocols: string[]; timeout: number; previousJobId?: string; models?: string[] } = {
-      targetProtocols: targetProtocols && targetProtocols.length > 0 ? targetProtocols : ['messages', 'chat', 'gemini', 'responses'],
+    const body: { targetProtocols: string[]; timeout: number; previousJobId?: string } = {
+      targetProtocols: ['messages', 'chat', 'gemini', 'responses'],
       timeout: 10000
     }
     if (previousJobId) {
       body.previousJobId = previousJobId
-    }
-    if (models && models.length > 0) {
-      body.models = models
     }
     return this.request(`/${type}/channels/${id}/capability-test`, {
       method: 'POST',

@@ -377,10 +377,19 @@ watch(() => props.capabilityJob?.jobId ?? '', (nextJobId, prevJobId) => {
   }
 })
 
+watch(() => props.capabilityJob?.error, (error) => {
+  if (!error) return
+  if (error === 'no_api_key') {
+    errorMessage.value = t('capability.noApiKeyError')
+    return
+  }
+  errorMessage.value = t('capability.genericJobError', { message: error })
+})
+
 const state = computed(() => {
   if (errorMessage.value) return 'error'
   if (!props.capabilityJob) return 'initializing'
-  if (props.capabilityJob.status === 'completed' || props.capabilityJob.status === 'failed' || props.capabilityJob.status === 'cancelled') return 'completed'
+  if (props.capabilityJob.status === 'completed' || props.capabilityJob.status === 'cancelled' || props.capabilityJob.status === 'failed') return 'completed'
   return 'running'
 })
 
@@ -392,6 +401,10 @@ watch(state, (newState) => {
 })
 
 const job = computed(() => props.capabilityJob)
+
+const knownProtocols = ['messages', 'chat', 'responses', 'gemini'] as const
+
+const isKnownProtocol = (protocol: string) => knownProtocols.includes(protocol as typeof knownProtocols[number])
 
 const getProtocolDisplayName = (protocol: string) => {
   const map: Record<string, string> = {
@@ -434,11 +447,13 @@ const protocolOrder = ['messages', 'chat', 'responses', 'gemini']
 
 const sortedTests = computed(() => {
   if (!job.value) return []
-  return [...job.value.tests].sort((a, b) => {
-    const indexA = protocolOrder.indexOf(a.protocol)
-    const indexB = protocolOrder.indexOf(b.protocol)
-    return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB)
-  })
+  return [...job.value.tests]
+    .filter(test => isKnownProtocol(test.protocol))
+    .sort((a, b) => {
+      const indexA = protocolOrder.indexOf(a.protocol)
+      const indexB = protocolOrder.indexOf(b.protocol)
+      return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB)
+    })
 })
 
 const getModelResults = (test: CapabilityProtocolJobResult): CapabilityModelJobResult[] => {
@@ -529,18 +544,11 @@ defineExpose({ setError })
   min-width: 0;
 }
 
-.dialog-title {
-  font-size: 1.125rem;
-  line-height: 1.25;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
 :deep(.error-tooltip),
 :deep(.failure-tooltip),
 :deep(.success-tooltip) {
   font-weight: 600;
-  letter-spacing: 0.2px;
+  letter-spacing: 0;
   max-width: 400px;
   word-break: break-word;
 }
@@ -624,7 +632,7 @@ defineExpose({ setError })
 .models-label {
   font-size: 0.8125rem;
   font-weight: 600;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   color: rgba(var(--v-theme-on-surface), 0.62);
   margin-bottom: 8px;
 }
@@ -730,7 +738,7 @@ defineExpose({ setError })
 
 .tooltip-title {
   font-weight: 600;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   margin-bottom: 6px;
   color: rgba(var(--v-theme-on-surface), 0.95);
 }
