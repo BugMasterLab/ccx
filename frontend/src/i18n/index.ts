@@ -25,7 +25,7 @@ export {
   resolveInitialLocale,
   translate,
 }
-export type { SupportedLocale } from './messages'
+export type { MessageKey, SupportedLocale } from './messages'
 
 export function useI18n() {
   const preferencesStore = usePreferencesStore()

@@ -333,7 +333,7 @@
                   <v-row v-if="supportsOpenAIAdvancedOptions" class="mt-4">
                     <v-col cols="12" md="6">
                       <div class="d-flex align-center justify-space-between h-100 advanced-switch-row">
-                        <div>
+                        <div class="channel-toggle-text">
                           <div class="text-body-2 font-weight-medium">{{ t('addChannel.fastMode') }}</div>
                           <div class="text-caption text-medium-emphasis">{{ t('addChannel.fastModeHint') }}</div>
                         </div>
@@ -610,7 +610,7 @@
                         </v-list-item-title>
                         <v-list-item-subtitle class="d-flex align-center ga-1">
                           <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : 'error'" variant="tonal">
-                            {{ t('channelCard.blacklistReason.' + dk.reason) }}
+                            {{ t(getBlacklistReasonKey(dk.reason)) }}
                           </v-chip>
                           <span class="text-caption">{{ new Date(dk.disabledAt).toLocaleDateString() }}</span>
                         </v-list-item-subtitle>
@@ -644,10 +644,10 @@
 
             <!-- 跳过 TLS 证书验证 -->
             <v-col cols="12">
-              <div class="d-flex align-center justify-space-between">
-                <div class="d-flex align-center ga-2">
+              <div class="channel-toggle-row">
+                <div class="channel-toggle-content">
                   <v-icon color="warning">mdi-shield-alert</v-icon>
-                  <div>
+                  <div class="channel-toggle-text">
                     <div class="text-body-1 font-weight-medium">{{ t('addChannel.skipTlsLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.skipTlsHint') }}</div>
                   </div>
@@ -658,10 +658,10 @@
 
             <!-- 低质量渠道标记 -->
             <v-col cols="12">
-              <div class="d-flex align-center justify-space-between">
-                <div class="d-flex align-center ga-2">
+              <div class="channel-toggle-row">
+                <div class="channel-toggle-content">
                   <v-icon color="info">mdi-speedometer-slow</v-icon>
-                  <div>
+                  <div class="channel-toggle-text">
                     <div class="text-body-1 font-weight-medium">{{ t('addChannel.lowQualityLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.lowQualityHint') }}</div>
                   </div>
@@ -671,10 +671,10 @@
             </v-col>
 
             <v-col cols="12">
-              <div class="d-flex align-center justify-space-between">
-                <div class="d-flex align-center ga-2">
+              <div class="channel-toggle-row">
+                <div class="channel-toggle-content">
                   <v-icon color="warning">mdi-cash-remove</v-icon>
-                  <div>
+                  <div class="channel-toggle-text">
                     <div class="text-body-1 font-weight-medium">{{ t('addChannel.autoBlacklistBalanceLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.autoBlacklistBalanceHint') }}</div>
                   </div>
@@ -702,10 +702,10 @@
 
             <!-- 注入 Dummy Thought Signature（仅 Gemini 渠道显示） -->
             <v-col v-if="props.channelType === 'gemini'" cols="12">
-              <div class="d-flex align-center justify-space-between">
-                <div class="d-flex align-center ga-2">
+              <div class="channel-toggle-row">
+                <div class="channel-toggle-content">
                   <v-icon color="secondary">mdi-signature</v-icon>
-                  <div>
+                  <div class="channel-toggle-text">
                     <div class="text-body-1 font-weight-medium">{{ t('addChannel.injectDummyThoughtSignatureLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.injectDummyThoughtSignatureHint') }}</div>
                   </div>
@@ -716,10 +716,10 @@
 
             <!-- 移除 Thought Signature（仅 Gemini 渠道显示） -->
             <v-col v-if="props.channelType === 'gemini'" cols="12">
-              <div class="d-flex align-center justify-space-between">
-                <div class="d-flex align-center ga-2">
+              <div class="channel-toggle-row">
+                <div class="channel-toggle-content">
                   <v-icon color="error">mdi-close-circle</v-icon>
-                  <div>
+                  <div class="channel-toggle-text">
                     <div class="text-body-1 font-weight-medium">{{ t('addChannel.stripThoughtSignatureLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.stripThoughtSignatureHint') }}</div>
                   </div>
@@ -864,7 +864,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Channel } from '../services/api'
-import { ApiService, ApiError } from '../services/api'
+import { api, ApiService, ApiError } from '../services/api'
 import {
   isValidApiKey as _isValidApiKey,
   isValidUrl as _isValidQuickInputUrl,
@@ -873,7 +873,7 @@ import {
 import { buildExpectedRequestUrls } from '../utils/expectedRequestUrls'
 import { supportsAdvancedChannelOptions } from '../utils/channelAdvancedOptions'
 import { buildChannelPayload } from '../utils/channelPayload'
-import { useI18n } from '../i18n'
+import { useI18n, type MessageKey } from '../i18n'
 
 interface Props {
   show: boolean
@@ -891,6 +891,20 @@ const emit = defineEmits<{
   testCapability: [channelId: number]
 }>()
 const { t } = useI18n()
+
+const getBlacklistReasonKey = (reason: string): MessageKey => {
+  switch (reason) {
+    case 'insufficient_balance':
+      return 'channelCard.blacklistReason.insufficient_balance'
+    case 'permission_error':
+      return 'channelCard.blacklistReason.permission_error'
+    case 'rate_limit':
+      return 'channelCard.blacklistReason.rate_limit'
+    case 'authentication_error':
+    default:
+      return 'channelCard.blacklistReason.authentication_error'
+  }
+}
 
 // 主题
 const theme = useTheme()
@@ -2210,9 +2224,37 @@ onUnmounted(() => {
   min-height: 56px;
 }
 
+.channel-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.channel-toggle-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.channel-toggle-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .advanced-switch-row :deep(.v-selection-control) {
   justify-content: flex-end;
   margin-inline-start: 16px;
+  flex: 0 0 auto;
+}
+
+.channel-toggle-row :deep(.v-selection-control) {
+  justify-content: flex-end;
+  flex: 0 0 auto;
+  margin-inline-start: 0;
 }
 
 </style>

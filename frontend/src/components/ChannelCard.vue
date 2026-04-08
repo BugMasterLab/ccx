@@ -249,7 +249,7 @@
                     <code class="text-caption text-truncate">{{ maskApiKey(dk.key) }}</code>
                     <div class="d-flex align-center ga-1 mt-1">
                       <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : dk.reason === 'rate_limit' ? 'info' : 'error'" variant="tonal">
-                        {{ t('channelCard.blacklistReason.' + dk.reason) }}
+                        {{ t(getBlacklistReasonKey(dk.reason)) }}
                       </v-chip>
                       <span class="text-caption text-medium-emphasis">{{ formatDisabledTime(dk.disabledAt) }}</span>
                     </div>
@@ -333,7 +333,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Channel } from '../services/api'
-import { useI18n } from '../i18n'
+import { useI18n, type MessageKey } from '../i18n'
 
 interface Props {
   channel: Channel
@@ -341,6 +341,20 @@ interface Props {
 
 const props = defineProps<Props>()
 const { t } = useI18n()
+
+const getBlacklistReasonKey = (reason: string): MessageKey => {
+  switch (reason) {
+    case 'insufficient_balance':
+      return 'channelCard.blacklistReason.insufficient_balance'
+    case 'permission_error':
+      return 'channelCard.blacklistReason.permission_error'
+    case 'rate_limit':
+      return 'channelCard.blacklistReason.rate_limit'
+    case 'authentication_error':
+    default:
+      return 'channelCard.blacklistReason.authentication_error'
+  }
+}
 
 // 复制功能相关状态
 const copiedKeyIndex = ref<number | null>(null)

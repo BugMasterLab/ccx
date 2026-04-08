@@ -1,10 +1,17 @@
 <template>
   <v-dialog :model-value="modelValue" max-width="800" @update:model-value="$emit('update:modelValue', $event)">
     <v-card>
-      <v-card-title class="d-flex align-center justify-space-between">
-        <span>{{ t('channelLogs.title', { channel: channelName }) }}</span>
-        <div class="d-flex align-center ga-2">
-          <v-btn size="x-small" :variant="autoRefresh ? 'flat' : 'outlined'" :color="autoRefresh ? 'primary' : ''" @click="autoRefresh = !autoRefresh">
+      <v-card-title class="channel-logs-header">
+        <span class="channel-logs-title">{{ t('channelLogs.title', { channel: channelName }) }}</span>
+        <div class="channel-logs-actions">
+          <v-btn
+            size="small"
+            density="comfortable"
+            class="channel-logs-refresh-btn"
+            :variant="autoRefresh ? 'flat' : 'outlined'"
+            :color="autoRefresh ? 'primary' : undefined"
+            @click="autoRefresh = !autoRefresh"
+          >
             {{ autoRefresh ? t('channelLogs.autoRefreshing') : t('channelLogs.autoRefresh') }}
           </v-btn>
           <v-btn icon size="small" variant="text" @click="$emit('update:modelValue', false)">
@@ -156,7 +163,46 @@ onUnmounted(() => stopPolling())
 </script>
 
 <style scoped>
+.channel-logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.channel-logs-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.channel-logs-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.channel-logs-refresh-btn {
+  min-width: fit-content;
+  white-space: nowrap;
+  text-transform: none;
+}
+
 .bg-error-subtle {
   background: rgba(var(--v-theme-error), 0.05);
+}
+
+@media (max-width: 600px) {
+  .channel-logs-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .channel-logs-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 </style>
