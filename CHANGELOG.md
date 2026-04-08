@@ -574,7 +574,7 @@
 
 - **渠道删除时保留历史指标数据** - 删除渠道时不再主动清理指标数据，让数据自然过期
   - 移除三个渠道删除处理器中的 `DeleteChannelMetrics()` 调用
-  - SQLite 数据将在配置的保留期后自动删除（`METRICS_RETENTION_DAYS`，默认 7 天）
+  - SQLite 数据将在配置的保留期后自动删除（`METRICS_RETENTION_DAYS`，默认 30 天）
   - 内存指标将在 48 小时无活动后自动清理
   - 保持全局历史统计数据完整性，不再因删除渠道而丢失
   - **注意**：若用相同 BaseURL + APIKey 重建渠道，可能继承近期健康状态/统计（受内存清理窗口与服务重启影响，熔断状态不持久化）
@@ -1709,7 +1709,7 @@
 
 - **快速添加渠道支持引号内容提取** - 支持从双引号/单引号中提取 URL 和 API Key，可直接粘贴 Claude Code 环境变量 JSON 配置格式
 - **SQLite 指标持久化存储** - 服务重启后不再丢失历史指标数据，启动时自动加载最近 24 小时数据
-  - 新增 `METRICS_PERSISTENCE_ENABLED`（默认 true）和 `METRICS_RETENTION_DAYS`（默认 7）配置
+  - 新增 `METRICS_PERSISTENCE_ENABLED`（默认 true）和 `METRICS_RETENTION_DAYS`（默认 30，范围 3-90）配置
   - 异步批量写入（100 条/批或每 30 秒），WAL 模式高并发，自动清理过期数据
 - **完整的 Responses API Token Usage 统计** - 支持多格式自动检测（Claude/Gemini/OpenAI）、缓存 TTL 细分统计（5m/1h）
 - **Messages API 缓存 TTL 细分统计** - 区分 5 分钟和 1 小时 TTL 的缓存创建统计

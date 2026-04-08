@@ -76,7 +76,7 @@ func NewEnvConfig() *EnvConfig {
 		MetricsFailureThreshold: getEnvAsFloat("METRICS_FAILURE_THRESHOLD", 0.5),
 		// 指标持久化配置
 		MetricsPersistenceEnabled: getEnv("METRICS_PERSISTENCE_ENABLED", "true") != "false",
-		MetricsRetentionDays:      clampInt(getEnvAsInt("METRICS_RETENTION_DAYS", 7), 3, 30),
+		MetricsRetentionDays:      clampInt(getEnvAsInt("METRICS_RETENTION_DAYS", 30), 3, 90),
 		// HTTP 客户端配置
 		ResponseHeaderTimeout: clampInt(getEnvAsInt("RESPONSE_HEADER_TIMEOUT", 60), 30, 120), // 30-120 秒
 		// 日志文件配置
