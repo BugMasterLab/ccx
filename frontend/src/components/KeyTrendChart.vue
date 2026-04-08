@@ -12,11 +12,11 @@
     <div class="chart-header d-flex align-center justify-space-between mb-3">
       <div class="d-flex align-center ga-2">
         <!-- Duration selector -->
-        <v-btn-toggle v-model="selectedDuration" mandatory density="compact" variant="outlined" divided :disabled="isLoading">
-          <v-btn value="1h" size="x-small">{{ t('chart.1h') }}</v-btn>
-          <v-btn value="6h" size="x-small">{{ t('chart.6h') }}</v-btn>
-          <v-btn value="24h" size="x-small">{{ t('chart.24h') }}</v-btn>
-          <v-btn value="today" size="x-small">{{ t('chart.today') }}</v-btn>
+        <v-btn-toggle v-model="selectedDuration" mandatory density="compact" variant="outlined" divided :disabled="isLoading" class="chart-control-toggle">
+          <v-btn value="1h" size="x-small" class="chart-control-btn">{{ t('chart.1h') }}</v-btn>
+          <v-btn value="6h" size="x-small" class="chart-control-btn">{{ t('chart.6h') }}</v-btn>
+          <v-btn value="24h" size="x-small" class="chart-control-btn">{{ t('chart.24h') }}</v-btn>
+          <v-btn value="today" size="x-small" class="chart-control-btn">{{ t('chart.today') }}</v-btn>
         </v-btn-toggle>
 
         <v-btn icon size="x-small" variant="text" :loading="isLoading" :disabled="isLoading" @click="refreshData">
@@ -25,16 +25,16 @@
       </div>
 
       <!-- View switcher -->
-      <v-btn-toggle v-model="selectedView" mandatory density="compact" variant="outlined" divided :disabled="isLoading">
-        <v-btn value="traffic" size="x-small">
+      <v-btn-toggle v-model="selectedView" mandatory density="compact" variant="outlined" divided :disabled="isLoading" class="chart-control-toggle">
+        <v-btn value="traffic" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-chart-line</v-icon>
           {{ t('chart.traffic') }}
         </v-btn>
-        <v-btn value="tokens" size="x-small">
+        <v-btn value="tokens" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-chart-line</v-icon>
           Token I/O
         </v-btn>
-        <v-btn value="cache" size="x-small">
+        <v-btn value="cache" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-database</v-icon>
           {{ t('chart.cacheRw') }}
         </v-btn>
@@ -807,6 +807,14 @@ defineExpose({
 .chart-header {
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.chart-control-toggle :deep(.v-btn.chart-control-btn) {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.3px !important;
+  padding-inline: 8px !important;
+  min-width: 36px !important;
 }
 
 .chart-area {
