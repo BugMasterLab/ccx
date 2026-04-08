@@ -260,6 +260,7 @@ export type MessageKey =
   | 'channelCard.blacklistReason.authentication_error'
   | 'channelCard.blacklistReason.permission_error'
   | 'channelCard.blacklistReason.insufficient_balance'
+  | 'channelCard.blacklistReason.rate_limit'
   | 'channelCard.notChecked'
   | 'channelCard.statusHealthy'
   | 'channelCard.statusError'
@@ -626,6 +627,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': 'Auth error',
     'channelCard.blacklistReason.permission_error': 'Permission denied',
     'channelCard.blacklistReason.insufficient_balance': 'No balance',
+    'channelCard.blacklistReason.rate_limit': 'Rate limited',
     'channelCard.notChecked': 'Not checked',
     'channelCard.statusHealthy': 'Healthy',
     'channelCard.statusError': 'Error',
@@ -991,6 +993,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': 'Auth error',
     'channelCard.blacklistReason.permission_error': 'Izin ditolak',
     'channelCard.blacklistReason.insufficient_balance': 'Saldo habis',
+    'channelCard.blacklistReason.rate_limit': 'Rate limit',
     'channelCard.notChecked': 'Belum dicek',
     'channelCard.statusHealthy': 'Sehat',
     'channelCard.statusError': 'Error',
@@ -1356,6 +1359,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': '认证失败',
     'channelCard.blacklistReason.permission_error': '权限不足',
     'channelCard.blacklistReason.insufficient_balance': '余额不足',
+    'channelCard.blacklistReason.rate_limit': '被限流',
     'channelCard.notChecked': '未检测',
     'channelCard.statusHealthy': '健康',
     'channelCard.statusError': '错误',

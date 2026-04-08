@@ -19,10 +19,10 @@
     "pinia": "^3.0.4",
     "pinia-plugin-persistedstate": "^4.7.1",
     "vue": "^3.5.26",
-    "vue-router": "4",
+    "vue-router": "^5",
     "vue3-apexcharts": "^1.10.0",
     "vuedraggable": "^4.1.0",
-    "vuetify": "^3.11.6"
+    "vuetify": "^4"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

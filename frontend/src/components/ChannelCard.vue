@@ -248,7 +248,7 @@
                   <div class="d-flex flex-column flex-1-1 mr-2" style="min-width: 0;">
                     <code class="text-caption text-truncate">{{ maskApiKey(dk.key) }}</code>
                     <div class="d-flex align-center ga-1 mt-1">
-                      <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : 'error'" variant="tonal">
+                      <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : dk.reason === 'rate_limit' ? 'info' : 'error'" variant="tonal">
                         {{ t('channelCard.blacklistReason.' + dk.reason) }}
                       </v-chip>
                       <span class="text-caption text-medium-emphasis">{{ formatDisabledTime(dk.disabledAt) }}</span>
