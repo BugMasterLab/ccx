@@ -315,7 +315,7 @@
 
           <div class="action-bar-right">
             <!-- CCH 计费头移除切换按钮（仅 Claude Messages 渠道相关） -->
-            <v-tooltip v-if="channelStore.activeTab === 'messages'" location="bottom" content-class="fuzzy-tooltip">
+            <v-tooltip v-if="channelStore.activeTab === 'messages'" location="bottom" content-class="ccx-tooltip">
               <template #activator="{ props }">
                 <v-btn
                   v-bind="props"
@@ -337,7 +337,7 @@
             </v-tooltip>
 
             <!-- Fuzzy 模式切换按钮 -->
-            <v-tooltip location="bottom" content-class="fuzzy-tooltip">
+            <v-tooltip location="bottom" content-class="ccx-tooltip">
               <template #activator="{ props }">
                 <v-btn
                   v-bind="props"
@@ -2214,21 +2214,5 @@ a.api-type-text {
 
 .v-theme--dark .status-badge .badge-content {
   border-color: rgba(255, 255, 255, 0.6);
-}
-
-/* Fuzzy tooltip 样式 - 复古像素主题 */
-.fuzzy-tooltip {
-  background: #1a1a1a !important;
-  color: #f5f5f5 !important;
-  border: 1px solid #333 !important;
-  border-radius: 0 !important;
-  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.2) !important;
-  padding: 8px 12px !important;
-}
-
-.v-theme--dark .fuzzy-tooltip {
-  background: #2d2d2d !important;
-  color: #f5f5f5 !important;
-  border-color: #555 !important;
 }
 </style>

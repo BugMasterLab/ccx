@@ -215,6 +215,7 @@
                       v-for="modelResult in getModelResults(test)"
                       :key="`${result.channelId}-${test.protocol}-${modelResult.model}`"
                       location="top"
+                      content-class="ccx-tooltip"
                     >
                       <template #activator="{ props: tooltipProps }">
                         <div

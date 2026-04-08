@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Changed
+
+- **统一全局 Tooltip 样式** - 将分散在各组件中的 tooltip 样式（`fuzzy-tooltip`、`status-tooltip`）合并为全局 `ccx-tooltip` 类（复古像素主题），所有 `v-tooltip` 统一使用 `content-class="ccx-tooltip"` 避免 Vuetify 默认灰色；拉黑密钥 chip 颜色由 `error` 改为 `warning`
+
+## [v2.6.47] - 2026-04-06
+
+### Fixed
+
+- **补注册 cash-remove 图标** - 修复前端缺少 `cash-remove` 图标注册导致组件渲染异常的问题
+
+## [v2.6.46] - 2026-04-05
+
 ### Fixed
 
 - **routePrefix 下 responses 渠道协议转换失败** - 修复 `ResponsesProvider.buildProviderRequestBody` 对请求路径的硬编码比较（`== "/v1/messages"`），改为 `HasSuffix` 匹配，使带 routePrefix 前缀的路由（如 `/:prefix/v1/messages`）也能正确触发 Claude→Responses 协议转换

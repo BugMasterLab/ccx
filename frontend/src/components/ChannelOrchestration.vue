@@ -157,7 +157,7 @@
             <!-- Metrics display -->
             <div class="channel-metrics" @click.stop>
               <template v-if="getChannelMetrics(element.index)">
-                <v-tooltip location="top" :open-delay="200">
+                <v-tooltip location="top" :open-delay="200" content-class="ccx-tooltip">
                   <template #activator="{ props: tooltipProps }">
                     <div v-bind="tooltipProps" class="d-flex align-center metrics-display">
                       <!-- Show success rate when there are requests in the last 15 minutes; otherwise show -- -->
@@ -260,9 +260,9 @@
                 <v-icon start size="x-small">mdi-key</v-icon>
                 {{ element.apiKeys?.length || 0 }}
               </v-chip>
-              <v-tooltip v-if="element.disabledApiKeys?.length" :text="`${element.disabledApiKeys.length} 个密钥已拉黑`" location="top">
+              <v-tooltip v-if="element.disabledApiKeys?.length" :text="`${element.disabledApiKeys.length} 个密钥已拉黑`" location="top" color="warning" content-class="ccx-tooltip">
                 <template #activator="{ props: tip }">
-                  <v-chip v-bind="tip" size="x-small" color="error" variant="tonal" @click="$emit('edit', element)">
+                  <v-chip v-bind="tip" size="x-small" color="warning" variant="tonal" @click="$emit('edit', element)">
                     {{ element.disabledApiKeys.length }}
                   </v-chip>
                 </template>
@@ -458,9 +458,9 @@
               <v-icon start size="x-small">mdi-key</v-icon>
               {{ channel.apiKeys?.length || 0 }}
             </v-chip>
-            <v-tooltip v-if="channel.disabledApiKeys?.length" :text="`${channel.disabledApiKeys.length} 个密钥已拉黑`" location="top">
+            <v-tooltip v-if="channel.disabledApiKeys?.length" :text="`${channel.disabledApiKeys.length} 个密钥已拉黑`" location="top" color="warning" content-class="ccx-tooltip">
               <template #activator="{ props: tip }">
-                <v-chip v-bind="tip" size="x-small" color="error" variant="tonal" @click="$emit('edit', channel)">
+                <v-chip v-bind="tip" size="x-small" color="warning" variant="tonal" @click="$emit('edit', channel)">
                   {{ channel.disabledApiKeys.length }}
                 </v-chip>
               </template>
