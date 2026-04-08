@@ -1516,17 +1516,20 @@ a.api-type-text {
 }
 
 .stat-card-label {
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   font-weight: 600;
-  margin-top: 2px;
-  opacity: 0.85;
+  margin-top: 4px;
+  line-height: 1.35;
+  opacity: 0.92;
   text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 .stat-card-desc {
-  font-size: 0.75rem;
-  opacity: 0.6;
-  margin-top: 2px;
+  font-size: 0.8125rem;
+  opacity: 0.72;
+  margin-top: 4px;
+  line-height: 1.45;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1684,9 +1687,9 @@ a.api-type-text {
   left: -1px !important;
   background: rgb(var(--v-theme-surface)) !important;
   color: rgb(var(--v-theme-on-surface)) !important;
-  font-size: 10px !important;
+  font-size: 11px !important;
   font-weight: 700 !important;
-  padding: 2px 8px !important;
+  padding: 3px 8px !important;
   border: 1px solid rgb(var(--v-theme-on-surface)) !important;
   border-top: none !important;
   border-left: none !important;
@@ -1718,7 +1721,7 @@ a.api-type-text {
 .channel-name .text-caption.text-medium-emphasis {
   background: rgb(var(--v-theme-surface-variant));
   padding: 2px 6px;
-  font-size: 10px !important;
+  font-size: 11px !important;
   font-weight: 600;
   color: rgb(var(--v-theme-on-surface)) !important;
   border: 1px solid rgb(var(--v-theme-on-surface));
@@ -2124,11 +2127,22 @@ a.api-type-text {
   font-family: 'Courier New', Consolas, 'Liberation Mono', monospace !important;
 }
 
+.text-body-1,
+.text-body-2 {
+  line-height: 1.55 !important;
+}
+
+.text-caption {
+  font-size: 0.8125rem !important;
+  line-height: 1.45 !important;
+}
+
 /* 所有按钮复古像素风格 */
 .v-btn:not(.v-btn--icon) {
   border-radius: 0 !important;
   text-transform: uppercase !important;
-  font-weight: 600 !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.5px !important;
 }
 
 /* 所有卡片复古像素风格 */

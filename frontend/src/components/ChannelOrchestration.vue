@@ -1739,14 +1739,14 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
-  margin-top: 2px;
-  font-size: 10px;
-  font-weight: 700;
-  color: rgba(var(--v-theme-on-surface), 0.72);
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.68);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0.4px;
 }
 
 .channel-keys {
@@ -1897,11 +1897,12 @@ defineExpose({
   }
 
   .rpm-tpm-values {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .rpm-tpm-labels {
-    font-size: 8px;
+    font-size: 10px;
+    letter-spacing: 0.3px;
   }
 }
 

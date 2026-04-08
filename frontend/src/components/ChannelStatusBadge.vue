@@ -135,7 +135,7 @@ const formatTime = (dateStr: string): string => {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 5px 9px;
   background: rgb(var(--v-theme-surface));
   border: 1px solid rgb(var(--v-theme-on-surface));
   cursor: help;
@@ -163,7 +163,7 @@ const formatTime = (dateStr: string): string => {
   display: inline-flex;
   align-items: center;
   line-height: 1;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;

@@ -5,11 +5,11 @@
         <v-avatar :color="avatarColor" variant="flat" size="40">
           <v-icon :style="headerIconStyle" size="20">{{ isEditing ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
         </v-avatar>
-        <div class="flex-grow-1">
-          <div class="text-h5 font-weight-bold">
+        <div class="flex-grow-1 modal-header-text">
+          <div class="modal-title">
             {{ isEditing ? t('addChannel.editTitle') : t('addChannel.createTitle') }}
           </div>
-          <div class="text-body-2" :class="subtitleClasses">
+          <div class="modal-subtitle" :class="subtitleClasses">
             {{ isEditing ? t('addChannel.editSubtitle') : isQuickMode ? t('addChannel.quickSubtitle') : t('addChannel.fullSubtitle') }}
           </div>
         </div>
@@ -18,7 +18,9 @@
           v-if="isEditing"
           color="success"
           variant="flat"
+          size="small"
           prepend-icon="mdi-test-tube"
+          class="capability-test-btn"
           @click="handleTestCapability"
         >
           {{ t('addChannel.testCapability') }}
@@ -196,7 +198,7 @@
                 <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
                   <div class="d-flex align-center ga-2">
                     <v-icon color="primary">mdi-swap-horizontal</v-icon>
-                    <span class="text-body-1 font-weight-bold">{{ t('addChannel.modelRedirect') }}</span>
+                    <span class="section-title">{{ t('addChannel.modelRedirect') }}</span>
                   </div>
                   <v-chip size="small" color="secondary" variant="tonal"> {{ t('addChannel.autoConvertModelNames') }} </v-chip>
                 </v-card-title>
@@ -398,7 +400,7 @@
                 <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
                   <div class="d-flex align-center ga-2">
                     <v-icon :color="form.apiKeys.length > 0 ? 'primary' : 'error'">mdi-key</v-icon>
-                    <span class="text-body-1 font-weight-bold">{{ t('channelCard.apiKeyManagement') }} *</span>
+                    <span class="section-title">{{ t('channelCard.apiKeyManagement') }} *</span>
                     <v-chip v-if="form.apiKeys.length === 0" size="x-small" color="error" variant="tonal">
                       {{ t('addChannel.apiKeyRequired') }}
                     </v-chip>
@@ -648,7 +650,7 @@
                 <div class="d-flex align-center ga-2">
                   <v-icon color="warning">mdi-shield-alert</v-icon>
                   <div>
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.skipTlsLabel') }}</div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.skipTlsLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.skipTlsHint') }}</div>
                   </div>
                 </div>
@@ -662,7 +664,7 @@
                 <div class="d-flex align-center ga-2">
                   <v-icon color="info">mdi-speedometer-slow</v-icon>
                   <div>
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.lowQualityLabel') }}</div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.lowQualityLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.lowQualityHint') }}</div>
                   </div>
                 </div>
@@ -675,7 +677,7 @@
                 <div class="d-flex align-center ga-2">
                   <v-icon color="warning">mdi-cash-remove</v-icon>
                   <div>
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.autoBlacklistBalanceLabel') }}</div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.autoBlacklistBalanceLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.autoBlacklistBalanceHint') }}</div>
                   </div>
                 </div>
@@ -706,7 +708,7 @@
                 <div class="d-flex align-center ga-2">
                   <v-icon color="secondary">mdi-signature</v-icon>
                   <div>
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.injectDummyThoughtSignatureLabel') }}</div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.injectDummyThoughtSignatureLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.injectDummyThoughtSignatureHint') }}</div>
                   </div>
                 </div>
@@ -720,7 +722,7 @@
                 <div class="d-flex align-center ga-2">
                   <v-icon color="error">mdi-close-circle</v-icon>
                   <div>
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.stripThoughtSignatureLabel') }}</div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.stripThoughtSignatureLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.stripThoughtSignatureHint') }}</div>
                   </div>
                 </div>
@@ -731,7 +733,7 @@
             <!-- 自定义请求头 -->
             <v-col cols="12">
               <v-card variant="outlined">
-                <v-card-title class="text-body-1 d-flex align-center ga-2">
+                <v-card-title class="section-card-title d-flex align-center ga-2">
                   <v-icon size="small">mdi-web</v-icon>
                   {{ t('addChannel.customHeadersLabel') }}
                 </v-card-title>
@@ -2038,23 +2040,19 @@ const handleSubmit = async () => {
   const { valid } = await formRef.value.validate()
   if (!valid) return
 
-  // 直接使用原始密钥，不需要转换
-  const processedApiKeys = form.apiKeys.filter(key => key.trim())
-
   // 处理 BaseURL：去重（忽略末尾 / 和 # 差异），并移除 UI 专用的尾部 #
   const seenUrls = new Set<string>()
-  const deduplicatedUrls =
-    form.baseUrls.length > 0
-      ? form.baseUrls
-          .map(url => url.trim().replace(/[#/]+$/, ''))
-          .filter(Boolean)
-          .filter(url => {
-            const normalized = url.replace(/[#/]+$/, '')
-            if (seenUrls.has(normalized)) return false
-            seenUrls.add(normalized)
-            return true
-          })
-      : [form.baseUrl.trim().replace(/[#/]+$/, '')].filter(Boolean)
+  if (form.baseUrls.length > 0) {
+    form.baseUrls
+      .map(url => url.trim().replace(/[#/]+$/, ''))
+      .filter(Boolean)
+      .forEach(url => {
+        const normalized = url.replace(/[#/]+$/, '')
+        if (!seenUrls.has(normalized)) {
+          seenUrls.add(normalized)
+        }
+      })
+  }
 
   const channelData = buildChannelPayload(form)
 
@@ -2142,7 +2140,43 @@ onUnmounted(() => {
 .base-url-hint {
   min-height: 20px;
   padding: 4px 12px 8px;
+  line-height: 1.45;
+}
+
+.modal-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-title {
+  font-size: 1.125rem;
   line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.modal-subtitle {
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+
+.section-title {
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.section-title--soft {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.section-card-title {
+  font-size: 0.9375rem !important;
+  line-height: 1.35;
+  font-weight: 600;
 }
 
 /* 多个预期请求项样式 */
@@ -2152,7 +2186,7 @@ onUnmounted(() => {
 
 /* 浅色模式下副标题使用白色带透明度 */
 .text-white-subtitle {
-  color: rgba(255, 255, 255, 0.85) !important;
+  color: rgba(255, 255, 255, 0.78) !important;
 }
 
 .animate-pulse {
@@ -2203,6 +2237,26 @@ onUnmounted(() => {
 
 .mode-toggle-btn {
   text-transform: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  padding-inline: 12px;
+}
+
+.mode-toggle-btn :deep(.v-btn__content) {
+  gap: 4px;
+}
+
+.capability-test-btn {
+  text-transform: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  padding-inline: 12px;
+}
+
+.capability-test-btn :deep(.v-btn__content) {
+  gap: 4px;
 }
 
 /* 高级选项中的右侧开关行 */

@@ -422,7 +422,7 @@ const chartOptions = computed<ApexOptions>(() => {
       labels: {
         datetimeUTC: false,
         format: selectedDuration.value === '1h' ? 'HH:mm' : 'HH:mm',
-        style: { fontSize: '10px' }
+        style: { fontSize: '11px', colors: theme.global.current.value.dark ? '#9ca3af' : '#6b7280' }
       },
       axisBorder: { show: false },
       axisTicks: { show: false }
@@ -606,7 +606,7 @@ const buildTrafficTooltip = ({ seriesIndex, dataPointIndex, w }: any): string =>
   const hasFailure = grandFailure > 0
 
   // Build HTML
-  let html = `<div style="padding: 8px 12px; font-size: 12px;">`
+  let html = `<div style="padding: 8px 12px; font-size: 13px; line-height: 1.55;">`
   html += `<div style="font-weight: 600; margin-bottom: 6px; color: ${hasFailure ? '#ef4444' : 'inherit'};">${timeStr}</div>`
 
   // Details for each key
@@ -618,7 +618,7 @@ const buildTrafficTooltip = ({ seriesIndex, dataPointIndex, w }: any): string =>
     html += `<span style="flex: 1;">${stat.keyMask}</span>`
     html += `<span style="margin-left: 12px; font-weight: 500;">${stat.total}</span>`
     if (hasKeyFailure) {
-      html += `<span style="margin-left: 6px; color: #ef4444; font-size: 11px;">(${stat.failure} ${t('chart.failed')}, ${failureRate}%)</span>`
+      html += `<span style="margin-left: 6px; color: #ef4444; font-size: 12px;">(${stat.failure} ${t('chart.failed')}, ${failureRate}%)</span>`
     }
     html += `</div>`
   })

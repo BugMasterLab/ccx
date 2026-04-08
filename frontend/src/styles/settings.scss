@@ -18,5 +18,6 @@ $error: #EF4444 !default;
 // 字体配置 - 等宽字体
 $body-font-family: 'Courier New', Consolas, 'Liberation Mono', monospace !default;
 $headings-font-family: 'Courier New', Consolas, 'Liberation Mono', monospace !default;
+$line-height-root: 1.6 !default;
 
 @use 'vuetify/settings';

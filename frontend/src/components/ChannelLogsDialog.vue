@@ -2,7 +2,7 @@
   <v-dialog :model-value="modelValue" max-width="800" @update:model-value="$emit('update:modelValue', $event)">
     <v-card>
       <v-card-title class="d-flex align-center justify-space-between">
-        <span>{{ t('channelLogs.title', { channel: channelName }) }}</span>
+        <span class="dialog-title">{{ t('channelLogs.title', { channel: channelName }) }}</span>
         <div class="d-flex align-center ga-2">
           <v-btn size="x-small" :variant="autoRefresh ? 'flat' : 'outlined'" :color="autoRefresh ? 'primary' : ''" @click="autoRefresh = !autoRefresh">
             {{ autoRefresh ? t('channelLogs.autoRefreshing') : t('channelLogs.autoRefresh') }}
@@ -156,6 +156,13 @@ onUnmounted(() => stopPolling())
 </script>
 
 <style scoped>
+.dialog-title {
+  font-size: 1.125rem;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 .channel-logs-scroll {
   max-height: 500px;
   overflow-y: auto;
@@ -177,7 +184,7 @@ onUnmounted(() => stopPolling())
 }
 
 .log-meta {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
 }
 
 .log-model {

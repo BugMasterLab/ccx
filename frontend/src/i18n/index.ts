@@ -31,8 +31,7 @@ export function useI18n() {
   const preferencesStore = usePreferencesStore()
   const locale = computed(() => normalizeLocale(preferencesStore.uiLanguage))
 
-  const t = createTranslator(locale.value)
-  const translateKey = (key: Parameters<typeof t>[0], params?: Parameters<typeof t>[1]) => {
+  const translateKey = (key: Parameters<ReturnType<typeof createTranslator>>[0], params?: Parameters<ReturnType<typeof createTranslator>>[1]) => {
     return translate(locale.value, key, params)
   }
 

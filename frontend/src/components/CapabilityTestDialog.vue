@@ -7,9 +7,9 @@
   >
     <v-card rounded="xl">
       <v-card-title class="d-flex align-center justify-space-between pa-4">
-        <div class="d-flex align-center ga-2">
+        <div class="d-flex align-center ga-2 dialog-title-wrapper">
           <v-icon color="success">mdi-test-tube</v-icon>
-          <span>{{ t('capability.title', { channel: channelName }) }}</span>
+          <span class="dialog-title">{{ t('capability.title', { channel: channelName }) }}</span>
         </div>
         <v-btn icon variant="text" @click="$emit('update:modelValue', false)">
           <v-icon>mdi-close</v-icon>
@@ -90,8 +90,8 @@
                   <span class="text-body-2 text-success">{{ t('capability.success') }}</span>
                 </div>
                 <v-tooltip v-else :text="test.error || t('capability.failedTooltip')" location="top">
-                  <template #activator="{ props }">
-                    <div v-bind="props" class="d-flex align-center ga-1">
+                  <template #activator="{ props: activatorProps }">
+                    <div v-bind="activatorProps" class="d-flex align-center ga-1">
                       <v-icon color="error" size="small">mdi-close-circle</v-icon>
                       <span class="text-body-2 text-error">{{ t('capability.failed') }}</span>
                     </div>
@@ -191,8 +191,8 @@
                       <span class="text-body-2 text-success">{{ t('capability.success') }}</span>
                     </div>
                     <v-tooltip v-else :text="test.error || t('capability.failedTooltip')" location="top" content-class="error-tooltip">
-                      <template #activator="{ props }">
-                        <div v-bind="props" class="d-flex align-center ga-1">
+                      <template #activator="{ props: activatorProps }">
+                        <div v-bind="activatorProps" class="d-flex align-center ga-1">
                           <v-icon color="error" size="small">mdi-close-circle</v-icon>
                           <span class="text-body-2 text-error">{{ t('capability.failed') }}</span>
                         </div>
@@ -325,7 +325,7 @@
             </tbody>
           </v-table>
 
-          <div class="text-caption text-medium-emphasis mt-3 text-right" v-if="state === 'completed'">
+          <div v-if="state === 'completed'" class="text-caption text-medium-emphasis mt-3 text-right">
             {{ t('capability.totalDuration', { duration: job?.totalDuration }) }}
           </div>
         </div>
@@ -456,13 +456,6 @@ const getSuccessCount = (test: CapabilityProtocolJobResult): number => {
   return getModelResults(test).filter(modelResult => modelResult.success).length
 }
 
-const getRecommendedModel = (test: CapabilityProtocolJobResult): string => {
-  if (test.testedModel) return test.testedModel
-  const firstSuccessfulModel = getModelResults(test).find(modelResult => modelResult.success)
-  if (firstSuccessfulModel?.model) return firstSuccessfulModel.model
-  return '-'
-}
-
 const formatSuccessRatio = (test: CapabilityProtocolJobResult): string => {
   const attemptedModels = getAttemptedModels(test)
   if (attemptedModels <= 0) return '-'
@@ -487,12 +480,6 @@ const formatLatency = (latency: number): string => {
 const formatStreaming = (modelResult: CapabilityModelJobResult): string => {
   if (!modelResult.success) return '-'
   return modelResult.streamingSupported ? t('capability.supported') : t('capability.unsupported')
-}
-
-const formatTime = (value: string): string => {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleTimeString()
 }
 
 const setError = (error: string) => {
@@ -537,6 +524,18 @@ defineExpose({ setError })
 </script>
 
 <style scoped>
+.dialog-title-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.dialog-title {
+  font-size: 1.125rem;
+  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 :deep(.error-tooltip),
 :deep(.failure-tooltip),
 :deep(.success-tooltip) {
@@ -623,7 +622,7 @@ defineExpose({ setError })
 }
 
 .models-label {
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 600;
   letter-spacing: 0.3px;
   color: rgba(var(--v-theme-on-surface), 0.62);
@@ -684,7 +683,7 @@ defineExpose({ setError })
 }
 
 .model-name {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 500;
   color: currentColor;
   letter-spacing: 0;
@@ -731,7 +730,7 @@ defineExpose({ setError })
 
 .tooltip-title {
   font-weight: 600;
-  font-size: 0.875rem;
+  font-size: 0.9375rem;
   margin-bottom: 6px;
   color: rgba(var(--v-theme-on-surface), 0.95);
 }
@@ -739,7 +738,7 @@ defineExpose({ setError })
 .tooltip-item {
   display: flex;
   align-items: center;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   margin: 4px 0;
   color: rgba(var(--v-theme-on-surface), 0.75);
 }
@@ -749,7 +748,7 @@ defineExpose({ setError })
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   margin: 6px 0;
 }
 
@@ -764,7 +763,7 @@ defineExpose({ setError })
 }
 
 .tooltip-error {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: inherit;
   margin-top: 4px;
   max-width: 300px;
@@ -772,7 +771,7 @@ defineExpose({ setError })
 }
 
 .tooltip-retry {
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   color: inherit;
   opacity: 0.7;
   margin-top: 6px;

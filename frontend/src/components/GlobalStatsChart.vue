@@ -352,7 +352,7 @@ const chartOptions = computed<ApexOptions>(() => {
       labels: {
         datetimeUTC: false,
         format: selectedDuration.value === '7d' || selectedDuration.value === '30d' ? 'MM-dd HH:mm' : 'HH:mm',
-        style: { fontSize: '10px' }
+        style: { fontSize: '11px', colors: theme.global.current.value.dark ? '#9ca3af' : '#6b7280' }
       },
       axisBorder: { show: false },
       axisTicks: { show: false }
@@ -421,7 +421,7 @@ const buildTrafficTooltip = ({ dataPointIndex }: any): string => {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   }
 
-  let html = `<div style="padding: 8px 12px; font-size: 12px;">`
+  let html = `<div style="padding: 8px 12px; font-size: 13px; line-height: 1.55;">`
   html += `<div style="font-weight: 600; margin-bottom: 6px; color: ${hasFailure ? '#ef4444' : 'inherit'};">${timeStr}</div>`
 
   const models = sortedModels.value
@@ -438,7 +438,7 @@ const buildTrafficTooltip = ({ dataPointIndex }: any): string => {
       html += `<span style="flex: 1;">${escapeHtml(model.name)}</span>`
       html += `<span style="margin-left: 12px; font-weight: 500;">${mdp.requestCount}</span>`
       if (hasModelFailure) {
-        html += `<span style="margin-left: 6px; color: #ef4444; font-size: 11px;">(${mdp.failureCount} ${t('chart.failed')}, ${failRate}%)</span>`
+        html += `<span style="margin-left: 6px; color: #ef4444; font-size: 12px;">(${mdp.failureCount} ${t('chart.failed')}, ${failRate}%)</span>`
       }
       html += `</div>`
     })
@@ -459,7 +459,7 @@ const buildTrafficTooltip = ({ dataPointIndex }: any): string => {
     html += `<span style="margin-left: 12px; font-weight: 500;">${dp.requestCount}</span>`
     html += `</div>`
     if (hasFailure) {
-      html += `<div style="color: #ef4444; font-size: 11px; margin-top: 4px;">${dp.failureCount} ${t('chart.failed')} (${failureRate}%)</div>`
+      html += `<div style="color: #ef4444; font-size: 12px; margin-top: 4px;">${dp.failureCount} ${t('chart.failed')} (${failureRate}%)</div>`
     }
   }
 
@@ -634,14 +634,17 @@ defineExpose({
 }
 
 .summary-label {
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-  margin-bottom: 2px;
+  font-size: 13px;
+  color: rgba(var(--v-theme-on-surface), 0.72);
+  margin-bottom: 4px;
+  line-height: 1.4;
+  font-weight: 500;
 }
 
 .summary-value {
   font-size: 16px;
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .compact-summary {
