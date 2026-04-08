@@ -320,8 +320,8 @@ func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager
 	return func(c *gin.Context) {
 		// 解析 duration 参数（支持 1h, 6h, 24h, 7d, 30d）
 		durationStr := c.DefaultQuery("duration", "24h")
-		duration := parseExtendedDuration(durationStr)
-		if duration <= 0 {
+		duration, err := parseExtendedDuration(durationStr)
+		if err != nil || duration <= 0 {
 			c.JSON(400, gin.H{"error": "Invalid duration parameter"})
 			return
 		}
@@ -429,16 +429,17 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 				duration = time.Minute
 			}
 		} else {
-			duration, err = time.ParseDuration(durationStr)
+			duration, err = parseExtendedDuration(durationStr)
 			if err != nil {
 				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
 				return
 			}
 		}
 
-		// 限制最大查询范围为 30 天
-		if duration > 30*24*time.Hour {
-			duration = 30 * 24 * time.Hour
+		// 限制最大查询范围为 24 小时（Key 级历史数据仅保留在内存中）
+		// 注意：全局统计支持 30 天是因为使用 SQLite 持久化，但 Key 级数据未持久化
+		if duration > 24*time.Hour {
+			duration = 24 * time.Hour
 		}
 
 		// 解析或自动选择 interval
@@ -460,19 +461,14 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 			// 1h = 60 points (1m interval)
 			// 6h = 72 points (5m interval)
 			// 24h = 96 points (15m interval)
-			// 7d = 84 points (2h interval)
-			// 30d = 90 points (8h interval)
+			// 注意：Key 级历史数据最大支持 24h（内存限制）
 			switch {
 			case duration <= time.Hour:
 				interval = time.Minute
 			case duration <= 6*time.Hour:
 				interval = 5 * time.Minute
-			case duration <= 24*time.Hour:
-				interval = 15 * time.Minute
-			case duration <= 7*24*time.Hour:
-				interval = 2 * time.Hour
 			default:
-				interval = 8 * time.Hour
+				interval = 15 * time.Minute
 			}
 		}
 
@@ -723,8 +719,8 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		durationStr := c.DefaultQuery("duration", "24h")
-		duration := parseExtendedDuration(durationStr)
-		if duration <= 0 {
+		duration, err := parseExtendedDuration(durationStr)
+		if err != nil || duration <= 0 {
 			c.JSON(400, gin.H{"error": "Invalid duration parameter"})
 			return
 		}
@@ -791,16 +787,17 @@ func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, c
 				duration = time.Minute
 			}
 		} else {
-			duration, err = time.ParseDuration(durationStr)
+			duration, err = parseExtendedDuration(durationStr)
 			if err != nil {
 				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
 				return
 			}
 		}
 
-		// 限制最大查询范围为 30 天
-		if duration > 30*24*time.Hour {
-			duration = 30 * 24 * time.Hour
+		// 限制最大查询范围为 24 小时（Key 级历史数据仅保留在内存中）
+		// 注意：全局统计支持 30 天是因为使用 SQLite 持久化，但 Key 级数据未持久化
+		if duration > 24*time.Hour {
+			duration = 24 * time.Hour
 		}
 
 		// 解析或自动选择 interval
@@ -1034,8 +1031,8 @@ func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, kind scheduler.Chann
 // parseHistoryDuration 解析历史数据查询参数
 func parseHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 	durationStr := c.DefaultQuery("duration", "24h")
-	duration := parseExtendedDuration(durationStr)
-	if duration <= 0 {
+	duration, err := parseExtendedDuration(durationStr)
+	if err != nil || duration <= 0 {
 		duration = 24 * time.Hour
 	}
 	maxDuration := 30 * 24 * time.Hour
@@ -1048,9 +1045,9 @@ func parseHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 // parseKeyHistoryDuration 解析 Key 历史数据查询参数（支持 today）
 func parseKeyHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 	durationStr := c.DefaultQuery("duration", "6h")
-	duration := parseExtendedDuration(durationStr)
-	if duration < time.Minute {
-		duration = time.Minute
+	duration, err := parseExtendedDuration(durationStr)
+	if err != nil || duration < time.Minute {
+		duration = 6 * time.Hour // 回退到默认值
 	}
 	maxDuration := 30 * 24 * time.Hour
 	if duration > maxDuration {
@@ -1083,20 +1080,25 @@ func selectIntervalForDuration(intervalStr string, duration time.Duration) time.
 
 // parseExtendedDuration 解析扩展的时间范围字符串
 // 支持标准 Go duration (1h, 6h, 24h) 和扩展格式 (7d, 30d, today)
-func parseExtendedDuration(s string) time.Duration {
+func parseExtendedDuration(s string) (time.Duration, error) {
 	if s == "today" {
-		return metrics.CalculateTodayDuration()
+		d := metrics.CalculateTodayDuration()
+		if d < time.Minute {
+			d = time.Minute
+		}
+		return d, nil
 	}
 	// 尝试天数格式: 7d, 30d
 	if strings.HasSuffix(s, "d") {
 		dayStr := strings.TrimSuffix(s, "d")
-		if days, err := strconv.Atoi(dayStr); err == nil && days > 0 {
-			return time.Duration(days) * 24 * time.Hour
+		days, err := strconv.Atoi(dayStr)
+		if err != nil || days <= 0 {
+			return 0, err
 		}
+		return time.Duration(days) * 24 * time.Hour, nil
 	}
 	// 标准 Go duration
-	d, _ := time.ParseDuration(s)
-	return d
+	return time.ParseDuration(s)
 }
 
 // filterBucketsByURLs 按渠道的 URL 和 Key 过滤 SQLite 聚合数据
