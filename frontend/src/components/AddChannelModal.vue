@@ -1578,7 +1578,8 @@ const rules = {
 }
 
 // 计算属性
-const isEditing = computed(() => !!props.channel)
+const dialogMode = ref<'create' | 'edit'>('create')
+const isEditing = computed(() => dialogMode.value === 'edit')
 
 const commonSupportedModelFilters = ['claude-*', 'gpt-5*', 'grok-4*', 'gemini-3*']
 
@@ -2076,12 +2077,14 @@ watch(
   () => props.show,
   newShow => {
     if (newShow) {
+      dialogMode.value = props.channel ? 'edit' : 'create'
+
       // 无论是编辑还是新增，都先清理密钥错误状态
       apiKeyError.value = ''
       duplicateKeyIndex.value = -1
       localRestoredKeys.value = new Set<string>()
 
-      if (props.channel) {
+      if (dialogMode.value === 'edit' && props.channel) {
         // 编辑模式：使用表单模式
         isQuickMode.value = false
         loadChannelData(props.channel)
@@ -2104,12 +2107,14 @@ watch(
     })
 
     if (action === 'load-edit-channel' && newChannel) {
+      dialogMode.value = 'edit'
       isQuickMode.value = false
       loadChannelData(newChannel)
       return
     }
 
     if (action === 'reset-new-form') {
+      dialogMode.value = 'create'
       isQuickMode.value = true
       resetForm()
     }
