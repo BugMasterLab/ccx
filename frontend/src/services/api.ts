@@ -162,6 +162,10 @@ export interface CapabilityTestJobStartResponse {
   job?: CapabilityTestJob
 }
 
+export type CapabilityLifecycle = 'pending' | 'active' | 'done' | 'cancelled'
+export type CapabilityOutcome = 'unknown' | 'success' | 'failed' | 'partial' | 'cancelled'
+export type CapabilityRunMode = 'fresh' | 'reused_running' | 'resumed_cancelled' | 'cache_hit' | 'reused_previous_results'
+
 export type CapabilityTestJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type CapabilityProtocolJobStatus = 'queued' | 'running' | 'completed' | 'failed'
 export type CapabilityModelJobStatus = 'queued' | 'running' | 'success' | 'failed' | 'skipped'
@@ -179,6 +183,9 @@ export interface CapabilityJobProgress {
 export interface CapabilityModelJobResult {
   model: string
   status: CapabilityModelJobStatus
+  lifecycle: CapabilityLifecycle
+  outcome: CapabilityOutcome
+  reason?: string
   success: boolean
   latency: number
   streamingSupported: boolean
@@ -190,6 +197,9 @@ export interface CapabilityModelJobResult {
 export interface CapabilityProtocolJobResult {
   protocol: string
   status: CapabilityProtocolJobStatus
+  lifecycle: CapabilityLifecycle
+  outcome: CapabilityOutcome
+  reason?: string
   success: boolean
   latency: number
   streamingSupported: boolean
@@ -208,6 +218,14 @@ export interface CapabilityTestJob {
   channelKind: string
   sourceType: string
   status: CapabilityTestJobStatus
+  lifecycle: CapabilityLifecycle
+  outcome: CapabilityOutcome
+  reason?: string
+  runMode?: CapabilityRunMode
+  summaryReason?: string
+  activeOperations?: number
+  isResumed?: boolean
+  hasReusedResults?: boolean
   tests: CapabilityProtocolJobResult[]
   compatibleProtocols: string[]
   totalDuration: number

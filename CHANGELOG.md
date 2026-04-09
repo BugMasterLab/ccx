@@ -1,5 +1,10 @@
 ## [Unreleased]
 
+### Changed
+
+- **重构能力测试状态模型与前端展示** - 能力测试后端为 job/protocol/model 三层新增 lifecycle、outcome、reason、runMode 等状态语义字段，统一取消、重试、缓存命中与恢复任务的状态表达；前端同步切换到新状态模型，优化轮询控制、局部重测、协议/模型行级展示与错误提示文案，减少 completed/failed/cancelled 混淆
+- **补充能力测试状态聚合回归测试** - 为 capability job 聚合、取消语义与 reason 映射新增单测，验证 partial / cancelled / timeout / not_run 等关键状态形状
+
 ### Fixed
 
 - **修复新增渠道表单状态串扰** - 调整 AddChannelModal 对 `channel` 变更的监听逻辑，避免编辑态关闭或触发能力测试时错误切回快速添加，并确保重新新增渠道时 `baseURL` 等表单字段被正确重置

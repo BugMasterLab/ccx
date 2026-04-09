@@ -217,7 +217,10 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 				TotalDuration:       0,
 			}
 			job := createCapabilityJobFromResponse(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout, resp, false)
-			job.Status = CapabilityJobStatusFailed
+			job.Lifecycle = CapabilityLifecycleDone
+			job.Outcome = CapabilityOutcomeFailed
+			job.Status = deriveCapabilityJobStatus(job.Lifecycle, job.Outcome)
+			job.RunMode = CapabilityRunModeFresh
 			job.Error = &errMsg
 			capabilityJobs.create(job)
 			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": false, "job": job})
@@ -245,6 +248,10 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 			job, reused := capabilityJobs.getOrCreateByLookupKey(lookupKey, func() *CapabilityTestJob {
 				return createCapabilityJobFromResponse(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout, *cached, true)
 			})
+			job.RunMode = CapabilityRunModeCacheHit
+			job.CacheHit = true
+			job.SummaryReason = "cache_hit"
+			job.IsResumed = reused
 			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": reused, "job": job})
 			return
 		}
@@ -252,9 +259,10 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 		job, reused := capabilityJobs.getOrCreateByLookupKey(lookupKey, func() *CapabilityTestJob {
 			return newCapabilityTestJob(id, channel.Name, channelKind, channel.ServiceType, protocols, timeout)
 		})
+		job.IsResumed = reused
 
 		// 检测到 cancelled job，恢复进度
-		if reused && job.Status == CapabilityJobStatusCancelled {
+		if reused && job.Lifecycle == CapabilityLifecycleCancelled {
 			log.Printf("[CapabilityTest-Job] 恢复已取消的任务 %s，渠道 %s (ID:%d)", job.JobID, channel.Name, id)
 
 			// 提取已成功的模型作为 previousResults
@@ -262,7 +270,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 			for _, test := range job.Tests {
 				modelMap := make(map[string]ModelTestResult)
 				for _, mr := range test.ModelResults {
-					if mr.Status == CapabilityModelStatusSuccess {
+					if mr.Outcome == CapabilityOutcomeSuccess {
 						modelMap[mr.Model] = ModelTestResult{
 							Model:              mr.Model,
 							Success:            mr.Success,
@@ -281,17 +289,27 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 
 			// 重置 failed/skipped 模型为 queued，准备重测
 			capabilityJobs.update(job.JobID, func(j *CapabilityTestJob) {
-				j.Status = CapabilityJobStatusQueued
+				j.Lifecycle = CapabilityLifecyclePending
+				j.Outcome = CapabilityOutcomeUnknown
+				j.Status = deriveCapabilityJobStatus(j.Lifecycle, j.Outcome)
+				j.RunMode = CapabilityRunModeResumedCancelled
+				j.SummaryReason = "resumed_cancelled"
+				j.IsResumed = true
+				j.HasReusedResults = len(previousResults) > 0
 				j.FinishedAt = ""
 				for i := range j.Tests {
-					if j.Tests[i].Status == CapabilityProtocolStatusFailed {
-						j.Tests[i].Status = CapabilityProtocolStatusQueued
+					if j.Tests[i].Lifecycle == CapabilityLifecycleCancelled || j.Tests[i].Outcome == CapabilityOutcomeFailed {
+						j.Tests[i].Lifecycle = CapabilityLifecyclePending
+						j.Tests[i].Outcome = CapabilityOutcomeUnknown
+						j.Tests[i].Reason = nil
 					}
 					for k := range j.Tests[i].ModelResults {
-						if j.Tests[i].ModelResults[k].Status == CapabilityModelStatusFailed ||
+						if j.Tests[i].ModelResults[k].Outcome == CapabilityOutcomeFailed ||
 							j.Tests[i].ModelResults[k].Status == CapabilityModelStatusSkipped {
-							j.Tests[i].ModelResults[k].Status = CapabilityModelStatusQueued
+							j.Tests[i].ModelResults[k].Lifecycle = CapabilityLifecyclePending
+							j.Tests[i].ModelResults[k].Outcome = CapabilityOutcomeUnknown
 							j.Tests[i].ModelResults[k].Error = nil
+							j.Tests[i].ModelResults[k].Reason = nil
 						}
 					}
 				}
@@ -306,6 +324,9 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 		// 复用正在运行的 job
 		if reused {
 			log.Printf("[CapabilityTest-Job] 复用能力测试任务 %s，渠道 %s (ID:%d, 类型:%s)", job.JobID, channel.Name, id, channel.ServiceType)
+			job.RunMode = CapabilityRunModeReusedRunning
+			job.SummaryReason = "reused_running"
+			job.IsResumed = true
 			c.JSON(http.StatusOK, gin.H{"jobId": job.JobID, "resumed": true, "job": job})
 			return
 		}
@@ -338,6 +359,9 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 					}
 				}
 				if len(previousResults) > 0 {
+					job.RunMode = CapabilityRunModeReusedPreviousResult
+					job.SummaryReason = "reused_previous_results"
+					job.HasReusedResults = true
 					log.Printf("[CapabilityTest-Job] 复用上次测试 %s 的成功结果，跳过 %d 个协议的成功模型",
 						req.PreviousJobID, len(previousResults))
 				}
@@ -400,16 +424,19 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 	}
 
 	updatedJob, _ := capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-		// 仅在未被取消时才设为 running
-		if job.Status == CapabilityJobStatusCancelled {
+		if job.Lifecycle == CapabilityLifecycleCancelled {
 			return
 		}
-		job.Status = CapabilityJobStatusRunning
+		job.Lifecycle = CapabilityLifecycleActive
+		job.Outcome = CapabilityOutcomeUnknown
+		job.Status = deriveCapabilityJobStatus(job.Lifecycle, job.Outcome)
 		job.StartedAt = time.Now().Format(time.RFC3339Nano)
+		if job.RunMode == "" {
+			job.RunMode = CapabilityRunModeFresh
+		}
 	})
 
-	// 如果 job 已被取消（在 queued 期间），不再执行测试
-	if updatedJob != nil && updatedJob.Status == CapabilityJobStatusCancelled {
+	if updatedJob != nil && updatedJob.Lifecycle == CapabilityLifecycleCancelled {
 		log.Printf("[CapabilityTest-Job] 任务 %s 在 queued 期间已被取消，跳过执行", jobID)
 		if lookupKey != "" {
 			capabilityJobs.clearLookupKey(lookupKey)
@@ -442,8 +469,8 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 	// 编排器已在执行过程中通过 capabilityJobs.update 实时维护 job.Tests，
 	// 这里只更新最终元数据，不重建 Tests（避免覆盖编排器维护的 skipped 等中间状态）
 	capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
-		// 如果已被取消，保留 cancelled 状态
-		if job.Status == CapabilityJobStatusCancelled {
+		if job.Lifecycle == CapabilityLifecycleCancelled {
+			job.TotalDuration = totalDuration
 			return
 		}
 		job.ChannelName = channel.Name
@@ -451,11 +478,6 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 		job.CompatibleProtocols = append([]string(nil), compatible...)
 		job.TotalDuration = totalDuration
 		job.FinishedAt = time.Now().Format(time.RFC3339Nano)
-		if len(compatible) > 0 {
-			job.Status = CapabilityJobStatusCompleted
-		} else {
-			job.Status = CapabilityJobStatusFailed
-		}
 	})
 
 	// 仅在未被取消且有兼容协议时写入缓存
@@ -501,8 +523,11 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 			capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 				for i := range job.Tests {
 					if job.Tests[i].Protocol == protocol {
-						job.Tests[i].Status = CapabilityProtocolStatusFailed
+						job.Tests[i].Lifecycle = CapabilityLifecycleDone
+						job.Tests[i].Outcome = CapabilityOutcomeFailed
+						job.Tests[i].Reason = &errMsg
 						job.Tests[i].Error = &errMsg
+						job.Tests[i].Status = deriveCapabilityProtocolStatus(job.Tests[i].Lifecycle, job.Tests[i].Outcome)
 						job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
 						break
 					}
@@ -525,12 +550,17 @@ func runRoundRobinTests(ctx context.Context, channel *config.UpstreamConfig, pro
 			for i := range job.Tests {
 				if job.Tests[i].Protocol == protocol {
 					job.Tests[i].Status = CapabilityProtocolStatusRunning
+					job.Tests[i].Lifecycle = CapabilityLifecycleActive
+					job.Tests[i].Outcome = CapabilityOutcomeUnknown
+					job.Tests[i].Reason = nil
 					job.Tests[i].AttemptedModels = len(models)
 					job.Tests[i].ModelResults = make([]CapabilityModelJobResult, len(models))
 					for idx, modelName := range models {
 						job.Tests[i].ModelResults[idx] = CapabilityModelJobResult{
-							Model:  modelName,
-							Status: CapabilityModelStatusQueued,
+							Model:     modelName,
+							Status:    CapabilityModelStatusQueued,
+							Lifecycle: CapabilityLifecyclePending,
+							Outcome:   CapabilityOutcomeUnknown,
 						}
 					}
 					job.Tests[i].TestedAt = time.Now().Format(time.RFC3339Nano)
@@ -867,6 +897,34 @@ func updateCapabilityJobModelResult(job *CapabilityTestJob, protocol, model stri
 			job.Tests[i].ModelResults[j].Error = result.Error
 			job.Tests[i].ModelResults[j].StartedAt = result.StartedAt
 			job.Tests[i].ModelResults[j].TestedAt = result.TestedAt
+			switch status {
+			case CapabilityModelStatusQueued:
+				job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecyclePending
+				job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeUnknown
+				job.Tests[i].ModelResults[j].Reason = nil
+			case CapabilityModelStatusRunning:
+				job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecycleActive
+				job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeUnknown
+				job.Tests[i].ModelResults[j].Reason = nil
+			case CapabilityModelStatusSuccess:
+				job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecycleDone
+				job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeSuccess
+				job.Tests[i].ModelResults[j].Reason = nil
+			case CapabilityModelStatusFailed:
+				job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecycleDone
+				job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeFailed
+				job.Tests[i].ModelResults[j].Reason = result.Error
+			case CapabilityModelStatusSkipped:
+				job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecycleDone
+				job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeUnknown
+				reason := "not_run"
+				if result.Error != nil && *result.Error == "cancelled" {
+					job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecycleCancelled
+					job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeCancelled
+					reason = "cancelled"
+				}
+				job.Tests[i].ModelResults[j].Reason = &reason
+			}
 			return
 		}
 	}
@@ -1139,19 +1197,31 @@ func CancelCapabilityTestJob(cfgManager *config.ConfigManager, channelKind strin
 		// 更新 job 状态
 		capabilityJobs.update(jobID, func(job *CapabilityTestJob) {
 			job.Status = CapabilityJobStatusCancelled
+			job.Lifecycle = CapabilityLifecycleCancelled
+			job.Outcome = CapabilityOutcomeCancelled
 			job.FinishedAt = time.Now().Format(time.RFC3339Nano)
-			// 将所有 queued/running 模型标记为 skipped
 			for i := range job.Tests {
 				for j := range job.Tests[i].ModelResults {
-					if job.Tests[i].ModelResults[j].Status == CapabilityModelStatusQueued ||
-						job.Tests[i].ModelResults[j].Status == CapabilityModelStatusRunning {
+					switch job.Tests[i].ModelResults[j].Status {
+					case CapabilityModelStatusQueued:
 						job.Tests[i].ModelResults[j].Status = CapabilityModelStatusSkipped
+						job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecycleDone
+						job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeUnknown
+						reason := "not_run"
+						job.Tests[i].ModelResults[j].Reason = &reason
+					case CapabilityModelStatusRunning:
+						job.Tests[i].ModelResults[j].Status = CapabilityModelStatusSkipped
+						job.Tests[i].ModelResults[j].Lifecycle = CapabilityLifecycleCancelled
+						job.Tests[i].ModelResults[j].Outcome = CapabilityOutcomeCancelled
+						reason := "cancelled"
+						job.Tests[i].ModelResults[j].Reason = &reason
+						job.Tests[i].ModelResults[j].Error = &reason
 					}
 				}
-				// 更新协议状态
-				if job.Tests[i].Status == CapabilityProtocolStatusQueued || job.Tests[i].Status == CapabilityProtocolStatusRunning {
-					job.Tests[i].Status = CapabilityProtocolStatusFailed
-				}
+				job.Tests[i].Lifecycle = CapabilityLifecycleCancelled
+				job.Tests[i].Outcome = CapabilityOutcomeCancelled
+				reason := "cancelled"
+				job.Tests[i].Reason = &reason
 			}
 		})
 

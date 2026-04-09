@@ -708,9 +708,28 @@ const stopCapabilityTestPolling = () => {
   }
 }
 
+const isCapabilityJobTerminal = (job: CapabilityTestJob | null | undefined) => {
+  if (!job) return false
+  return job.lifecycle === 'done' || job.lifecycle === 'cancelled'
+}
+
+const startCapabilityPolling = (channelId: number, jobId: string) => {
+  stopCapabilityTestPolling()
+  capabilityTestPolling.value = setInterval(async () => {
+    if (!jobId) return
+    try {
+      const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, jobId)
+      updateCapabilityJob(latest)
+    } catch (error) {
+      console.error('Failed to poll capability test job:', error)
+    }
+  }, 1000)
+}
+
 const updateCapabilityJob = (job: CapabilityTestJob) => {
   capabilityTestJob.value = job
-  if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+  capabilityTestJobId.value = job.jobId
+  if (isCapabilityJobTerminal(job) && !(job.activeOperations && job.activeOperations > 0)) {
     stopCapabilityTestPolling()
   }
 }
@@ -728,7 +747,6 @@ const testChannelCapability = async (channelId: number) => {
   stopCapabilityTestPolling()
   capabilityTestPreviousJobId.value = capabilityTestJobId.value
   capabilityTestJobId.value = ''
-  capabilityTestJob.value = null
 
   try {
     const startResp: CapabilityTestJobStartResponse = await api.startChannelCapabilityTest(
@@ -742,19 +760,11 @@ const testChannelCapability = async (channelId: number) => {
       updateCapabilityJob(startResp.job)
     }
 
-    if (startResp.job?.status === 'completed' || startResp.job?.status === 'failed' || startResp.job?.status === 'cancelled') {
+    if (isCapabilityJobTerminal(startResp.job) && !(startResp.job?.activeOperations && startResp.job.activeOperations > 0)) {
       return
     }
 
-    capabilityTestPolling.value = setInterval(async () => {
-      if (!capabilityTestJobId.value) return
-      try {
-        const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, capabilityTestJobId.value)
-        updateCapabilityJob(latest)
-      } catch (error) {
-        console.error('Failed to poll capability test job:', error)
-      }
-    }, 1000)
+    startCapabilityPolling(channelId, startResp.jobId)
   } catch (error) {
     const message = error instanceof Error ? error.message : t('system.unknown')
     capabilityTestDialogRef.value?.setError(t('toast.capabilityFailed', { message }))
@@ -777,17 +787,7 @@ const handleRetryCapabilityModel = async (protocol: string, model: string) => {
   if (!capabilityTestJobId.value) return
   try {
     await api.retryCapabilityTestModel(channelStore.activeTab, capabilityTestChannelId.value, capabilityTestJobId.value, protocol, model)
-    if (!capabilityTestPolling.value) {
-      capabilityTestPolling.value = setInterval(async () => {
-        if (!capabilityTestJobId.value) return
-        try {
-          const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, capabilityTestChannelId.value, capabilityTestJobId.value)
-          updateCapabilityJob(latest)
-        } catch (error) {
-          console.error('Failed to poll capability test job:', error)
-        }
-      }, 1000)
-    }
+    startCapabilityPolling(capabilityTestChannelId.value, capabilityTestJobId.value)
   } catch (error) {
     console.error('Failed to retry capability test model:', error)
   }

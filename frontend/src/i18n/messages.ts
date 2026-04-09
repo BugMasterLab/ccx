@@ -85,7 +85,13 @@ export type MessageKey =
   | 'capability.cancel'
   | 'capability.cancelling'
   | 'capability.cancelled'
-  | 'capability.retryModel'
+  | 'capability.partial'
+  | 'capability.runModeCacheHit'
+  | 'capability.runModeReusedRunning'
+  | 'capability.runModeResumedCancelled'
+  | 'capability.reasonNotRun'
+  | 'capability.reasonCancelled'
+  | 'capability.reasonTimeout'
   | 'capability.noApiKeyError'
   | 'capability.genericJobError'
   | 'orchestration.title'
@@ -437,6 +443,14 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancel': 'Cancel Test',
     'capability.cancelling': 'Cancelling...',
     'capability.cancelled': 'Cancelled',
+    'capability.partial': 'Partially available',
+    'capability.runModeCacheHit': 'Cached result',
+    'capability.runModeReusedRunning': 'Reused running task',
+    'capability.runModeResumedCancelled': 'Resumed cancelled task',
+    'capability.runModeReusedPreviousResults': 'Reused previous success',
+    'capability.reasonNotRun': 'Not executed in this round',
+    'capability.reasonCancelled': 'Cancelled before completion',
+    'capability.reasonTimeout': 'Timed out',
     'capability.retryModel': 'Retry this model',
     'capability.noApiKeyError': 'This channel has no API key configured and cannot run capability tests.',
     'capability.genericJobError': 'Capability test failed: {message}',
@@ -1139,6 +1153,14 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancel': '取消测试',
     'capability.cancelling': '取消中...',
     'capability.cancelled': '已取消',
+    'capability.partial': '部分可用',
+    'capability.runModeCacheHit': '缓存结果',
+    'capability.runModeReusedRunning': '复用进行中任务',
+    'capability.runModeResumedCancelled': '恢复已取消任务',
+    'capability.runModeReusedPreviousResults': '复用上次成功结果',
+    'capability.reasonNotRun': '本轮未执行',
+    'capability.reasonCancelled': '完成前已取消',
+    'capability.reasonTimeout': '请求超时',
     'capability.retryModel': '重测此模型',
     'capability.noApiKeyError': '该渠道未配置 API Key，无法执行能力测试。',
     'capability.genericJobError': '能力测试失败：{message}',
