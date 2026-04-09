@@ -875,6 +875,7 @@ import {
 import { buildExpectedRequestUrls } from '../utils/expectedRequestUrls'
 import { supportsAdvancedChannelOptions } from '../utils/channelAdvancedOptions'
 import { buildChannelPayload } from '../utils/channelPayload'
+import { resolveChannelWatcherAction } from '../utils/add-channel-modal-state'
 import { useI18n } from '../i18n'
 
 interface Props {
@@ -2095,9 +2096,22 @@ watch(
 
 watch(
   () => props.channel,
-  newChannel => {
-    if (newChannel && props.show) {
+  (newChannel, oldChannel) => {
+    const action = resolveChannelWatcherAction({
+      show: props.show,
+      newChannel,
+      oldChannel,
+    })
+
+    if (action === 'load-edit-channel' && newChannel) {
+      isQuickMode.value = false
       loadChannelData(newChannel)
+      return
+    }
+
+    if (action === 'reset-new-form') {
+      isQuickMode.value = true
+      resetForm()
     }
   }
 )
