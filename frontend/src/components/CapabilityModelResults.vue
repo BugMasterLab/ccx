@@ -248,6 +248,37 @@ const getModelTooltipLatencyText = (modelResult: CapabilityModelJobResult): stri
   border-color: rgba(148, 163, 184, 0.25);
 }
 
+/* 暗色模式提升模型徽标可读性，避免文字过暗 */
+:global(.v-theme--dark) .queued-badge {
+  background: rgba(148, 163, 184, 0.18);
+  color: rgba(226, 232, 240, 0.92);
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
+:global(.v-theme--dark) .running-badge {
+  background: rgba(96, 165, 250, 0.2);
+  color: rgba(191, 219, 254, 0.96);
+  border-color: rgba(96, 165, 250, 0.42);
+}
+
+:global(.v-theme--dark) .success-badge {
+  background: rgba(74, 222, 128, 0.2);
+  color: rgba(134, 239, 172, 0.96);
+  border-color: rgba(74, 222, 128, 0.44);
+}
+
+:global(.v-theme--dark) .error-badge {
+  background: rgba(248, 113, 113, 0.2);
+  color: rgba(252, 165, 165, 0.96);
+  border-color: rgba(248, 113, 113, 0.44);
+}
+
+:global(.v-theme--dark) .skipped-badge {
+  background: rgba(148, 163, 184, 0.16);
+  color: rgba(203, 213, 225, 0.9);
+  border-color: rgba(148, 163, 184, 0.34);
+}
+
 .retryable-badge {
   cursor: pointer;
 }
