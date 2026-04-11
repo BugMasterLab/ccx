@@ -92,7 +92,7 @@
                     <span :class="['text-body-2', getProtocolStatusTextClass(test)]">{{ getProtocolStatusText(test) }}</span>
                   </div>
                 </template>
-                <v-tooltip v-else :text="getProtocolErrorText(test)" location="top">
+                <v-tooltip v-else :text="getProtocolErrorText(test)" location="top" content-class="error-tooltip">
                   <template #activator="{ props: activatorProps }">
                     <div v-bind="activatorProps" class="d-flex align-center ga-1">
                       <v-icon :color="getProtocolStatusIconColor(test)" size="small">{{ getProtocolStatusIcon(test) }}</v-icon>
@@ -476,28 +476,6 @@ defineExpose({ setError })
 .dialog-title-wrapper {
   flex: 1;
   min-width: 0;
-}
-
-:deep(.error-tooltip),
-:deep(.failure-tooltip),
-:deep(.success-tooltip) {
-  font-weight: 600;
-  letter-spacing: 0;
-  max-width: 400px;
-  word-break: break-word;
-}
-
-:deep(.error-tooltip),
-:deep(.failure-tooltip) {
-  color: #991b1b;
-  background-color: #fff7f7;
-  border: 1px solid #fecaca;
-}
-
-:deep(.success-tooltip) {
-  color: #166534;
-  background-color: #f6fff8;
-  border: 1px solid #bbf7d0;
 }
 
 .capability-status-bar {

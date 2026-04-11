@@ -14,6 +14,29 @@
   border-color: #555 !important;
 }
 
+/* 能力测试 Tooltip（全局样式，兼容 teleport 到 body） */
+.error-tooltip,
+.failure-tooltip,
+.success-tooltip {
+  font-weight: 600;
+  letter-spacing: 0;
+  max-width: 400px;
+  word-break: break-word;
+}
+
+.error-tooltip,
+.failure-tooltip {
+  color: #991b1b !important;
+  background-color: #fff7f7 !important;
+  border: 1px solid #fecaca !important;
+}
+
+.success-tooltip {
+  color: #166534 !important;
+  background-color: #f6fff8 !important;
+  border: 1px solid #bbf7d0 !important;
+}
+
 /* 对话框标题统一样式 */
 .dialog-title {
   font-size: 1.125rem;
