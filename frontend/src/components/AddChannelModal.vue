@@ -230,6 +230,15 @@
                     >
                       gpt-5.2 / gpt-5.2-codex
                     </v-btn>
+                    <v-btn
+                      size="small"
+                      variant="tonal"
+                      color="secondary"
+                      prepend-icon="mdi-lightning-bolt"
+                      @click="applyModelMappingPreset('gpt-5.3-codex')"
+                    >
+                      gpt-5.3 / gpt-5.3-codex
+                    </v-btn>
                   </div>
 
                   <!-- 现有映射列表 -->
@@ -1286,7 +1295,7 @@ const showModelMappingPresets = computed(() => {
 const modelNameCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
 const modelMappingPresets: Record<
-  'gpt-5.4' | 'gpt-5.2-codex',
+  'gpt-5.4' | 'gpt-5.3-codex' | 'gpt-5.2-codex',
   {
     modelMapping: Record<string, string>
     reasoningMapping: Record<string, 'none' | 'low' | 'medium' | 'high' | 'xhigh'>
@@ -1299,6 +1308,20 @@ const modelMappingPresets: Record<
       opus: 'gpt-5.4',
       sonnet: 'gpt-5.4',
       haiku: 'gpt-5.4'
+    },
+    reasoningMapping: {
+      opus: 'xhigh',
+      sonnet: 'xhigh',
+      haiku: 'high'
+    },
+    fastMode: true,
+    textVerbosity: 'medium'
+  },
+  'gpt-5.3-codex': {
+    modelMapping: {
+      opus: 'gpt-5.3-codex',
+      sonnet: 'gpt-5.3-codex',
+      haiku: 'gpt-5.3-codex'
     },
     reasoningMapping: {
       opus: 'xhigh',
