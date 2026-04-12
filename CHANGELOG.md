@@ -1,3 +1,9 @@
+## [v2.6.55] - 2026-04-12
+
+### Fixed
+
+- **拆分 Vue 类型声明为 ambient 文件** - 将 Vue shims 拆分为独立的 ambient 声明文件，兼容 TypeScript 6.0 的类型解析要求
+
 ## [v2.6.54] - 2026-04-12
 
 ### Fixed
