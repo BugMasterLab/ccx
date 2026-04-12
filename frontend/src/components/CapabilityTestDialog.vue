@@ -107,6 +107,7 @@
               <CapabilityModelResults
                 :test="test"
                 :pending-text="getProtocolPendingText(test)"
+                :show-label="false"
                 :retry-enabled="!isJobActiveLike"
                 @retry-model="handleRetryModel"
               />
@@ -127,7 +128,7 @@
             </thead>
             <tbody>
               <template v-for="test in sortedTests" :key="test.protocol">
-                <tr>
+                <tr class="protocol-summary-row">
                   <td>
                     <v-chip :color="getProtocolColor(test.protocol)" size="small" variant="tonal">
                       {{ getProtocolDisplayName(test.protocol) }}
@@ -203,12 +204,13 @@
                     </div>
                   </td>
                 </tr>
-                <tr>
+                <tr class="protocol-models-row">
                   <td colspan="6" class="model-results-cell">
                     <div class="model-results-wrapper">
                       <CapabilityModelResults
                         :test="test"
                         :pending-text="getProtocolPendingText(test)"
+                        :show-label="false"
                         :retry-enabled="!isJobActiveLike"
                         @retry-model="handleRetryModel"
                       />
@@ -495,6 +497,23 @@ defineExpose({ setError })
   white-space: nowrap;
 }
 
+/* 协议摘要行：顶部有分割线，底线去掉（和下面模型行视觉合并） */
+.capability-table :deep(.protocol-summary-row > td) {
+  border-top: thin solid rgba(var(--v-border-color), var(--v-border-opacity)) !important;
+  border-bottom: none !important;
+}
+
+/* 第一个协议摘要行：去掉顶部线，避免和表头底线重叠 */
+.capability-table :deep(tbody > .protocol-summary-row:first-child > td) {
+  border-top: none !important;
+}
+
+/* 模型行：去掉表格默认边框，组间分割线统一由下一组摘要行顶部负责 */
+.capability-table :deep(.protocol-models-row > td) {
+  border-top: none !important;
+  border-bottom: none !important;
+}
+
 .mobile-layout {
   display: none;
 }
@@ -522,7 +541,7 @@ defineExpose({ setError })
 .model-results-cell {
   padding: 0 !important;
   background: rgba(var(--v-theme-surface-variant), 0.12);
-  border-bottom: 1px solid rgba(var(--v-theme-outline), 0.16);
+  border-bottom: 1px solid rgba(var(--v-theme-outline), 0.16) !important;
   box-shadow: inset 3px 0 0 0 rgba(var(--v-theme-outline), 0.18);
 }
 

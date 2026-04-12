@@ -15,6 +15,7 @@
 }
 
 /* 能力测试 Tooltip（全局样式，兼容 teleport 到 body） */
+.pending-tooltip,
 .error-tooltip,
 .failure-tooltip,
 .success-tooltip {
@@ -22,6 +23,18 @@
   letter-spacing: 0;
   max-width: 400px;
   word-break: break-word;
+}
+
+.pending-tooltip {
+  color: #1e3a8a !important;
+  background-color: #f5f9ff !important;
+  border: 1px solid #bfdbfe !important;
+}
+
+.v-theme--dark .pending-tooltip {
+  color: #dbeafe !important;
+  background-color: #15233a !important;
+  border-color: #3b82f6 !important;
 }
 
 .error-tooltip,

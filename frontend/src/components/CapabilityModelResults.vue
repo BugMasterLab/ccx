@@ -79,7 +79,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  showLabel: true,
+  showLabel: false,
   retryEnabled: true
 })
 
@@ -148,7 +148,7 @@ const isModelPending = (modelResult: CapabilityModelJobResult): boolean => {
 
 const getTooltipClass = (modelResult: CapabilityModelJobResult): string => {
   if (modelResult.outcome === 'success') return 'success-tooltip'
-  if (modelResult.lifecycle === 'pending' || modelResult.lifecycle === 'active') return ''
+  if (modelResult.lifecycle === 'pending' || modelResult.lifecycle === 'active') return 'pending-tooltip'
   return 'error-tooltip'
 }
 
@@ -193,6 +193,14 @@ const getModelTooltipLatencyText = (modelResult: CapabilityModelJobResult): stri
 
 .model-results-wrapper {
   width: 100%;
+  box-sizing: border-box;
+  padding: 10px 16px;
+}
+
+@media (max-width: 720px) {
+  .model-results-wrapper {
+    padding: 10px 12px;
+  }
 }
 
 .model-results-flow {
