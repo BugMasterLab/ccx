@@ -72,6 +72,7 @@
               color="error"
               variant="tonal"
               size="small"
+              class="capability-action-btn"
               :loading="cancelling"
               @click="handleCancel"
             >
@@ -178,6 +179,7 @@
                       color="primary"
                       variant="tonal"
                       rounded="lg"
+                      class="copy-tab-btn"
                       @click="$emit('copyToTab', test.protocol)"
                     >
                       {{ t('capability.copyToTab') }}
@@ -555,8 +557,19 @@ defineExpose({ setError })
   color: rgba(var(--v-theme-on-surface), 0.56);
 }
 
+.capability-action-btn,
+.copy-tab-btn,
 .convert-btn {
   text-transform: none;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.capability-action-btn :deep(.v-btn__content),
+.copy-tab-btn :deep(.v-btn__content),
+.convert-btn :deep(.v-btn__content) {
+  line-height: 1.4;
 }
 
 @media (max-width: 720px) {
