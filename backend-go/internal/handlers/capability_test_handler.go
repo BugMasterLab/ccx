@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -19,6 +19,7 @@ import (
 	"github.com/BenedictKing/ccx/internal/handlers/common"
 	"github.com/BenedictKing/ccx/internal/httpclient"
 	"github.com/BenedictKing/ccx/internal/metrics"
+	"github.com/BenedictKing/ccx/internal/providers"
 	"github.com/BenedictKing/ccx/internal/utils"
 	"github.com/gin-gonic/gin"
 )
@@ -44,6 +45,14 @@ var capabilityCache = struct {
 }{
 	entries: make(map[string]*capabilityCacheEntry),
 }
+
+// capability test 专用共享 provider：避免在 ResponsesProvider 上重复创建 SessionManager 清理协程
+var (
+	capabilityClaudeProvider    providers.Provider = &providers.ClaudeProvider{}
+	capabilityOpenAIProvider    providers.Provider = &providers.OpenAIProvider{}
+	capabilityGeminiProvider    providers.Provider = &providers.GeminiProvider{}
+	capabilityResponsesProvider providers.Provider = &providers.ResponsesProvider{}
+)
 
 // buildCapabilityCacheKey 构建缓存 key（基于 baseURL + apiKey、协议列表、模型列表）
 func buildCapabilityCacheKey(baseURL string, apiKey string, protocols []string, models []string) string {
@@ -840,7 +849,7 @@ func executeModelTest(ctx context.Context, channel *config.UpstreamConfig, proto
 	startTime := time.Now()
 	log.Printf("[CapabilityTest-Model] 渠道 %s 启动 %s 协议模型测试 (模型: %s, startedAt: %s)",
 		channel.Name, protocol, model, modelResult.StartedAt)
-	success, streamingSupported, statusCode, respBody, sendErr := sendAndCheckStream(reqCtx, client, req)
+	success, streamingSupported, statusCode, respBody, sendErr := sendAndCheckStream(reqCtx, client, req, protocol)
 	modelResult.Latency = time.Since(startTime).Milliseconds()
 	modelResult.TestedAt = time.Now().Format(time.RFC3339Nano)
 
@@ -1138,11 +1147,28 @@ func buildTestRequest(protocol string, channel *config.UpstreamConfig) (*http.Re
 	return buildTestRequestWithModel(protocol, channel, model)
 }
 
+// getCapabilityStreamProvider 为能力测试返回不带长期后台依赖的流解析 provider
+func getCapabilityStreamProvider(protocol string) providers.Provider {
+	switch protocol {
+	case "messages":
+		return capabilityClaudeProvider
+	case "chat":
+		return capabilityOpenAIProvider
+	case "gemini":
+		return capabilityGeminiProvider
+	case "responses":
+		return capabilityResponsesProvider
+	default:
+		return nil
+	}
+}
+
 // ============== 流式响应检测 ==============
 
 // sendAndCheckStream 发送请求并检查流式响应能力
-// 返回: success（HTTP 2xx）, streamingSupported（能解析 SSE chunk）, statusCode, responseBody, error
-func sendAndCheckStream(ctx context.Context, client *http.Client, req *http.Request) (bool, bool, int, []byte, error) {
+// 复用代理侧的规范化流预检：必须包含实际文本或语义内容才算成功
+// 返回: success（HTTP 2xx 且有有效流内容）, streamingSupported（流内容非空）, statusCode, responseBody, error
+func sendAndCheckStream(ctx context.Context, client *http.Client, req *http.Request, protocol string) (bool, bool, int, []byte, error) {
 	resp, err := client.Do(req)
 	if err != nil {
 		return false, false, 0, nil, err
@@ -1155,45 +1181,75 @@ func sendAndCheckStream(ctx context.Context, client *http.Client, req *http.Requ
 		return false, false, resp.StatusCode, bodyBytes, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	// HTTP 2xx，尝试读取第一个 SSE chunk 检测流式支持
-	streamingSupported := false
-
-	// 使用 5 秒读取超时
-	readCtx, readCancel := context.WithTimeout(ctx, 5*time.Second)
-	defer readCancel()
-
-	// 在 goroutine 中扫描以支持超时取消
-	doneCh := make(chan bool, 1)
-	go func() {
-		scanner := bufio.NewScanner(resp.Body)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.HasPrefix(line, "data: ") {
-				data := strings.TrimPrefix(line, "data: ")
-				// 跳过 [DONE] 标记
-				if data == "[DONE]" {
-					continue
-				}
-				// 尝试 JSON 解析
-				var jsonObj map[string]interface{}
-				if json.Unmarshal([]byte(data), &jsonObj) == nil {
-					doneCh <- true
-					return
-				}
-			}
-		}
-		doneCh <- false
-	}()
-
-	select {
-	case result := <-doneCh:
-		streamingSupported = result
-	case <-readCtx.Done():
-		// 读取超时，但 HTTP 2xx 所以 success 仍为 true
-		streamingSupported = false
+	provider := getCapabilityStreamProvider(protocol)
+	if provider == nil {
+		return false, false, resp.StatusCode, nil, fmt.Errorf("unsupported protocol provider: %s", protocol)
 	}
 
-	return true, streamingSupported, resp.StatusCode, nil, nil
+	// 通过 provider 将上游原始 SSE 规范化为代理侧使用的事件格式，
+	// 再复用 common.PreflightStreamEvents 做统一的空响应判定。
+	eventChan, errChan, err := provider.HandleStreamResponse(resp.Body)
+	if err != nil {
+		return false, false, resp.StatusCode, nil, err
+	}
+
+	type streamResult struct {
+		preflight *common.StreamPreflightResult
+		err       error
+	}
+	doneCh := make(chan streamResult, 1)
+
+	go func() {
+		preflight := common.PreflightStreamEvents(eventChan, errChan)
+		if preflight.HasError {
+			doneCh <- streamResult{err: preflight.Error}
+			return
+		}
+		doneCh <- streamResult{preflight: preflight}
+	}()
+
+	readCtx, readCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer readCancel()
+
+	var result streamResult
+	select {
+	case result = <-doneCh:
+	case <-readCtx.Done():
+		return false, false, resp.StatusCode, nil, fmt.Errorf("流式响应读取超时")
+	}
+
+	if result.err != nil {
+		return false, false, resp.StatusCode, nil, result.err
+	}
+
+	if result.preflight == nil {
+		return false, false, resp.StatusCode, nil, fmt.Errorf("流式响应预检失败")
+	}
+
+	if result.preflight.IsEmpty {
+		if result.preflight.Diagnostic != "" {
+			return false, false, 0, nil, fmt.Errorf("上游返回空响应 (%s)", result.preflight.Diagnostic)
+		}
+		return false, false, 0, nil, common.ErrEmptyStreamResponse
+	}
+
+	if isTimedOutPreflightResult(result.preflight) {
+		return false, false, 0, nil, fmt.Errorf("流式响应预检超时，未收到任何 SSE 事件")
+	}
+
+	go func(eventChan <-chan string) {
+		for range eventChan {
+		}
+	}(eventChan)
+
+	return true, true, resp.StatusCode, nil, nil
+}
+
+func isTimedOutPreflightResult(preflight *common.StreamPreflightResult) bool {
+	if preflight == nil {
+		return false
+	}
+	return !preflight.HasError && !preflight.IsEmpty && len(preflight.BufferedEvents) == 0 && preflight.Diagnostic == "" && preflight.UnknownEventType == ""
 }
 
 // ============== 取消与重测 ==============
@@ -1407,6 +1463,14 @@ func classifyError(err error, statusCode int, ctx context.Context) string {
 		return "timeout"
 	}
 
+	errStr := ""
+	if err != nil {
+		errStr = err.Error()
+		if errors.Is(err, common.ErrEmptyStreamResponse) || strings.Contains(errStr, "上游返回空响应") {
+			return "empty_response"
+		}
+	}
+
 	if statusCode == 429 {
 		return "rate_limited"
 	}
@@ -1415,10 +1479,12 @@ func classifyError(err error, statusCode int, ctx context.Context) string {
 		return fmt.Sprintf("http_error_%d", statusCode)
 	}
 
-	errStr := err.Error()
 	if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded") {
 		return "timeout"
 	}
 
+	if errStr == "" {
+		return "request_failed"
+	}
 	return "request_failed: " + errStr
 }
