@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Added
+
+- **补充四协议互转矩阵测试** - 新增 Responses 请求矩阵、Messages 响应矩阵，以及 Messages/Chat/Gemini/Responses 入口的非流式 handler matrix 测试，覆盖四种上游协议的主要请求与响应路径
+
+### Fixed
+
+- **修复 Chat 非流式透传读空响应体** - `chat` handler 在非流式默认透传分支中重置已读取的 `resp.Body`，避免 `PassthroughJSONResponse` 二次读取时返回空响应体
+
 ## [v2.6.52] - 2026-04-12
 
 ### Changed

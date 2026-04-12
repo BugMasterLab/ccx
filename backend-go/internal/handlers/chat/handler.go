@@ -596,6 +596,8 @@ func handleSuccess(
 		return usage, nil
 
 	default:
+		// body 已被 ReadAll 读入 bodyBytes，需要重置 resp.Body 以便 PassthroughJSONResponse 读取
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		var respMap map[string]interface{}
 		if err := common.PassthroughJSONResponse(c, resp, &respMap); err != nil {
 			return nil, nil
