@@ -1,3 +1,9 @@
+## [Unreleased]
+
+### Fixed
+
+- **修复能力测试与渠道健康检查的版本化 BaseURL 拼接** - 统一能力测试与 Responses/Chat/Gemini 渠道 ping/health-check 的端点构建逻辑，正确识别已包含 `/v1` 或 `/v1beta` 的 baseURL（如 `.../codex/v1`），避免重复追加版本前缀导致 `/v1/v1/...` 404，并补充相关回归测试
+
 ## [v2.6.56] - 2026-04-13
 
 ### Fixed

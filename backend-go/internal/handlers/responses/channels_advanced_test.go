@@ -31,6 +31,21 @@ func setupResponsesConfigManager(t *testing.T, upstream []config.UpstreamConfig)
 	return cm
 }
 
+func TestBuildHealthCheckURLs_UseExistingVersionSuffix(t *testing.T) {
+	if got := buildMessagesURL("https://api.example.com/codex/v1"); got != "https://api.example.com/codex/v1/messages" {
+		t.Fatalf("buildMessagesURL() = %s", got)
+	}
+	if got := buildModelsURL("https://api.example.com/codex/v1"); got != "https://api.example.com/codex/v1/models" {
+		t.Fatalf("buildModelsURL() = %s", got)
+	}
+	if got := buildGeminiModelsURL("https://api.example.com/codex/v1beta"); got != "https://api.example.com/codex/v1beta/models" {
+		t.Fatalf("buildGeminiModelsURL() = %s", got)
+	}
+	if got := buildModelsURL("https://api.example.com/codex/v1#"); got != "https://api.example.com/codex/v1/models" {
+		t.Fatalf("buildModelsURL() with marker = %s", got)
+	}
+}
+
 func TestGetUpstreams_IncludesAdvancedOptionFields(t *testing.T) {
 	cm := setupResponsesConfigManager(t, []config.UpstreamConfig{{
 		Name:             "resp-ch",

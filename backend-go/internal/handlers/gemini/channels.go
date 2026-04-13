@@ -361,7 +361,7 @@ func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
 
 		// 简单的连通性测试
 		client := httpclient.GetManager().GetStandardClient(10*time.Second, upstream.InsecureSkipVerify, upstream.ProxyURL)
-		testURL := fmt.Sprintf("%s/v1beta/models", strings.TrimRight(baseURL, "/"))
+		testURL := buildModelsURL(baseURL)
 
 		req, _ := http.NewRequest("GET", testURL, nil)
 		if len(upstream.APIKeys) > 0 {
@@ -411,7 +411,7 @@ func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			// 每个渠道使用各自的代理配置
 			client := httpclient.GetManager().GetStandardClient(10*time.Second, upstream.InsecureSkipVerify, upstream.ProxyURL)
 
-			testURL := fmt.Sprintf("%s/v1beta/models", strings.TrimRight(baseURL, "/"))
+			testURL := buildModelsURL(baseURL)
 			req, _ := http.NewRequest("GET", testURL, nil)
 			if len(upstream.APIKeys) > 0 {
 				req.Header.Set("x-goog-api-key", upstream.APIKeys[0])
@@ -448,8 +448,8 @@ func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	}
 }
 
-// buildModelsURL 构建 models 端点的 URL（Gemini 使用 v1beta）
-func buildModelsURL(baseURL string) string {
+// buildEndpointURL 构建带版本前缀的端点 URL
+func buildEndpointURL(baseURL, versionPrefix, endpoint string) string {
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
 	if skipVersionPrefix {
 		baseURL = strings.TrimSuffix(baseURL, "#")
@@ -459,12 +459,16 @@ func buildModelsURL(baseURL string) string {
 	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
 	hasVersionSuffix := versionPattern.MatchString(baseURL)
 
-	endpoint := "/models"
 	if !hasVersionSuffix && !skipVersionPrefix {
-		endpoint = "/v1beta" + endpoint // Gemini 使用 v1beta
+		baseURL += versionPrefix
 	}
 
 	return baseURL + endpoint
+}
+
+// buildModelsURL 构建 models 端点的 URL（Gemini 使用 v1beta）
+func buildModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1beta", "/models")
 }
 
 // GetModelsRequest 获取模型列表的请求体

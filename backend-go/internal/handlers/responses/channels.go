@@ -319,25 +319,29 @@ func pingResponsesUpstream(upstream *config.UpstreamConfig) gin.H {
 
 	var (
 		testURL string
+		method  string
 		req     *http.Request
 	)
 	switch upstream.ServiceType {
 	case "claude":
-		testURL = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
-		req, _ = http.NewRequest("OPTIONS", testURL, nil)
+		method = http.MethodOptions
+		testURL = buildMessagesURL(baseURL)
+		req, _ = http.NewRequest(method, testURL, nil)
 		if len(upstream.APIKeys) > 0 {
 			utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 			req.Header.Set("anthropic-version", "2023-06-01")
 		}
 	case "gemini":
-		testURL = fmt.Sprintf("%s/v1beta/models", strings.TrimRight(baseURL, "/"))
-		req, _ = http.NewRequest("GET", testURL, nil)
+		method = http.MethodGet
+		testURL = buildGeminiModelsURL(baseURL)
+		req, _ = http.NewRequest(method, testURL, nil)
 		if len(upstream.APIKeys) > 0 {
 			req.Header.Set("x-goog-api-key", upstream.APIKeys[0])
 		}
 	default:
-		testURL = fmt.Sprintf("%s/v1/models", strings.TrimRight(baseURL, "/"))
-		req, _ = http.NewRequest("GET", testURL, nil)
+		method = http.MethodGet
+		testURL = buildModelsURL(baseURL)
+		req, _ = http.NewRequest(method, testURL, nil)
 		if len(upstream.APIKeys) > 0 {
 			utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 		}
@@ -399,8 +403,8 @@ func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	}
 }
 
-// buildModelsURL 构建 models 端点的 URL
-func buildModelsURL(baseURL string) string {
+// buildEndpointURL 构建带版本前缀的端点 URL
+func buildEndpointURL(baseURL, versionPrefix, endpoint string) string {
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
 	if skipVersionPrefix {
 		baseURL = strings.TrimSuffix(baseURL, "#")
@@ -410,12 +414,24 @@ func buildModelsURL(baseURL string) string {
 	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
 	hasVersionSuffix := versionPattern.MatchString(baseURL)
 
-	endpoint := "/models"
 	if !hasVersionSuffix && !skipVersionPrefix {
-		endpoint = "/v1" + endpoint
+		baseURL += versionPrefix
 	}
 
 	return baseURL + endpoint
+}
+
+func buildMessagesURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/messages")
+}
+
+func buildGeminiModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1beta", "/models")
+}
+
+// buildModelsURL 构建 models 端点的 URL
+func buildModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/models")
 }
 
 // GetModelsRequest 获取模型列表的请求体

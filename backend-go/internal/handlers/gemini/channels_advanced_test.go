@@ -31,6 +31,15 @@ func setupGeminiConfigManager(t *testing.T, upstream []config.UpstreamConfig) *c
 	return cm
 }
 
+func TestBuildHealthCheckURLs_UseExistingVersionSuffix(t *testing.T) {
+	if got := buildModelsURL("https://api.example.com/codex/v1beta"); got != "https://api.example.com/codex/v1beta/models" {
+		t.Fatalf("buildModelsURL() = %s", got)
+	}
+	if got := buildModelsURL("https://api.example.com/codex/v1beta#"); got != "https://api.example.com/codex/v1beta/models" {
+		t.Fatalf("buildModelsURL() with marker = %s", got)
+	}
+}
+
 func TestGetUpstreams_IncludesAdvancedOptionFields(t *testing.T) {
 	cm := setupGeminiConfigManager(t, []config.UpstreamConfig{{
 		Name:             "gemini-ch",

@@ -364,16 +364,16 @@ func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		switch upstream.ServiceType {
 		case "claude":
 			// Claude API 没有 /v1/models，使用 /v1/messages 的 OPTIONS 请求
-			testURL = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
-			req, _ = http.NewRequest("OPTIONS", testURL, nil)
+			testURL = buildMessagesURL(baseURL)
+			req, _ = http.NewRequest(http.MethodOptions, testURL, nil)
 			if len(upstream.APIKeys) > 0 {
 				utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 				req.Header.Set("anthropic-version", "2023-06-01")
 			}
 		default:
 			// OpenAI / Gemini / Responses 等使用 /v1/models
-			testURL = fmt.Sprintf("%s/v1/models", strings.TrimRight(baseURL, "/"))
-			req, _ = http.NewRequest("GET", testURL, nil)
+			testURL = buildModelsURL(baseURL)
+			req, _ = http.NewRequest(http.MethodGet, testURL, nil)
 			if len(upstream.APIKeys) > 0 {
 				utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 			}
@@ -426,15 +426,15 @@ func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			var req *http.Request
 			switch upstream.ServiceType {
 			case "claude":
-				testURL = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
-				req, _ = http.NewRequest("OPTIONS", testURL, nil)
+				testURL = buildMessagesURL(baseURL)
+				req, _ = http.NewRequest(http.MethodOptions, testURL, nil)
 				if len(upstream.APIKeys) > 0 {
 					utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 					req.Header.Set("anthropic-version", "2023-06-01")
 				}
 			default:
-				testURL = fmt.Sprintf("%s/v1/models", strings.TrimRight(baseURL, "/"))
-				req, _ = http.NewRequest("GET", testURL, nil)
+				testURL = buildModelsURL(baseURL)
+				req, _ = http.NewRequest(http.MethodGet, testURL, nil)
 				if len(upstream.APIKeys) > 0 {
 					utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 				}
@@ -471,8 +471,8 @@ func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	}
 }
 
-// buildModelsURL 构建 models 端点的 URL
-func buildModelsURL(baseURL string) string {
+// buildEndpointURL 构建带版本前缀的端点 URL
+func buildEndpointURL(baseURL, versionPrefix, endpoint string) string {
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
 	if skipVersionPrefix {
 		baseURL = strings.TrimSuffix(baseURL, "#")
@@ -482,12 +482,20 @@ func buildModelsURL(baseURL string) string {
 	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
 	hasVersionSuffix := versionPattern.MatchString(baseURL)
 
-	endpoint := "/models"
 	if !hasVersionSuffix && !skipVersionPrefix {
-		endpoint = "/v1" + endpoint
+		baseURL += versionPrefix
 	}
 
 	return baseURL + endpoint
+}
+
+func buildMessagesURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/messages")
+}
+
+// buildModelsURL 构建 models 端点的 URL
+func buildModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/models")
 }
 
 // GetModelsRequest 获取模型列表的请求体

@@ -31,6 +31,18 @@ func setupChatConfigManager(t *testing.T, upstream []config.UpstreamConfig) *con
 	return cm
 }
 
+func TestBuildHealthCheckURLs_UseExistingVersionSuffix(t *testing.T) {
+	if got := buildMessagesURL("https://api.example.com/codex/v1"); got != "https://api.example.com/codex/v1/messages" {
+		t.Fatalf("buildMessagesURL() = %s", got)
+	}
+	if got := buildModelsURL("https://api.example.com/codex/v1"); got != "https://api.example.com/codex/v1/models" {
+		t.Fatalf("buildModelsURL() = %s", got)
+	}
+	if got := buildModelsURL("https://api.example.com/codex/v1#"); got != "https://api.example.com/codex/v1/models" {
+		t.Fatalf("buildModelsURL() with marker = %s", got)
+	}
+}
+
 func TestGetUpstreams_IncludesAdvancedOptionFields(t *testing.T) {
 	cm := setupChatConfigManager(t, []config.UpstreamConfig{{
 		Name:             "chat-ch",

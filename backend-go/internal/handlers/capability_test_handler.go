@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -85,6 +86,22 @@ func normalizeCapabilityModels(models []string) []string {
 	}
 	sort.Strings(normalized)
 	return normalized
+}
+
+func buildCapabilityTestURL(baseURL, versionPrefix, endpoint string) string {
+	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
+	if skipVersionPrefix {
+		baseURL = strings.TrimSuffix(baseURL, "#")
+	}
+	baseURL = strings.TrimSuffix(baseURL, "/")
+
+	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
+	hasVersionSuffix := versionPattern.MatchString(baseURL)
+	if !hasVersionSuffix && !skipVersionPrefix {
+		baseURL += versionPrefix
+	}
+
+	return baseURL + endpoint
 }
 
 // getCapabilityCache 读取缓存，命中时自动续期（不超过最大生存期）
@@ -988,16 +1005,6 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 	}
 	baseURL := urls[0]
 
-	// 如果末尾有 #，去掉 # 后不添加版本前缀
-	noVersionPrefix := false
-	if strings.HasSuffix(baseURL, "#") {
-		baseURL = strings.TrimSuffix(baseURL, "#")
-		noVersionPrefix = true
-	}
-
-	// 处理 BaseURL：去除末尾 /
-	baseURL = strings.TrimSuffix(baseURL, "/")
-
 	apiKey := channel.APIKeys[0]
 
 	var (
@@ -1009,11 +1016,7 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 
 	switch protocol {
 	case "messages":
-		if noVersionPrefix {
-			requestURL = baseURL + "/messages"
-		} else {
-			requestURL = baseURL + "/v1/messages"
-		}
+		requestURL = buildCapabilityTestURL(baseURL, "/v1", "/messages")
 		body, err = json.Marshal(map[string]interface{}{
 			"model": model,
 			"system": []map[string]interface{}{
@@ -1038,11 +1041,7 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 		})
 
 	case "chat":
-		if noVersionPrefix {
-			requestURL = baseURL + "/chat/completions"
-		} else {
-			requestURL = baseURL + "/v1/chat/completions"
-		}
+		requestURL = buildCapabilityTestURL(baseURL, "/v1", "/chat/completions")
 		body, err = json.Marshal(map[string]interface{}{
 			"model": model,
 			"messages": []map[string]string{
@@ -1055,11 +1054,7 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 		})
 
 	case "gemini":
-		if noVersionPrefix {
-			requestURL = baseURL + "/models/" + model + ":streamGenerateContent?alt=sse"
-		} else {
-			requestURL = baseURL + "/v1beta/models/" + model + ":streamGenerateContent?alt=sse"
-		}
+		requestURL = buildCapabilityTestURL(baseURL, "/v1beta", "/models/"+model+":streamGenerateContent?alt=sse")
 		body, err = json.Marshal(map[string]interface{}{
 			"contents": []map[string]interface{}{
 				{
@@ -1080,11 +1075,7 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 		isGemini = true
 
 	case "responses":
-		if noVersionPrefix {
-			requestURL = baseURL + "/responses"
-		} else {
-			requestURL = baseURL + "/v1/responses"
-		}
+		requestURL = buildCapabilityTestURL(baseURL, "/v1", "/responses")
 		body, err = json.Marshal(map[string]interface{}{
 			"model":             model,
 			"input":             "What are you best at: code generation, creative writing, or math problem solving?",
