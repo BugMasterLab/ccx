@@ -264,3 +264,42 @@ func TestExecuteModelTest_RespectsAutoBlacklistBalance(t *testing.T) {
 		t.Fatalf("APIKeys=%v, want original key preserved", updated.Upstream[0].APIKeys)
 	}
 }
+
+func TestBuildTestRequestWithModel_NoAPIKey(t *testing.T) {
+	channel := &config.UpstreamConfig{
+		BaseURL: "https://example.com",
+	}
+
+	// APIKeys 和 DisabledAPIKeys 都为空时应返回 no_api_key 错误
+	_, err := buildTestRequestWithModel("messages", channel, "test-model")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "no_api_key") {
+		t.Fatalf("error=%q, want contains 'no_api_key'", err.Error())
+	}
+}
+
+func TestBuildTestRequestWithModel_FallbackToDisabledKey(t *testing.T) {
+	channel := &config.UpstreamConfig{
+		BaseURL: "https://example.com",
+		APIKeys: []string{}, // 活跃 key 已被拉空
+		DisabledAPIKeys: []config.DisabledKeyInfo{
+			{Key: "disabled-key-1", Reason: "authentication_error"},
+		},
+	}
+
+	// 应从 DisabledAPIKeys 临时借用 key，不 panic
+	req, err := buildTestRequestWithModel("messages", channel, "test-model")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 验证请求使用了被拉黑的 key
+	authHeader := req.Header.Get("X-Api-Key")
+	if authHeader == "" {
+		authHeader = req.Header.Get("Authorization")
+	}
+	if !strings.Contains(authHeader, "disabled-key-1") {
+		t.Fatalf("auth header=%q, want contains 'disabled-key-1'", authHeader)
+	}
+}

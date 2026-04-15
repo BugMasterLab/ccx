@@ -1005,7 +1005,15 @@ func buildTestRequestWithModel(protocol string, channel *config.UpstreamConfig, 
 	}
 	baseURL := urls[0]
 
-	apiKey := channel.APIKeys[0]
+	apiKey := ""
+	if len(channel.APIKeys) > 0 {
+		apiKey = channel.APIKeys[0]
+	} else if len(channel.DisabledAPIKeys) > 0 {
+		// 活跃 key 已被拉黑清空，临时借用被拉黑的 key 完成能力测试（不恢复到活跃列表）
+		apiKey = channel.DisabledAPIKeys[0].Key
+	} else {
+		return nil, fmt.Errorf("no_api_key")
+	}
 
 	var (
 		requestURL string
