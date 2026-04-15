@@ -234,7 +234,7 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 		}
 		channel.RPM = effectiveRPM
 
-		if len(channel.APIKeys) == 0 {
+		if len(channel.APIKeys) == 0 && len(channel.DisabledAPIKeys) == 0 {
 			errMsg := "no_api_key"
 			resp := CapabilityTestResponse{
 				ChannelID:           id,
@@ -262,6 +262,8 @@ func TestChannelCapability(cfgManager *config.ConfigManager, channelKind string)
 		apiKey := ""
 		if len(channel.APIKeys) > 0 {
 			apiKey = channel.APIKeys[0]
+		} else if len(channel.DisabledAPIKeys) > 0 {
+			apiKey = channel.DisabledAPIKeys[0].Key
 		}
 
 		normalizedModels := normalizeCapabilityModels(req.Models)
@@ -478,6 +480,8 @@ func runCapabilityTestJob(jobID, channelKind string, channelID int, channel conf
 	apiKey := ""
 	if len(channel.APIKeys) > 0 {
 		apiKey = channel.APIKeys[0]
+	} else if len(channel.DisabledAPIKeys) > 0 {
+		apiKey = channel.DisabledAPIKeys[0].Key
 	}
 	results := runRoundRobinTests(ctx, &channel, protocols, timeout, jobID, previousResults, userModels, cfgManager, channelID, channelKind, apiKey)
 	totalDuration := time.Since(totalStart).Milliseconds()
@@ -1435,6 +1439,8 @@ func RetryCapabilityTestModel(cfgManager *config.ConfigManager, channelKind stri
 			apiKey := ""
 			if len(channel.APIKeys) > 0 {
 				apiKey = channel.APIKeys[0]
+			} else if len(channel.DisabledAPIKeys) > 0 {
+				apiKey = channel.DisabledAPIKeys[0].Key
 			}
 			modelResult := executeModelTest(retryCtx, channel, req.Protocol, req.Model, timeout, jobID, cfgManager, id, channelKind, apiKey)
 
