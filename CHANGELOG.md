@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Added
+
+- **完整强化版熔断器** - 实现显式三态熔断状态机（closed/open/half_open），支持指数退避、单探针恢复和失败分类
+  - 引入失败分类机制（retryable/non_retryable/quota/client_cancel），只有可重试故障触发熔断
+  - 实现 half-open 单探针恢复机制，成功 2 次才完全恢复
+  - 实现指数退避机制（30s base, 10min max），避免频繁重试
+  - 新增 circuit_states 表持久化熔断状态，服务重启后保留
+  - 调度器禁止 open 渠道被 fallback 选回，解决连续 500 仍打到坏渠道的问题
+  - 升级 upstream_failover 和 responses/compact 使用新 breaker 状态机
+  - Dashboard API 返回完整 breaker 字段（circuitState/halfOpenSuccesses/breakerFailureRate/nextRetryAt）
+  - 前端状态徽章支持 breaker-open/half-open 显示，恢复按钮识别自动熔断
+  - 涉及文件：`internal/metrics/channel_metrics.go`, `internal/metrics/persistence.go`, `internal/metrics/sqlite_store.go`, `internal/scheduler/channel_scheduler.go`, `internal/handlers/common/upstream_failover.go`, `internal/handlers/responses/compact.go`, `internal/handlers/channel_metrics_handler.go`, `frontend/src/components/ChannelStatusBadge.vue`, `frontend/src/components/ChannelOrchestration.vue`
+
+### Fixed
+
+- **收敛 half-open 探针并发窗口、健康判定与指标口径** - 调整 `upstream_failover.go` 与 `responses/compact.go` 的探针释放时序为“先记账、后释放”，避免 half-open 状态下并发请求重复抢占探针；将空 API Key 列表渠道统一判定为不健康；将 `IsKeyHealthy()` 的到期状态推进收敛到写锁内，避免读锁下写状态；并修正渠道聚合 `successRate/errorRate` 使用总请求统计、仅让 `breakerFailureRate` 使用 breaker 窗口，保证看板指标与真实请求结果一致，同时去除 closed / 非 breaker 相关热路径上的同步熔断状态持久化写入，降低默认持久化模式下的请求开销
+
+### Removed
+
+- **清理已下架模型引用** - 移除代码中对官方已下架的 `gpt-5.1-codex-max` 模型的所有引用
+
 ## [v2.6.57] - 2026-04-14
 
 ### Fixed

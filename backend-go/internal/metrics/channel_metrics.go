@@ -12,11 +12,67 @@ import (
 	"github.com/BenedictKing/ccx/internal/utils"
 )
 
-// RequestRecord 带时间戳的请求记录（扩展版，支持 Token 和 Cache 数据）
+// FailureClass 表示请求失败分类，用于区分是否应影响熔断状态机。
+type FailureClass string
+
+const (
+	FailureClassNone         FailureClass = ""
+	FailureClassRetryable    FailureClass = "retryable"
+	FailureClassNonRetryable FailureClass = "non_retryable"
+	FailureClassQuota        FailureClass = "quota"
+	FailureClassClientCancel FailureClass = "client_cancel"
+)
+
+// IsBreakerRelevant 判断失败类型是否应影响 breaker 状态机。
+func (fc FailureClass) IsBreakerRelevant() bool {
+	return fc == FailureClassRetryable
+}
+
+// CircuitState 表示 Key 当前的熔断状态。
+type CircuitState uint8
+
+const (
+	CircuitStateClosed CircuitState = iota
+	CircuitStateOpen
+	CircuitStateHalfOpen
+)
+
+func (s CircuitState) String() string {
+	switch s {
+	case CircuitStateOpen:
+		return "open"
+	case CircuitStateHalfOpen:
+		return "half_open"
+	default:
+		return "closed"
+	}
+}
+
+// ParseCircuitState 解析持久化的状态字符串。
+func ParseCircuitState(text string) CircuitState {
+	switch text {
+	case "open":
+		return CircuitStateOpen
+	case "half_open":
+		return CircuitStateHalfOpen
+	default:
+		return CircuitStateClosed
+	}
+}
+
+const (
+	consecutiveRetryableFailuresThreshold int64         = 3
+	halfOpenSuccessThreshold              int           = 2
+	defaultCircuitBackoffBase             time.Duration = 30 * time.Second
+	defaultCircuitBackoffMax              time.Duration = 10 * time.Minute
+)
+
+// RequestRecord 带时间戳的请求记录（扩展版，支持 Token、Cache 和失败分类数据）。
 type RequestRecord struct {
 	Model                    string
 	Timestamp                time.Time
 	Success                  bool
+	FailureClass             FailureClass
 	InputTokens              int64
 	OutputTokens             int64
 	CacheCreationInputTokens int64
@@ -25,19 +81,27 @@ type RequestRecord struct {
 
 // KeyMetrics 单个 Key 的指标（绑定到 BaseURL + Key 组合）
 type KeyMetrics struct {
-	MetricsKey          string     `json:"metricsKey"`          // hash(baseURL + apiKey)
-	BaseURL             string     `json:"baseUrl"`             // 用于显示
-	KeyMask             string     `json:"keyMask"`             // 脱敏的 key（用于显示）
-	RequestCount        int64      `json:"requestCount"`        // 总请求数
-	SuccessCount        int64      `json:"successCount"`        // 成功数
-	FailureCount        int64      `json:"failureCount"`        // 失败数
-	ConsecutiveFailures int64      `json:"consecutiveFailures"` // 连续失败数
-	ActiveRequests      int64      `json:"activeRequests"`      // 进行中的请求数
-	LastSuccessAt       *time.Time `json:"lastSuccessAt,omitempty"`
-	LastFailureAt       *time.Time `json:"lastFailureAt,omitempty"`
-	CircuitBrokenAt     *time.Time `json:"circuitBrokenAt,omitempty"` // 熔断开始时间
-	// 滑动窗口记录（最近 N 次请求的结果）
+	MetricsKey          string       `json:"metricsKey"`          // hash(baseURL + apiKey)
+	BaseURL             string       `json:"baseUrl"`             // 用于显示
+	KeyMask             string       `json:"keyMask"`             // 脱敏的 key（用于显示）
+	RequestCount        int64        `json:"requestCount"`        // 总请求数
+	SuccessCount        int64        `json:"successCount"`        // 成功数
+	FailureCount        int64        `json:"failureCount"`        // 失败数
+	ConsecutiveFailures int64        `json:"consecutiveFailures"` // 连续可重试失败数
+	ActiveRequests      int64        `json:"activeRequests"`      // 进行中的请求数
+	LastSuccessAt       *time.Time   `json:"lastSuccessAt,omitempty"`
+	LastFailureAt       *time.Time   `json:"lastFailureAt,omitempty"`
+	CircuitBrokenAt     *time.Time   `json:"circuitBrokenAt,omitempty"` // breaker 进入 open 的时间（兼容旧字段）
+	CircuitState        CircuitState `json:"-"`
+	HalfOpenAt          *time.Time   `json:"halfOpenAt,omitempty"`
+	NextRetryAt         *time.Time   `json:"nextRetryAt,omitempty"`
+	BackoffLevel        int          `json:"backoffLevel"`
+	HalfOpenSuccesses   int          `json:"halfOpenSuccesses"`
+	ProbeInFlight       bool         `json:"-"`
+	// 滑动窗口记录（最近 N 次请求的结果，用于展示综合成功率）
 	recentResults []bool // true=success, false=failure
+	// breaker 滑动窗口（仅记录成功和可重试失败）
+	breakerResults []bool
 	// 带时间戳的请求记录（用于分时段统计，保留24小时）
 	requestHistory []RequestRecord
 	// 进行中请求在 requestHistory 中的索引（用于“连接即计数”，结束后回写成功/失败与 token）
@@ -46,16 +110,20 @@ type KeyMetrics struct {
 
 // ChannelMetrics 渠道聚合指标（用于 API 返回，兼容旧结构）
 type ChannelMetrics struct {
-	ChannelIndex        int        `json:"channelIndex"`
-	RequestCount        int64      `json:"requestCount"`
-	SuccessCount        int64      `json:"successCount"`
-	FailureCount        int64      `json:"failureCount"`
-	ConsecutiveFailures int64      `json:"consecutiveFailures"`
-	LastSuccessAt       *time.Time `json:"lastSuccessAt,omitempty"`
-	LastFailureAt       *time.Time `json:"lastFailureAt,omitempty"`
-	CircuitBrokenAt     *time.Time `json:"circuitBrokenAt,omitempty"`
+	ChannelIndex        int          `json:"channelIndex"`
+	RequestCount        int64        `json:"requestCount"`
+	SuccessCount        int64        `json:"successCount"`
+	FailureCount        int64        `json:"failureCount"`
+	ConsecutiveFailures int64        `json:"consecutiveFailures"`
+	LastSuccessAt       *time.Time   `json:"lastSuccessAt,omitempty"`
+	LastFailureAt       *time.Time   `json:"lastFailureAt,omitempty"`
+	CircuitBrokenAt     *time.Time   `json:"circuitBrokenAt,omitempty"`
+	CircuitState        CircuitState `json:"-"`
+	NextRetryAt         *time.Time   `json:"nextRetryAt,omitempty"`
+	HalfOpenSuccesses   int          `json:"halfOpenSuccesses"`
 	// 滑动窗口记录（兼容旧代码）
-	recentResults []bool
+	recentResults  []bool
+	breakerResults []bool
 	// 带时间戳的请求记录
 	requestHistory []RequestRecord
 }
@@ -80,17 +148,20 @@ type TimeWindowStats struct {
 
 // MetricsManager 指标管理器
 type MetricsManager struct {
-	mu                  sync.RWMutex
-	keyMetrics          map[string]*KeyMetrics // key: hash(baseURL + apiKey)
-	windowSize          int                    // 滑动窗口大小
-	failureThreshold    float64                // 失败率阈值
-	circuitRecoveryTime time.Duration          // 熔断恢复时间
-	stopCh              chan struct{}          // 用于停止清理 goroutine
-	nextRequestID       uint64                 // 单进程递增请求ID（用于 pendingHistoryIdx）
+	mu                    sync.RWMutex
+	keyMetrics            map[string]*KeyMetrics // key: hash(baseURL + apiKey)
+	windowSize            int                    // 滑动窗口大小
+	failureThreshold      float64                // 失败率阈值
+	circuitRecoveryTime   time.Duration          // 兼容旧统计字段，表示基础探测冷却时间
+	circuitBackoffBase    time.Duration
+	circuitBackoffMax     time.Duration
+	halfOpenSuccessTarget int
+	stopCh                chan struct{} // 用于停止清理 goroutine
+	nextRequestID         uint64        // 单进程递增请求ID（用于 pendingHistoryIdx）
 
 	// 持久化存储（可选）
 	store   PersistenceStore
-	apiType string // "messages"、"responses" 或 "gemini"
+	apiType string // "messages"、"responses"、"gemini" 或 "chat"
 }
 
 // GetPersistenceStore 获取持久化存储（可能为 nil）
@@ -106,11 +177,14 @@ func (m *MetricsManager) GetAPIType() string {
 // NewMetricsManager 创建指标管理器
 func NewMetricsManager() *MetricsManager {
 	m := &MetricsManager{
-		keyMetrics:          make(map[string]*KeyMetrics),
-		windowSize:          10,               // 默认基于最近 10 次请求计算失败率
-		failureThreshold:    0.5,              // 默认 50% 失败率阈值
-		circuitRecoveryTime: 15 * time.Minute, // 默认 15 分钟自动恢复
-		stopCh:              make(chan struct{}),
+		keyMetrics:            make(map[string]*KeyMetrics),
+		windowSize:            10,  // 默认基于最近 10 次请求计算失败率
+		failureThreshold:      0.5, // 默认 50% 失败率阈值
+		circuitRecoveryTime:   defaultCircuitBackoffBase,
+		circuitBackoffBase:    defaultCircuitBackoffBase,
+		circuitBackoffMax:     defaultCircuitBackoffMax,
+		halfOpenSuccessTarget: halfOpenSuccessThreshold,
+		stopCh:                make(chan struct{}),
 	}
 	// 启动后台熔断恢复任务
 	go m.cleanupCircuitBreakers()
@@ -126,11 +200,14 @@ func NewMetricsManagerWithConfig(windowSize int, failureThreshold float64) *Metr
 		failureThreshold = 0.5
 	}
 	m := &MetricsManager{
-		keyMetrics:          make(map[string]*KeyMetrics),
-		windowSize:          windowSize,
-		failureThreshold:    failureThreshold,
-		circuitRecoveryTime: 15 * time.Minute,
-		stopCh:              make(chan struct{}),
+		keyMetrics:            make(map[string]*KeyMetrics),
+		windowSize:            windowSize,
+		failureThreshold:      failureThreshold,
+		circuitRecoveryTime:   defaultCircuitBackoffBase,
+		circuitBackoffBase:    defaultCircuitBackoffBase,
+		circuitBackoffMax:     defaultCircuitBackoffMax,
+		halfOpenSuccessTarget: halfOpenSuccessThreshold,
+		stopCh:                make(chan struct{}),
 	}
 	// 启动后台熔断恢复任务
 	go m.cleanupCircuitBreakers()
@@ -146,13 +223,16 @@ func NewMetricsManagerWithPersistence(windowSize int, failureThreshold float64, 
 		failureThreshold = 0.5
 	}
 	m := &MetricsManager{
-		keyMetrics:          make(map[string]*KeyMetrics),
-		windowSize:          windowSize,
-		failureThreshold:    failureThreshold,
-		circuitRecoveryTime: 15 * time.Minute,
-		stopCh:              make(chan struct{}),
-		store:               store,
-		apiType:             apiType,
+		keyMetrics:            make(map[string]*KeyMetrics),
+		windowSize:            windowSize,
+		failureThreshold:      failureThreshold,
+		circuitRecoveryTime:   defaultCircuitBackoffBase,
+		circuitBackoffBase:    defaultCircuitBackoffBase,
+		circuitBackoffMax:     defaultCircuitBackoffMax,
+		halfOpenSuccessTarget: halfOpenSuccessThreshold,
+		stopCh:                make(chan struct{}),
+		store:                 store,
+		apiType:               apiType,
 	}
 
 	// 从持久化存储加载历史数据
@@ -180,78 +260,100 @@ func (m *MetricsManager) loadFromStore() error {
 		return err
 	}
 
-	if len(records) == 0 {
-		log.Printf("[Metrics-Load] [%s] 无历史指标数据需要加载", m.apiType)
-		// 即使 24h 内无记录，也需要加载历史时间戳（补全超出窗口的最后成功/失败时间）
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		m.loadHistoricalTimestamps()
-		return nil
-	}
-
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// 重建内存中的 KeyMetrics
-	for _, r := range records {
-		metrics := m.getOrCreateKeyLocked(r.BaseURL, r.MetricsKey, r.KeyMask)
+	if len(records) == 0 {
+		log.Printf("[Metrics-Load] [%s] 无历史指标数据需要加载", m.apiType)
+	} else {
+		for _, r := range records {
+			metrics := m.getOrCreateKeyLocked(r.BaseURL, r.MetricsKey, r.KeyMask)
 
-		// 重建请求历史
-		metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
-			Model:                    r.Model,
-			Timestamp:                r.Timestamp,
-			Success:                  r.Success,
-			InputTokens:              r.InputTokens,
-			OutputTokens:             r.OutputTokens,
-			CacheCreationInputTokens: r.CacheCreationTokens,
-			CacheReadInputTokens:     r.CacheReadTokens,
-		})
+			metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
+				Model:                    r.Model,
+				Timestamp:                r.Timestamp,
+				Success:                  r.Success,
+				FailureClass:             normalizeFailureClass(r.Success, r.FailureClass),
+				InputTokens:              r.InputTokens,
+				OutputTokens:             r.OutputTokens,
+				CacheCreationInputTokens: r.CacheCreationTokens,
+				CacheReadInputTokens:     r.CacheReadTokens,
+			})
 
-		// 更新聚合计数
-		metrics.RequestCount++
-		if r.Success {
-			metrics.SuccessCount++
-			if metrics.LastSuccessAt == nil || r.Timestamp.After(*metrics.LastSuccessAt) {
-				t := r.Timestamp
-				metrics.LastSuccessAt = &t
+			metrics.RequestCount++
+			if r.Success {
+				metrics.SuccessCount++
+				if metrics.LastSuccessAt == nil || r.Timestamp.After(*metrics.LastSuccessAt) {
+					t := r.Timestamp
+					metrics.LastSuccessAt = &t
+				}
+			} else {
+				metrics.FailureCount++
+				if metrics.LastFailureAt == nil || r.Timestamp.After(*metrics.LastFailureAt) {
+					t := r.Timestamp
+					metrics.LastFailureAt = &t
+				}
+				if normalizeFailureClass(r.Success, r.FailureClass).IsBreakerRelevant() {
+					metrics.ConsecutiveFailures++
+				}
 			}
-		} else {
-			metrics.FailureCount++
-			if metrics.LastFailureAt == nil || r.Timestamp.After(*metrics.LastFailureAt) {
-				t := r.Timestamp
-				metrics.LastFailureAt = &t
+		}
+
+		windowCutoff := time.Now().Add(-15 * time.Minute)
+		for _, metrics := range m.keyMetrics {
+			metrics.recentResults = make([]bool, 0, m.windowSize)
+			metrics.breakerResults = make([]bool, 0, m.windowSize)
+			var recentRecords []bool
+			var breakerRecords []bool
+			var consecutiveRetryable int64
+			for _, record := range metrics.requestHistory {
+				if record.Timestamp.After(windowCutoff) {
+					recentRecords = append(recentRecords, record.Success)
+					if isBreakerRelevantFailure(record.Success, record.FailureClass) {
+						breakerRecords = append(breakerRecords, record.Success)
+					}
+				}
+				if record.Success {
+					consecutiveRetryable = 0
+				} else if record.FailureClass.IsBreakerRelevant() {
+					consecutiveRetryable++
+				}
 			}
+			metrics.ConsecutiveFailures = consecutiveRetryable
+			if len(recentRecords) > m.windowSize {
+				recentRecords = recentRecords[len(recentRecords)-m.windowSize:]
+			}
+			if len(breakerRecords) > m.windowSize {
+				breakerRecords = breakerRecords[len(breakerRecords)-m.windowSize:]
+			}
+			metrics.recentResults = append(metrics.recentResults, recentRecords...)
+			metrics.breakerResults = append(metrics.breakerResults, breakerRecords...)
 		}
 	}
 
-	// 重建滑动窗口（只从最近 15 分钟的记录中取最近 windowSize 条）
-	// 避免历史失败记录导致渠道长期处于不健康状态
-	windowCutoff := time.Now().Add(-15 * time.Minute)
-	for _, metrics := range m.keyMetrics {
-		metrics.recentResults = make([]bool, 0, m.windowSize)
-		// 从历史记录中筛选最近 15 分钟内的记录
-		var recentRecords []bool
-		for _, record := range metrics.requestHistory {
-			if record.Timestamp.After(windowCutoff) {
-				recentRecords = append(recentRecords, record.Success)
-			}
-		}
-		// 取最近 windowSize 条
-		n := len(recentRecords)
-		start := 0
-		if n > m.windowSize {
-			start = n - m.windowSize
-		}
-		for i := start; i < n; i++ {
-			metrics.recentResults = append(metrics.recentResults, recentRecords[i])
-		}
-	}
-
-	// 加载全量历史时间戳，补全超出 24h 窗口的 LastSuccessAt/LastFailureAt
 	m.loadHistoricalTimestamps()
 
-	log.Printf("[Metrics-Load] [%s] 已从持久化存储加载 %d 条历史记录，重建 %d 个 Key 指标",
-		m.apiType, len(records), len(m.keyMetrics))
+	states, err := m.store.LoadCircuitStates(m.apiType)
+	if err != nil {
+		return err
+	}
+	for metricsKey, state := range states {
+		metrics, ok := m.keyMetrics[metricsKey]
+		if !ok {
+			metrics = m.getOrCreateKeyLocked(state.BaseURL, state.MetricsKey, state.KeyMask)
+		}
+		metrics.CircuitState = ParseCircuitState(state.CircuitState)
+		metrics.CircuitBrokenAt = state.CircuitOpenedAt
+		metrics.HalfOpenAt = state.HalfOpenAt
+		metrics.NextRetryAt = state.NextRetryAt
+		metrics.BackoffLevel = state.BackoffLevel
+		metrics.HalfOpenSuccesses = state.HalfOpenSuccesses
+		metrics.ConsecutiveFailures = state.ConsecutiveFailures
+		metrics.ProbeInFlight = false
+	}
+
+	log.Printf("[Metrics-Load] [%s] 已从持久化存储加载 %d 条历史记录、%d 条熔断状态，重建 %d 个 Key 指标",
+		m.apiType, len(records), len(states), len(m.keyMetrics))
 	return nil
 }
 
@@ -288,7 +390,9 @@ func (m *MetricsManager) getOrCreateKeyLocked(baseURL, metricsKey, keyMask strin
 		MetricsKey:        metricsKey,
 		BaseURL:           baseURL,
 		KeyMask:           keyMask,
+		CircuitState:      CircuitStateClosed,
 		recentResults:     make([]bool, 0, m.windowSize),
+		breakerResults:    make([]bool, 0, m.windowSize),
 		pendingHistoryIdx: make(map[uint64]int),
 	}
 	m.keyMetrics[metricsKey] = metrics
@@ -317,11 +421,212 @@ func (m *MetricsManager) getOrCreateKey(baseURL, apiKey string) *KeyMetrics {
 		MetricsKey:        metricsKey,
 		BaseURL:           baseURL,
 		KeyMask:           utils.MaskAPIKey(apiKey),
+		CircuitState:      CircuitStateClosed,
 		recentResults:     make([]bool, 0, m.windowSize),
+		breakerResults:    make([]bool, 0, m.windowSize),
 		pendingHistoryIdx: make(map[uint64]int),
 	}
 	m.keyMetrics[metricsKey] = metrics
 	return metrics
+}
+
+func normalizeFailureClass(success bool, failureClass FailureClass) FailureClass {
+	if success {
+		return FailureClassNone
+	}
+	if failureClass == FailureClassNone {
+		return FailureClassRetryable
+	}
+	return failureClass
+}
+
+func isBreakerRelevantFailure(success bool, failureClass FailureClass) bool {
+	if success {
+		return true
+	}
+	return normalizeFailureClass(success, failureClass).IsBreakerRelevant()
+}
+
+func extractUsageTokens(usage *types.Usage) (int64, int64, int64, int64) {
+	if usage == nil {
+		return 0, 0, 0, 0
+	}
+	inputTokens := int64(usage.InputTokens)
+	outputTokens := int64(usage.OutputTokens)
+	cacheCreationTokens := int64(usage.CacheCreationInputTokens)
+	if cacheCreationTokens <= 0 {
+		cacheCreationTokens = int64(usage.CacheCreation5mInputTokens + usage.CacheCreation1hInputTokens)
+	}
+	cacheReadTokens := int64(usage.CacheReadInputTokens)
+	return inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens
+}
+
+func (m *MetricsManager) appendToBreakerWindowKey(metrics *KeyMetrics, success bool) {
+	metrics.breakerResults = append(metrics.breakerResults, success)
+	if len(metrics.breakerResults) > m.windowSize {
+		metrics.breakerResults = metrics.breakerResults[1:]
+	}
+}
+
+func (m *MetricsManager) calculateKeyBreakerFailureRateInternal(metrics *KeyMetrics) float64 {
+	if len(metrics.breakerResults) == 0 {
+		return 0
+	}
+	failures := 0
+	for _, success := range metrics.breakerResults {
+		if !success {
+			failures++
+		}
+	}
+	return float64(failures) / float64(len(metrics.breakerResults))
+}
+
+func (m *MetricsManager) nextBackoffDuration(level int) time.Duration {
+	if level < 0 {
+		level = 0
+	}
+	delay := m.circuitBackoffBase
+	for i := 0; i < level; i++ {
+		delay *= 2
+		if delay >= m.circuitBackoffMax {
+			return m.circuitBackoffMax
+		}
+	}
+	if delay > m.circuitBackoffMax {
+		return m.circuitBackoffMax
+	}
+	return delay
+}
+
+func (m *MetricsManager) persistCircuitStateLocked(metrics *KeyMetrics) {
+	if m.store == nil || metrics == nil {
+		return
+	}
+	var circuitOpenedAt *time.Time
+	if metrics.CircuitBrokenAt != nil {
+		t := *metrics.CircuitBrokenAt
+		circuitOpenedAt = &t
+	}
+	var halfOpenAt *time.Time
+	if metrics.HalfOpenAt != nil {
+		t := *metrics.HalfOpenAt
+		halfOpenAt = &t
+	}
+	var nextRetryAt *time.Time
+	if metrics.NextRetryAt != nil {
+		t := *metrics.NextRetryAt
+		nextRetryAt = &t
+	}
+	if err := m.store.UpsertCircuitState(PersistentCircuitState{
+		MetricsKey:          metrics.MetricsKey,
+		BaseURL:             metrics.BaseURL,
+		KeyMask:             metrics.KeyMask,
+		APIType:             m.apiType,
+		CircuitState:        metrics.CircuitState.String(),
+		CircuitOpenedAt:     circuitOpenedAt,
+		HalfOpenAt:          halfOpenAt,
+		NextRetryAt:         nextRetryAt,
+		BackoffLevel:        metrics.BackoffLevel,
+		HalfOpenSuccesses:   metrics.HalfOpenSuccesses,
+		ConsecutiveFailures: metrics.ConsecutiveFailures,
+	}); err != nil {
+		log.Printf("[Metrics-Circuit] 警告: 持久化熔断状态失败 (key=%s, state=%s): %v", metrics.KeyMask, metrics.CircuitState.String(), err)
+	}
+}
+
+func (m *MetricsManager) resetCircuitStateLocked(metrics *KeyMetrics, clearBreakerWindow bool) {
+	metrics.CircuitState = CircuitStateClosed
+	metrics.CircuitBrokenAt = nil
+	metrics.HalfOpenAt = nil
+	metrics.NextRetryAt = nil
+	metrics.BackoffLevel = 0
+	metrics.HalfOpenSuccesses = 0
+	metrics.ProbeInFlight = false
+	metrics.ConsecutiveFailures = 0
+	if clearBreakerWindow {
+		metrics.breakerResults = make([]bool, 0, m.windowSize)
+	}
+	m.persistCircuitStateLocked(metrics)
+}
+
+func (m *MetricsManager) moveCircuitToOpenLocked(metrics *KeyMetrics, now time.Time, escalate bool) {
+	if escalate {
+		metrics.BackoffLevel++
+	}
+	delay := m.nextBackoffDuration(metrics.BackoffLevel)
+	nextRetryAt := now.Add(delay)
+	metrics.CircuitState = CircuitStateOpen
+	metrics.CircuitBrokenAt = &now
+	metrics.HalfOpenAt = nil
+	metrics.NextRetryAt = &nextRetryAt
+	metrics.HalfOpenSuccesses = 0
+	metrics.ProbeInFlight = false
+	m.persistCircuitStateLocked(metrics)
+}
+
+func (m *MetricsManager) moveCircuitToHalfOpenLocked(metrics *KeyMetrics, now time.Time) {
+	metrics.CircuitState = CircuitStateHalfOpen
+	metrics.HalfOpenAt = &now
+	metrics.NextRetryAt = nil
+	metrics.HalfOpenSuccesses = 0
+	metrics.ProbeInFlight = false
+	m.persistCircuitStateLocked(metrics)
+}
+
+func (m *MetricsManager) advanceCircuitStateIfDueLocked(metrics *KeyMetrics, now time.Time) {
+	if metrics == nil {
+		return
+	}
+	if metrics.CircuitState == CircuitStateOpen && metrics.NextRetryAt != nil && !now.Before(*metrics.NextRetryAt) {
+		m.moveCircuitToHalfOpenLocked(metrics, now)
+	}
+}
+
+func (m *MetricsManager) handleBreakerSuccessLocked(metrics *KeyMetrics, now time.Time) {
+	m.advanceCircuitStateIfDueLocked(metrics, now)
+	m.appendToBreakerWindowKey(metrics, true)
+	metrics.ConsecutiveFailures = 0
+
+	switch metrics.CircuitState {
+	case CircuitStateHalfOpen:
+		metrics.HalfOpenSuccesses++
+		if metrics.HalfOpenSuccesses >= m.halfOpenSuccessTarget {
+			m.resetCircuitStateLocked(metrics, true)
+			log.Printf("[Metrics-Circuit] Key [%s] (%s) half-open 探针成功，恢复 closed", metrics.KeyMask, metrics.BaseURL)
+		} else {
+			m.persistCircuitStateLocked(metrics)
+		}
+	case CircuitStateOpen:
+		m.resetCircuitStateLocked(metrics, true)
+		log.Printf("[Metrics-Circuit] Key [%s] (%s) 因请求成功退出熔断状态", metrics.KeyMask, metrics.BaseURL)
+	default:
+		// closed 状态成功仅更新内存统计，不需要同步持久化熔断状态
+	}
+}
+
+func (m *MetricsManager) handleBreakerFailureLocked(metrics *KeyMetrics, failureClass FailureClass, now time.Time) {
+	failureClass = normalizeFailureClass(false, failureClass)
+	m.advanceCircuitStateIfDueLocked(metrics, now)
+	if !failureClass.IsBreakerRelevant() {
+		// 非 breaker 相关失败仅更新观测统计，不需要同步持久化熔断状态
+		return
+	}
+
+	metrics.ConsecutiveFailures++
+	m.appendToBreakerWindowKey(metrics, false)
+
+	switch metrics.CircuitState {
+	case CircuitStateHalfOpen:
+		m.moveCircuitToOpenLocked(metrics, now, true)
+		log.Printf("[Metrics-Circuit] Key [%s] (%s) half-open 探针失败，重新进入 open（失败率: %.1f%%）", metrics.KeyMask, metrics.BaseURL, m.calculateKeyBreakerFailureRateInternal(metrics)*100)
+	case CircuitStateClosed:
+		if m.isKeyCircuitBroken(metrics) {
+			m.moveCircuitToOpenLocked(metrics, now, false)
+			log.Printf("[Metrics-Circuit] Key [%s] (%s) 进入熔断状态（失败率: %.1f%%）", metrics.KeyMask, metrics.BaseURL, m.calculateKeyBreakerFailureRateInternal(metrics)*100)
+		}
+	default:
+		// open 状态下继续记录内存统计，持久化仅在状态迁移时发生
+	}
 }
 
 // RecordSuccess 记录成功请求（新方法，使用 baseURL + apiKey）
@@ -341,36 +646,15 @@ func (m *MetricsManager) recordSuccessWithUsageLocked(baseURL, apiKey string, us
 	metrics := m.getOrCreateKey(baseURL, apiKey)
 	metrics.RequestCount++
 	metrics.SuccessCount++
-	metrics.ConsecutiveFailures = 0
-
 	metrics.LastSuccessAt = &now
 
-	// 成功后清除熔断标记
-	if metrics.CircuitBrokenAt != nil {
-		metrics.CircuitBrokenAt = nil
-		log.Printf("[Metrics-Circuit] Key [%s] (%s) 因请求成功退出熔断状态", metrics.KeyMask, metrics.BaseURL)
-	}
-
-	// 更新滑动窗口
 	m.appendToWindowKey(metrics, true)
+	m.handleBreakerSuccessLocked(metrics, now)
 
-	// 提取 Token 数据（如果有）
-	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
-	if usage != nil {
-		inputTokens = int64(usage.InputTokens)
-		outputTokens = int64(usage.OutputTokens)
-		// cache_creation_input_tokens 有时不会返回（只返回 5m/1h 细分字段），这里做兜底汇总。
-		cacheCreationTokens = int64(usage.CacheCreationInputTokens)
-		if cacheCreationTokens <= 0 {
-			cacheCreationTokens = int64(usage.CacheCreation5mInputTokens + usage.CacheCreation1hInputTokens)
-		}
-		cacheReadTokens = int64(usage.CacheReadInputTokens)
-	}
+	inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens := extractUsageTokens(usage)
 
-	// 记录带时间戳的请求
-	m.appendToHistoryKeyWithUsage(metrics, now, true, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens)
+	m.appendToHistoryKeyWithUsage(metrics, now, true, FailureClassNone, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens)
 
-	// 写入持久化存储（异步，不阻塞）
 	if m.store != nil {
 		m.store.AddRecord(PersistentRecord{
 			MetricsKey:          metrics.MetricsKey,
@@ -378,6 +662,7 @@ func (m *MetricsManager) recordSuccessWithUsageLocked(baseURL, apiKey string, us
 			KeyMask:             metrics.KeyMask,
 			Timestamp:           now,
 			Success:             true,
+			FailureClass:        FailureClassNone,
 			InputTokens:         inputTokens,
 			OutputTokens:        outputTokens,
 			CacheCreationTokens: cacheCreationTokens,
@@ -389,33 +674,27 @@ func (m *MetricsManager) recordSuccessWithUsageLocked(baseURL, apiKey string, us
 
 // RecordFailure 记录失败请求（新方法，使用 baseURL + apiKey）
 func (m *MetricsManager) RecordFailure(baseURL, apiKey string) {
+	m.RecordFailureWithClass(baseURL, apiKey, FailureClassRetryable)
+}
+
+// RecordFailureWithClass 记录失败请求并指定失败分类。
+func (m *MetricsManager) RecordFailureWithClass(baseURL, apiKey string, failureClass FailureClass) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.recordFailureLocked(baseURL, apiKey, time.Now())
+	m.recordFailureLocked(baseURL, apiKey, normalizeFailureClass(false, failureClass), time.Now())
 }
 
-func (m *MetricsManager) recordFailureLocked(baseURL, apiKey string, now time.Time) {
+func (m *MetricsManager) recordFailureLocked(baseURL, apiKey string, failureClass FailureClass, now time.Time) {
 	metrics := m.getOrCreateKey(baseURL, apiKey)
 	metrics.RequestCount++
 	metrics.FailureCount++
-	metrics.ConsecutiveFailures++
-
 	metrics.LastFailureAt = &now
 
-	// 更新滑动窗口
 	m.appendToWindowKey(metrics, false)
+	m.handleBreakerFailureLocked(metrics, failureClass, now)
+	m.appendToHistoryKey(metrics, now, false, normalizeFailureClass(false, failureClass))
 
-	// 检查是否刚进入熔断状态
-	if metrics.CircuitBrokenAt == nil && m.isKeyCircuitBroken(metrics) {
-		metrics.CircuitBrokenAt = &now
-		log.Printf("[Metrics-Circuit] Key [%s] (%s) 进入熔断状态（失败率: %.1f%%）", metrics.KeyMask, metrics.BaseURL, m.calculateKeyFailureRateInternal(metrics)*100)
-	}
-
-	// 记录带时间戳的请求
-	m.appendToHistoryKey(metrics, now, false)
-
-	// 写入持久化存储（异步，不阻塞）
 	if m.store != nil {
 		m.store.AddRecord(PersistentRecord{
 			MetricsKey:          metrics.MetricsKey,
@@ -423,6 +702,7 @@ func (m *MetricsManager) recordFailureLocked(baseURL, apiKey string, now time.Ti
 			KeyMask:             metrics.KeyMask,
 			Timestamp:           now,
 			Success:             false,
+			FailureClass:        normalizeFailureClass(false, failureClass),
 			InputTokens:         0,
 			OutputTokens:        0,
 			CacheCreationTokens: 0,
@@ -444,7 +724,7 @@ func (m *MetricsManager) RecordRequestConnectedAt(baseURL, apiKey string, model 
 	defer m.mu.Unlock()
 
 	metrics := m.getOrCreateKey(baseURL, apiKey)
-	// RequestCount 改为在 finalize 阶段统一增加，避免 fallback 路径二次计数
+	m.advanceCircuitStateIfDueLocked(metrics, timestamp)
 
 	m.nextRequestID++
 	requestID := m.nextRequestID
@@ -454,13 +734,13 @@ func (m *MetricsManager) RecordRequestConnectedAt(baseURL, apiKey string, model 
 	}
 
 	metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
-		Timestamp: timestamp,
-		Success:   true, // 先按成功计数；结束时会回写真实结果
-		Model:     model,
+		Timestamp:    timestamp,
+		Success:      true, // 先按成功计数；结束时会回写真实结果
+		FailureClass: FailureClassNone,
+		Model:        model,
 	})
 	metrics.pendingHistoryIdx[requestID] = len(metrics.requestHistory) - 1
 
-	// 清理历史并同步修正索引
 	m.cleanupHistoryLocked(metrics)
 
 	return requestID
@@ -468,124 +748,93 @@ func (m *MetricsManager) RecordRequestConnectedAt(baseURL, apiKey string, model 
 
 // RecordRequestFinalizeSuccess 回写成功结果与 token（requestID 来自 RecordRequestConnected）。
 func (m *MetricsManager) RecordRequestFinalizeSuccess(baseURL, apiKey string, requestID uint64, usage *types.Usage) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	metricsKey := generateMetricsKey(baseURL, apiKey)
-	metrics, exists := m.keyMetrics[metricsKey]
-	if !exists {
-		m.recordSuccessWithUsageLocked(baseURL, apiKey, usage, time.Now())
-		return
-	}
-
-	idx, ok := metrics.pendingHistoryIdx[requestID]
-	if !ok || idx < 0 || idx >= len(metrics.requestHistory) {
-		m.recordSuccessWithUsageLocked(baseURL, apiKey, usage, time.Now())
-		return
-	}
-	delete(metrics.pendingHistoryIdx, requestID)
-
-	// 正常路径：在此统一增加 RequestCount
-	metrics.RequestCount++
-	metrics.SuccessCount++
-	metrics.ConsecutiveFailures = 0
-
-	now := time.Now()
-	metrics.LastSuccessAt = &now
-
-	// 成功后清除熔断标记
-	if metrics.CircuitBrokenAt != nil {
-		metrics.CircuitBrokenAt = nil
-		log.Printf("[Metrics-Circuit] Key [%s] (%s) 因请求成功退出熔断状态", metrics.KeyMask, metrics.BaseURL)
-	}
-
-	// 更新滑动窗口
-	m.appendToWindowKey(metrics, true)
-
-	// 提取 Token 数据（如果有）
-	var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
-	if usage != nil {
-		inputTokens = int64(usage.InputTokens)
-		outputTokens = int64(usage.OutputTokens)
-		// cache_creation_input_tokens 有时不会返回（只返回 5m/1h 细分字段），这里做兜底汇总。
-		cacheCreationTokens = int64(usage.CacheCreationInputTokens)
-		if cacheCreationTokens <= 0 {
-			cacheCreationTokens = int64(usage.CacheCreation5mInputTokens + usage.CacheCreation1hInputTokens)
-		}
-		cacheReadTokens = int64(usage.CacheReadInputTokens)
-	}
-
-	// 回写历史记录（时间戳保持为“请求开始（TCP 建连阶段）”时刻）
-	record := &metrics.requestHistory[idx]
-	record.Success = true
-	record.InputTokens = inputTokens
-	record.OutputTokens = outputTokens
-	record.CacheCreationInputTokens = cacheCreationTokens
-	record.CacheReadInputTokens = cacheReadTokens
-
-	// 写入持久化存储（异步，不阻塞）
-	if m.store != nil {
-		m.store.AddRecord(PersistentRecord{
-			MetricsKey:          metrics.MetricsKey,
-			BaseURL:             baseURL,
-			KeyMask:             metrics.KeyMask,
-			Timestamp:           record.Timestamp,
-			Success:             true,
-			InputTokens:         inputTokens,
-			OutputTokens:        outputTokens,
-			CacheCreationTokens: cacheCreationTokens,
-			CacheReadTokens:     cacheReadTokens,
-			APIType:             m.apiType,
-			Model:               record.Model,
-		})
-	}
+	m.RecordRequestFinalizeOutcome(baseURL, apiKey, requestID, true, FailureClassNone, usage)
 }
 
 // RecordRequestFinalizeFailure 回写失败结果（requestID 来自 RecordRequestConnected）。
 func (m *MetricsManager) RecordRequestFinalizeFailure(baseURL, apiKey string, requestID uint64) {
+	m.RecordRequestFinalizeFailureWithClass(baseURL, apiKey, requestID, FailureClassRetryable)
+}
+
+// RecordRequestFinalizeFailureWithClass 回写失败结果并显式指定失败分类。
+func (m *MetricsManager) RecordRequestFinalizeFailureWithClass(baseURL, apiKey string, requestID uint64, failureClass FailureClass) {
+	m.RecordRequestFinalizeOutcome(baseURL, apiKey, requestID, false, failureClass, nil)
+}
+
+// RecordRequestFinalizeOutcome 根据最终结果统一回写请求指标与 breaker 状态。
+func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey string, requestID uint64, success bool, failureClass FailureClass, usage *types.Usage) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	metricsKey := generateMetricsKey(baseURL, apiKey)
 	metrics, exists := m.keyMetrics[metricsKey]
 	if !exists {
-		m.recordFailureLocked(baseURL, apiKey, time.Now())
+		if success {
+			m.recordSuccessWithUsageLocked(baseURL, apiKey, usage, time.Now())
+		} else {
+			m.recordFailureLocked(baseURL, apiKey, normalizeFailureClass(false, failureClass), time.Now())
+		}
 		return
 	}
 
 	idx, ok := metrics.pendingHistoryIdx[requestID]
 	if !ok || idx < 0 || idx >= len(metrics.requestHistory) {
-		m.recordFailureLocked(baseURL, apiKey, time.Now())
+		if success {
+			m.recordSuccessWithUsageLocked(baseURL, apiKey, usage, time.Now())
+		} else {
+			m.recordFailureLocked(baseURL, apiKey, normalizeFailureClass(false, failureClass), time.Now())
+		}
 		return
 	}
 	delete(metrics.pendingHistoryIdx, requestID)
 
-	// 正常路径：在此统一增加 RequestCount
-	metrics.RequestCount++
-	metrics.FailureCount++
-	metrics.ConsecutiveFailures++
-
 	now := time.Now()
-	metrics.LastFailureAt = &now
+	metrics.RequestCount++
+	record := &metrics.requestHistory[idx]
+	record.Success = success
+	record.FailureClass = normalizeFailureClass(success, failureClass)
 
-	// 更新滑动窗口
-	m.appendToWindowKey(metrics, false)
+	if success {
+		metrics.SuccessCount++
+		metrics.LastSuccessAt = &now
+		m.appendToWindowKey(metrics, true)
+		m.handleBreakerSuccessLocked(metrics, now)
 
-	// 检查是否刚进入熔断状态
-	if metrics.CircuitBrokenAt == nil && m.isKeyCircuitBroken(metrics) {
-		metrics.CircuitBrokenAt = &now
-		log.Printf("[Metrics-Circuit] Key [%s] (%s) 进入熔断状态（失败率: %.1f%%）", metrics.KeyMask, metrics.BaseURL, m.calculateKeyFailureRateInternal(metrics)*100)
+		inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens := extractUsageTokens(usage)
+		record.InputTokens = inputTokens
+		record.OutputTokens = outputTokens
+		record.CacheCreationInputTokens = cacheCreationTokens
+		record.CacheReadInputTokens = cacheReadTokens
+
+		if m.store != nil {
+			m.store.AddRecord(PersistentRecord{
+				MetricsKey:          metrics.MetricsKey,
+				BaseURL:             baseURL,
+				KeyMask:             metrics.KeyMask,
+				Timestamp:           record.Timestamp,
+				Success:             true,
+				FailureClass:        FailureClassNone,
+				InputTokens:         inputTokens,
+				OutputTokens:        outputTokens,
+				CacheCreationTokens: cacheCreationTokens,
+				CacheReadTokens:     cacheReadTokens,
+				APIType:             m.apiType,
+				Model:               record.Model,
+			})
+		}
+		return
 	}
 
-	// 回写历史记录（时间戳保持为“请求开始（TCP 建连阶段）”时刻）
-	record := &metrics.requestHistory[idx]
-	record.Success = false
+	failureClass = normalizeFailureClass(false, failureClass)
+	metrics.FailureCount++
+	metrics.LastFailureAt = &now
+	m.appendToWindowKey(metrics, false)
+	m.handleBreakerFailureLocked(metrics, failureClass, now)
 	record.InputTokens = 0
 	record.OutputTokens = 0
 	record.CacheCreationInputTokens = 0
 	record.CacheReadInputTokens = 0
 
-	// 写入持久化存储（异步，不阻塞）
 	if m.store != nil {
 		m.store.AddRecord(PersistentRecord{
 			MetricsKey:          metrics.MetricsKey,
@@ -593,6 +842,7 @@ func (m *MetricsManager) RecordRequestFinalizeFailure(baseURL, apiKey string, re
 			KeyMask:             metrics.KeyMask,
 			Timestamp:           record.Timestamp,
 			Success:             false,
+			FailureClass:        failureClass,
 			InputTokens:         0,
 			OutputTokens:        0,
 			CacheCreationTokens: 0,
@@ -661,15 +911,20 @@ func (m *MetricsManager) RecordRequestEnd(baseURL, apiKey string) {
 
 // isKeyCircuitBroken 判断 Key 是否达到熔断条件（内部方法，调用前需持有锁）
 func (m *MetricsManager) isKeyCircuitBroken(metrics *KeyMetrics) bool {
-	// 最小请求数保护：至少 max(3, windowSize/2) 次请求才判断熔断
-	minRequests := max(3, m.windowSize/2)
-	if len(metrics.recentResults) < minRequests {
+	if metrics == nil {
 		return false
 	}
-	return m.calculateKeyFailureRateInternal(metrics) >= m.failureThreshold
+	if metrics.ConsecutiveFailures >= consecutiveRetryableFailuresThreshold {
+		return true
+	}
+	minRequests := max(3, m.windowSize/2)
+	if len(metrics.breakerResults) < minRequests {
+		return false
+	}
+	return m.calculateKeyBreakerFailureRateInternal(metrics) >= m.failureThreshold
 }
 
-// calculateKeyFailureRateInternal 计算 Key 失败率（内部方法，调用前需持有锁）
+// calculateKeyFailureRateInternal 计算 Key 综合失败率（内部方法，调用前需持有锁）
 func (m *MetricsManager) calculateKeyFailureRateInternal(metrics *KeyMetrics) float64 {
 	if len(metrics.recentResults) == 0 {
 		return 0
@@ -693,8 +948,8 @@ func (m *MetricsManager) appendToWindowKey(metrics *KeyMetrics, success bool) {
 }
 
 // appendToHistoryKey 向 Key 历史记录添加请求（保留24小时）
-func (m *MetricsManager) appendToHistoryKey(metrics *KeyMetrics, timestamp time.Time, success bool) {
-	m.appendToHistoryKeyWithUsage(metrics, timestamp, success, 0, 0, 0, 0)
+func (m *MetricsManager) appendToHistoryKey(metrics *KeyMetrics, timestamp time.Time, success bool, failureClass FailureClass) {
+	m.appendToHistoryKeyWithUsage(metrics, timestamp, success, failureClass, 0, 0, 0, 0)
 }
 
 // cleanupHistoryLocked 清理超过 24 小时的历史记录，并同步修正 pendingHistoryIdx 索引。
@@ -741,10 +996,11 @@ func (m *MetricsManager) cleanupHistoryLocked(metrics *KeyMetrics) {
 }
 
 // appendToHistoryKeyWithUsage 向 Key 历史记录添加请求（带 Usage 数据）
-func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timestamp time.Time, success bool, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) {
+func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timestamp time.Time, success bool, failureClass FailureClass, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) {
 	metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
 		Timestamp:                timestamp,
 		Success:                  success,
+		FailureClass:             normalizeFailureClass(success, failureClass),
 		InputTokens:              inputTokens,
 		OutputTokens:             outputTokens,
 		CacheCreationInputTokens: cacheCreationTokens,
@@ -757,16 +1013,23 @@ func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timest
 
 // IsKeyHealthy 判断单个 Key 是否健康
 func (m *MetricsManager) IsKeyHealthy(baseURL, apiKey string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	metricsKey := generateMetricsKey(baseURL, apiKey)
 	metrics, exists := m.keyMetrics[metricsKey]
-	if !exists || len(metrics.recentResults) == 0 {
+	if !exists {
 		return true // 没有记录，默认健康
 	}
+	m.advanceCircuitStateIfDueLocked(metrics, time.Now())
+	if metrics.CircuitState == CircuitStateOpen {
+		return false
+	}
+	if len(metrics.breakerResults) == 0 {
+		return true
+	}
 
-	return m.calculateKeyFailureRateInternal(metrics) < m.failureThreshold
+	return m.calculateKeyBreakerFailureRateInternal(metrics) < m.failureThreshold
 }
 
 // IsChannelHealthy 判断渠道是否健康（基于当前活跃 Keys 聚合计算）
@@ -776,30 +1039,41 @@ func (m *MetricsManager) IsChannelHealthyWithKeys(baseURL string, activeKeys []s
 		return false // 没有 Key，不健康
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	// 聚合所有活跃 Key 的指标
 	var totalResults []bool
+	hasOpenOnly := false
+	hasAvailableCandidate := false
+	now := time.Now()
 	for _, apiKey := range activeKeys {
 		metricsKey := generateMetricsKey(baseURL, apiKey)
-		if metrics, exists := m.keyMetrics[metricsKey]; exists {
-			totalResults = append(totalResults, metrics.recentResults...)
+		metrics, exists := m.keyMetrics[metricsKey]
+		if !exists {
+			hasAvailableCandidate = true
+			continue
 		}
+		m.advanceCircuitStateIfDueLocked(metrics, now)
+		if metrics.CircuitState == CircuitStateOpen {
+			hasOpenOnly = true
+			continue
+		}
+		hasAvailableCandidate = true
+		totalResults = append(totalResults, metrics.breakerResults...)
 	}
 
-	// 没有任何记录，默认健康
 	if len(totalResults) == 0 {
+		if hasOpenOnly && !hasAvailableCandidate {
+			return false
+		}
 		return true
 	}
 
-	// 最小请求数保护：至少 max(3, windowSize/2) 次请求才判断健康状态
 	minRequests := max(3, m.windowSize/2)
 	if len(totalResults) < minRequests {
-		return true // 请求数不足，默认健康
+		return true
 	}
 
-	// 计算聚合失败率
 	failures := 0
 	for _, success := range totalResults {
 		if !success {
@@ -811,38 +1085,160 @@ func (m *MetricsManager) IsChannelHealthyWithKeys(baseURL string, activeKeys []s
 	return failureRate < m.failureThreshold
 }
 
-// CalculateKeyFailureRate 计算单个 Key 的失败率
-func (m *MetricsManager) CalculateKeyFailureRate(baseURL, apiKey string) float64 {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// IsChannelHealthyMultiURL 判断多 BaseURL 聚合渠道是否健康。
+func (m *MetricsManager) IsChannelHealthyMultiURL(baseURLs []string, activeKeys []string) bool {
+	if len(baseURLs) == 0 {
+		return false
+	}
+	if len(activeKeys) == 0 {
+		return false
+	}
 
-	metricsKey := generateMetricsKey(baseURL, apiKey)
-	metrics, exists := m.keyMetrics[metricsKey]
-	if !exists || len(metrics.recentResults) == 0 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var totalResults []bool
+	hasOpenOnly := false
+	hasAvailableCandidate := false
+	now := time.Now()
+	for _, baseURL := range baseURLs {
+		for _, apiKey := range activeKeys {
+			metricsKey := generateMetricsKey(baseURL, apiKey)
+			metrics, exists := m.keyMetrics[metricsKey]
+			if !exists {
+				hasAvailableCandidate = true
+				continue
+			}
+			m.advanceCircuitStateIfDueLocked(metrics, now)
+			if metrics.CircuitState == CircuitStateOpen {
+				hasOpenOnly = true
+				continue
+			}
+			hasAvailableCandidate = true
+			totalResults = append(totalResults, metrics.breakerResults...)
+		}
+	}
+
+	if len(totalResults) == 0 {
+		if hasOpenOnly && !hasAvailableCandidate {
+			return false
+		}
+		return true
+	}
+
+	minRequests := max(3, m.windowSize/2)
+	if len(totalResults) < minRequests {
+		return true
+	}
+
+	failures := 0
+	for _, success := range totalResults {
+		if !success {
+			failures++
+		}
+	}
+	failureRate := float64(failures) / float64(len(totalResults))
+	return failureRate < m.failureThreshold
+}
+
+// CalculateChannelFailureRateMultiURL 计算多 BaseURL 聚合 breaker 失败率。
+func (m *MetricsManager) CalculateChannelFailureRateMultiURL(baseURLs []string, activeKeys []string) float64 {
+	if len(baseURLs) == 0 || len(activeKeys) == 0 {
 		return 0
 	}
 
-	return m.calculateKeyFailureRateInternal(metrics)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var totalResults []bool
+	hasOpenOnly := false
+	hasAvailableCandidate := false
+	now := time.Now()
+	for _, baseURL := range baseURLs {
+		for _, apiKey := range activeKeys {
+			metricsKey := generateMetricsKey(baseURL, apiKey)
+			metrics, exists := m.keyMetrics[metricsKey]
+			if !exists {
+				hasAvailableCandidate = true
+				continue
+			}
+			m.advanceCircuitStateIfDueLocked(metrics, now)
+			if metrics.CircuitState == CircuitStateOpen {
+				hasOpenOnly = true
+				continue
+			}
+			hasAvailableCandidate = true
+			totalResults = append(totalResults, metrics.breakerResults...)
+		}
+	}
+
+	if len(totalResults) == 0 {
+		if hasOpenOnly && !hasAvailableCandidate {
+			return 1
+		}
+		return 0
+	}
+
+	failures := 0
+	for _, success := range totalResults {
+		if !success {
+			failures++
+		}
+	}
+	return float64(failures) / float64(len(totalResults))
 }
 
-// CalculateChannelFailureRate 计算渠道聚合失败率
+// CalculateKeyFailureRate 计算单个 Key 的 breaker 失败率
+func (m *MetricsManager) CalculateKeyFailureRate(baseURL, apiKey string) float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	metricsKey := generateMetricsKey(baseURL, apiKey)
+	metrics, exists := m.keyMetrics[metricsKey]
+	if !exists {
+		return 0
+	}
+	m.advanceCircuitStateIfDueLocked(metrics, time.Now())
+	if metrics.CircuitState == CircuitStateOpen && len(metrics.breakerResults) == 0 {
+		return 1
+	}
+
+	return m.calculateKeyBreakerFailureRateInternal(metrics)
+}
+
+// CalculateChannelFailureRate 计算渠道聚合 breaker 失败率
 func (m *MetricsManager) CalculateChannelFailureRate(baseURL string, activeKeys []string) float64 {
 	if len(activeKeys) == 0 {
 		return 0
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	var totalResults []bool
+	hasOpenOnly := false
+	hasAvailableCandidate := false
+	now := time.Now()
 	for _, apiKey := range activeKeys {
 		metricsKey := generateMetricsKey(baseURL, apiKey)
-		if metrics, exists := m.keyMetrics[metricsKey]; exists {
-			totalResults = append(totalResults, metrics.recentResults...)
+		metrics, exists := m.keyMetrics[metricsKey]
+		if !exists {
+			hasAvailableCandidate = true
+			continue
 		}
+		m.advanceCircuitStateIfDueLocked(metrics, now)
+		if metrics.CircuitState == CircuitStateOpen {
+			hasOpenOnly = true
+			continue
+		}
+		hasAvailableCandidate = true
+		totalResults = append(totalResults, metrics.breakerResults...)
 	}
 
 	if len(totalResults) == 0 {
+		if hasOpenOnly && !hasAvailableCandidate {
+			return 1
+		}
 		return 0
 	}
 
@@ -858,12 +1254,12 @@ func (m *MetricsManager) CalculateChannelFailureRate(baseURL string, activeKeys 
 
 // GetKeyMetrics 获取单个 Key 的指标
 func (m *MetricsManager) GetKeyMetrics(baseURL, apiKey string) *KeyMetrics {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	metricsKey := generateMetricsKey(baseURL, apiKey)
 	if metrics, exists := m.keyMetrics[metricsKey]; exists {
-		// 返回副本
+		m.advanceCircuitStateIfDueLocked(metrics, time.Now())
 		return &KeyMetrics{
 			MetricsKey:          metrics.MetricsKey,
 			BaseURL:             metrics.BaseURL,
@@ -872,9 +1268,15 @@ func (m *MetricsManager) GetKeyMetrics(baseURL, apiKey string) *KeyMetrics {
 			SuccessCount:        metrics.SuccessCount,
 			FailureCount:        metrics.FailureCount,
 			ConsecutiveFailures: metrics.ConsecutiveFailures,
+			ActiveRequests:      metrics.ActiveRequests,
 			LastSuccessAt:       metrics.LastSuccessAt,
 			LastFailureAt:       metrics.LastFailureAt,
 			CircuitBrokenAt:     metrics.CircuitBrokenAt,
+			CircuitState:        metrics.CircuitState,
+			HalfOpenAt:          metrics.HalfOpenAt,
+			NextRetryAt:         metrics.NextRetryAt,
+			BackoffLevel:        metrics.BackoffLevel,
+			HalfOpenSuccesses:   metrics.HalfOpenSuccesses,
 		}
 	}
 	return nil
@@ -882,29 +1284,36 @@ func (m *MetricsManager) GetKeyMetrics(baseURL, apiKey string) *KeyMetrics {
 
 // GetChannelAggregatedMetrics 获取渠道聚合指标（基于活跃 Keys）
 func (m *MetricsManager) GetChannelAggregatedMetrics(channelIndex int, baseURL string, activeKeys []string) *ChannelMetrics {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	aggregated := &ChannelMetrics{
 		ChannelIndex: channelIndex,
+		CircuitState: CircuitStateClosed,
 	}
 
-	var latestSuccess, latestFailure, latestCircuitBroken *time.Time
+	var latestSuccess, latestFailure, latestCircuitBroken, latestNextRetry *time.Time
 	var maxConsecutiveFailures int64
+	var maxHalfOpenSuccesses int
+	channelState := CircuitStateClosed
 
 	for _, apiKey := range activeKeys {
 		metricsKey := generateMetricsKey(baseURL, apiKey)
 		if metrics, exists := m.keyMetrics[metricsKey]; exists {
+			m.advanceCircuitStateIfDueLocked(metrics, time.Now())
 			aggregated.RequestCount += metrics.RequestCount
 			aggregated.SuccessCount += metrics.SuccessCount
 			aggregated.FailureCount += metrics.FailureCount
 			if metrics.ConsecutiveFailures > maxConsecutiveFailures {
 				maxConsecutiveFailures = metrics.ConsecutiveFailures
 			}
+			if metrics.HalfOpenSuccesses > maxHalfOpenSuccesses {
+				maxHalfOpenSuccesses = metrics.HalfOpenSuccesses
+			}
 			aggregated.recentResults = append(aggregated.recentResults, metrics.recentResults...)
+			aggregated.breakerResults = append(aggregated.breakerResults, metrics.breakerResults...)
 			aggregated.requestHistory = append(aggregated.requestHistory, metrics.requestHistory...)
 
-			// 取最新的时间戳
 			if metrics.LastSuccessAt != nil && (latestSuccess == nil || metrics.LastSuccessAt.After(*latestSuccess)) {
 				latestSuccess = metrics.LastSuccessAt
 			}
@@ -914,12 +1323,21 @@ func (m *MetricsManager) GetChannelAggregatedMetrics(channelIndex int, baseURL s
 			if metrics.CircuitBrokenAt != nil && (latestCircuitBroken == nil || metrics.CircuitBrokenAt.After(*latestCircuitBroken)) {
 				latestCircuitBroken = metrics.CircuitBrokenAt
 			}
+			if metrics.NextRetryAt != nil && (latestNextRetry == nil || metrics.NextRetryAt.After(*latestNextRetry)) {
+				latestNextRetry = metrics.NextRetryAt
+			}
+			if metrics.CircuitState > channelState {
+				channelState = metrics.CircuitState
+			}
 		}
 	}
 
 	aggregated.LastSuccessAt = latestSuccess
 	aggregated.LastFailureAt = latestFailure
 	aggregated.CircuitBrokenAt = latestCircuitBroken
+	aggregated.NextRetryAt = latestNextRetry
+	aggregated.CircuitState = channelState
+	aggregated.HalfOpenSuccesses = maxHalfOpenSuccesses
 	aggregated.ConsecutiveFailures = maxConsecutiveFailures
 
 	return aggregated
@@ -1100,11 +1518,13 @@ func SelectTopKeys(infos []KeyUsageInfo, maxDisplay int) []KeyUsageInfo {
 
 // GetAllKeyMetrics 获取所有 Key 的指标
 func (m *MetricsManager) GetAllKeyMetrics() []*KeyMetrics {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	result := make([]*KeyMetrics, 0, len(m.keyMetrics))
+	now := time.Now()
 	for _, metrics := range m.keyMetrics {
+		m.advanceCircuitStateIfDueLocked(metrics, now)
 		result = append(result, &KeyMetrics{
 			MetricsKey:          metrics.MetricsKey,
 			BaseURL:             metrics.BaseURL,
@@ -1113,9 +1533,15 @@ func (m *MetricsManager) GetAllKeyMetrics() []*KeyMetrics {
 			SuccessCount:        metrics.SuccessCount,
 			FailureCount:        metrics.FailureCount,
 			ConsecutiveFailures: metrics.ConsecutiveFailures,
+			ActiveRequests:      metrics.ActiveRequests,
 			LastSuccessAt:       metrics.LastSuccessAt,
 			LastFailureAt:       metrics.LastFailureAt,
 			CircuitBrokenAt:     metrics.CircuitBrokenAt,
+			CircuitState:        metrics.CircuitState,
+			HalfOpenAt:          metrics.HalfOpenAt,
+			NextRetryAt:         metrics.NextRetryAt,
+			BackoffLevel:        metrics.BackoffLevel,
+			HalfOpenSuccesses:   metrics.HalfOpenSuccesses,
 		})
 	}
 	return result
@@ -1170,16 +1596,15 @@ func (m *MetricsManager) GetAllTimeWindowStatsForKey(baseURL, apiKey string) map
 }
 
 // ResetKeyFailureState 重置单个 Key 的熔断/失败状态（保留历史统计与总量计数）。
-// 用于“恢复熔断”场景：清零连续失败、清空滑动窗口、解除熔断标记。
+// 用于“恢复熔断”场景：清零连续失败、清空 breaker 滑动窗口、解除熔断标记。
 func (m *MetricsManager) ResetKeyFailureState(baseURL, apiKey string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	metricsKey := generateMetricsKey(baseURL, apiKey)
 	if metrics, exists := m.keyMetrics[metricsKey]; exists {
-		metrics.ConsecutiveFailures = 0
 		metrics.recentResults = make([]bool, 0, m.windowSize)
-		metrics.CircuitBrokenAt = nil
+		m.resetCircuitStateLocked(metrics, true)
 		log.Printf("[Metrics-Reset] Key [%s] (%s) 熔断状态已重置（保留历史统计）", metrics.KeyMask, metrics.BaseURL)
 	}
 }
@@ -1191,17 +1616,16 @@ func (m *MetricsManager) ResetKey(baseURL, apiKey string) {
 
 	metricsKey := generateMetricsKey(baseURL, apiKey)
 	if metrics, exists := m.keyMetrics[metricsKey]; exists {
-		// 完全重置所有字段
 		metrics.RequestCount = 0
 		metrics.SuccessCount = 0
 		metrics.FailureCount = 0
-		metrics.ConsecutiveFailures = 0
 		metrics.ActiveRequests = 0
 		metrics.LastSuccessAt = nil
 		metrics.LastFailureAt = nil
-		metrics.CircuitBrokenAt = nil
 		metrics.recentResults = make([]bool, 0, m.windowSize)
+		metrics.breakerResults = make([]bool, 0, m.windowSize)
 		metrics.requestHistory = nil
+		m.resetCircuitStateLocked(metrics, true)
 		if metrics.pendingHistoryIdx != nil {
 			for id := range metrics.pendingHistoryIdx {
 				delete(metrics.pendingHistoryIdx, id)
@@ -1258,15 +1682,16 @@ func (m *MetricsManager) DeleteKeysForChannel(baseURLs, apiKeys []string) []stri
 // apiKeys: 渠道的所有 API Key
 // 返回被删除的持久化记录数
 func (m *MetricsManager) DeleteChannelMetrics(baseURLs, apiKeys []string) int64 {
-	// 1. 删除内存指标，获取 metricsKey 列表
 	deletedKeys := m.DeleteKeysForChannel(baseURLs, apiKeys)
 
-	// 2. 删除持久化数据（使用内部 apiType，避免外部误传）
 	if m.store != nil && len(deletedKeys) > 0 {
 		deleted, err := m.store.DeleteRecordsByMetricsKeys(deletedKeys, m.apiType)
 		if err != nil {
 			log.Printf("[Metrics-Delete] 警告: 删除持久化指标记录失败: %v", err)
 			return 0
+		}
+		if _, err := m.store.DeleteCircuitStatesByMetricsKeys(deletedKeys, m.apiType); err != nil {
+			log.Printf("[Metrics-Delete] 警告: 删除持久化熔断状态失败: %v", err)
 		}
 		if deleted > 0 {
 			log.Printf("[Metrics-Delete] 已删除 %d 条 %s 持久化指标记录", deleted, m.apiType)
@@ -1289,7 +1714,6 @@ func (m *MetricsManager) DeleteByMetricsKeys(metricsKeys []string) int64 {
 		return 0
 	}
 
-	// 1. 删除内存指标
 	m.mu.Lock()
 	var deletedFromMemory int
 	for _, metricsKey := range metricsKeys {
@@ -1304,12 +1728,14 @@ func (m *MetricsManager) DeleteByMetricsKeys(metricsKeys []string) int64 {
 		log.Printf("[Metrics-Delete] 已删除 %d 个内存指标记录", deletedFromMemory)
 	}
 
-	// 2. 删除持久化数据
 	if m.store != nil {
 		deleted, err := m.store.DeleteRecordsByMetricsKeys(metricsKeys, m.apiType)
 		if err != nil {
 			log.Printf("[Metrics-Delete] 警告: 删除持久化指标记录失败: %v", err)
 			return 0
+		}
+		if _, err := m.store.DeleteCircuitStatesByMetricsKeys(metricsKeys, m.apiType); err != nil {
+			log.Printf("[Metrics-Delete] 警告: 删除持久化熔断状态失败: %v", err)
 		}
 		if deleted > 0 {
 			log.Printf("[Metrics-Delete] 已删除 %d 条 %s 持久化指标记录", deleted, m.apiType)
@@ -1320,12 +1746,11 @@ func (m *MetricsManager) DeleteByMetricsKeys(metricsKeys []string) int64 {
 	return 0
 }
 
-// cleanupCircuitBreakers 后台任务：定期检查并恢复超时的熔断 Key，清理过期指标
+// cleanupCircuitBreakers 后台任务：推进到期的熔断状态并清理过期指标
 func (m *MetricsManager) cleanupCircuitBreakers() {
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
-	// 每小时清理一次过期 Key
 	cleanupTicker := time.NewTicker(1 * time.Hour)
 	defer cleanupTicker.Stop()
 
@@ -1341,23 +1766,14 @@ func (m *MetricsManager) cleanupCircuitBreakers() {
 	}
 }
 
-// recoverExpiredCircuitBreakers 恢复超时的熔断 Key
+// recoverExpiredCircuitBreakers 推进超时的熔断 Key（open -> half_open）。
 func (m *MetricsManager) recoverExpiredCircuitBreakers() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
 	for _, metrics := range m.keyMetrics {
-		if metrics.CircuitBrokenAt != nil {
-			elapsed := now.Sub(*metrics.CircuitBrokenAt)
-			if elapsed > m.circuitRecoveryTime {
-				// 重置熔断状态
-				metrics.ConsecutiveFailures = 0
-				metrics.recentResults = make([]bool, 0, m.windowSize)
-				metrics.CircuitBrokenAt = nil
-				log.Printf("[Metrics-Circuit] Key [%s] (%s) 熔断自动恢复（已超过 %v）", metrics.KeyMask, metrics.BaseURL, m.circuitRecoveryTime)
-			}
-		}
+		m.advanceCircuitStateIfDueLocked(metrics, now)
 	}
 }
 
@@ -1368,10 +1784,10 @@ func (m *MetricsManager) cleanupStaleKeys() {
 
 	now := time.Now()
 	staleThreshold := 48 * time.Hour
+	var removedMetricsKeys []string
 	var removed []string
 
 	for key, metrics := range m.keyMetrics {
-		// 判断最后活动时间
 		var lastActivity time.Time
 		if metrics.LastSuccessAt != nil {
 			lastActivity = *metrics.LastSuccessAt
@@ -1380,10 +1796,16 @@ func (m *MetricsManager) cleanupStaleKeys() {
 			lastActivity = *metrics.LastFailureAt
 		}
 
-		// 如果从未有活动或超过阈值，删除
 		if lastActivity.IsZero() || now.Sub(lastActivity) > staleThreshold {
 			delete(m.keyMetrics, key)
+			removedMetricsKeys = append(removedMetricsKeys, key)
 			removed = append(removed, metrics.KeyMask)
+		}
+	}
+
+	if m.store != nil && len(removedMetricsKeys) > 0 {
+		if _, err := m.store.DeleteCircuitStatesByMetricsKeys(removedMetricsKeys, m.apiType); err != nil {
+			log.Printf("[Metrics-Cleanup] 警告: 删除过期熔断状态失败: %v", err)
 		}
 	}
 
@@ -1392,9 +1814,29 @@ func (m *MetricsManager) cleanupStaleKeys() {
 	}
 }
 
-// GetCircuitRecoveryTime 获取熔断恢复时间
+// GetCircuitRecoveryTime 获取基础熔断冷却时间（兼容旧接口）
 func (m *MetricsManager) GetCircuitRecoveryTime() time.Duration {
 	return m.circuitRecoveryTime
+}
+
+// GetCircuitBackoffBase 获取 breaker 基础退避时间。
+func (m *MetricsManager) GetCircuitBackoffBase() time.Duration {
+	return m.circuitBackoffBase
+}
+
+// GetCircuitBackoffMax 获取 breaker 最大退避时间。
+func (m *MetricsManager) GetCircuitBackoffMax() time.Duration {
+	return m.circuitBackoffMax
+}
+
+// GetHalfOpenSuccessTarget 获取 half-open 恢复所需连续成功次数。
+func (m *MetricsManager) GetHalfOpenSuccessTarget() int {
+	return m.halfOpenSuccessTarget
+}
+
+// GetConsecutiveRetryableFailuresThreshold 获取连续可重试失败触发阈值。
+func (m *MetricsManager) GetConsecutiveRetryableFailuresThreshold() int64 {
+	return consecutiveRetryableFailuresThreshold
 }
 
 // GetFailureThreshold 获取失败率阈值
@@ -1425,6 +1867,10 @@ type MetricsResponse struct {
 	LastSuccessAt       *string                    `json:"lastSuccessAt,omitempty"`
 	LastFailureAt       *string                    `json:"lastFailureAt,omitempty"`
 	CircuitBrokenAt     *string                    `json:"circuitBrokenAt,omitempty"`
+	CircuitState        string                     `json:"circuitState,omitempty"`
+	NextRetryAt         *string                    `json:"nextRetryAt,omitempty"`
+	HalfOpenSuccesses   int                        `json:"halfOpenSuccesses,omitempty"`
+	BreakerFailureRate  float64                    `json:"breakerFailureRate,omitempty"`
 	TimeWindows         map[string]TimeWindowStats `json:"timeWindows,omitempty"`
 	KeyMetrics          []*KeyMetricsResponse      `json:"keyMetrics,omitempty"` // 各 Key 的详细指标
 }
@@ -1440,13 +1886,16 @@ type KeyMetricsResponse struct {
 	SuccessRate         float64 `json:"successRate"`
 	ConsecutiveFailures int64   `json:"consecutiveFailures,omitempty"`
 	CircuitBroken       bool    `json:"circuitBroken,omitempty"`
+	CircuitState        string  `json:"circuitState,omitempty"`
+	NextRetryAt         *string `json:"nextRetryAt,omitempty"`
+	HalfOpenSuccesses   int     `json:"halfOpenSuccesses,omitempty"`
+	BreakerFailureRate  float64 `json:"breakerFailureRate,omitempty"`
 }
 
 // ToResponseMultiURL 转换为 API 响应格式（支持多 BaseURL 聚合）
 // baseURLs: 渠道配置的所有 BaseURL（用于多端点 failover 场景）
 // historicalKeys: 历史 API Key（用于统计聚合，只计入总数不显示在 KeyMetrics 中）
 func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string, activeKeys []string, latency int64, historicalKeys ...[]string) *MetricsResponse {
-	// 如果没有配置 BaseURL，返回空响应
 	if len(baseURLs) == 0 {
 		return &MetricsResponse{
 			ChannelIndex: channelIndex,
@@ -1456,8 +1905,8 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 		}
 	}
 
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	resp := &MetricsResponse{
 		ChannelIndex: channelIndex,
@@ -1470,7 +1919,6 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 		return resp
 	}
 
-	// 用于按 API Key 聚合的临时结构
 	type keyAggregation struct {
 		keyMask             string
 		requestCount        int64
@@ -1478,18 +1926,24 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 		failureCount        int64
 		consecutiveFailures int64
 		circuitBroken       bool
+		circuitState        CircuitState
+		nextRetryAt         *time.Time
+		halfOpenSuccesses   int
+		breakerFailureRate  float64
 	}
-	keyAggMap := make(map[string]*keyAggregation) // key: apiKey
+	keyAggMap := make(map[string]*keyAggregation)
 
-	var latestSuccess, latestFailure, latestCircuitBroken *time.Time
+	var latestSuccess, latestFailure, latestCircuitBroken, latestNextRetry *time.Time
 	var totalResults []bool
 	var maxConsecutiveFailures int64
+	var maxHalfOpenSuccesses int
+	channelState := CircuitStateClosed
 
-	// 遍历所有 BaseURL 和 Key 的组合
 	for _, baseURL := range baseURLs {
 		for _, apiKey := range activeKeys {
 			metricsKey := generateMetricsKey(baseURL, apiKey)
 			if metrics, exists := m.keyMetrics[metricsKey]; exists {
+				m.advanceCircuitStateIfDueLocked(metrics, time.Now())
 				resp.RequestCount += metrics.RequestCount
 				resp.SuccessCount += metrics.SuccessCount
 				resp.FailureCount += metrics.FailureCount
@@ -1497,9 +1951,14 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 				if metrics.ConsecutiveFailures > maxConsecutiveFailures {
 					maxConsecutiveFailures = metrics.ConsecutiveFailures
 				}
-				totalResults = append(totalResults, metrics.recentResults...)
+				if metrics.HalfOpenSuccesses > maxHalfOpenSuccesses {
+					maxHalfOpenSuccesses = metrics.HalfOpenSuccesses
+				}
+				if metrics.CircuitState > channelState {
+					channelState = metrics.CircuitState
+				}
+				totalResults = append(totalResults, metrics.breakerResults...)
 
-				// 取最新的时间戳
 				if metrics.LastSuccessAt != nil && (latestSuccess == nil || metrics.LastSuccessAt.After(*latestSuccess)) {
 					latestSuccess = metrics.LastSuccessAt
 				}
@@ -1509,8 +1968,11 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 				if metrics.CircuitBrokenAt != nil && (latestCircuitBroken == nil || metrics.CircuitBrokenAt.After(*latestCircuitBroken)) {
 					latestCircuitBroken = metrics.CircuitBrokenAt
 				}
+				if metrics.NextRetryAt != nil && (latestNextRetry == nil || metrics.NextRetryAt.After(*latestNextRetry)) {
+					latestNextRetry = metrics.NextRetryAt
+				}
 
-				// 按 API Key 聚合（同一 Key 在不同 URL 的指标合并）
+				breakerFailureRate := m.calculateKeyBreakerFailureRateInternal(metrics) * 100
 				if agg, ok := keyAggMap[apiKey]; ok {
 					agg.requestCount += metrics.RequestCount
 					agg.successCount += metrics.SuccessCount
@@ -1521,7 +1983,25 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 					if metrics.CircuitBrokenAt != nil {
 						agg.circuitBroken = true
 					}
+					if metrics.CircuitState > agg.circuitState {
+						agg.circuitState = metrics.CircuitState
+					}
+					if metrics.NextRetryAt != nil && (agg.nextRetryAt == nil || metrics.NextRetryAt.After(*agg.nextRetryAt)) {
+						t := *metrics.NextRetryAt
+						agg.nextRetryAt = &t
+					}
+					if metrics.HalfOpenSuccesses > agg.halfOpenSuccesses {
+						agg.halfOpenSuccesses = metrics.HalfOpenSuccesses
+					}
+					if breakerFailureRate > agg.breakerFailureRate {
+						agg.breakerFailureRate = breakerFailureRate
+					}
 				} else {
+					var nextRetryCopy *time.Time
+					if metrics.NextRetryAt != nil {
+						t := *metrics.NextRetryAt
+						nextRetryCopy = &t
+					}
 					keyAggMap[apiKey] = &keyAggregation{
 						keyMask:             metrics.KeyMask,
 						requestCount:        metrics.RequestCount,
@@ -1529,13 +2009,16 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 						failureCount:        metrics.FailureCount,
 						consecutiveFailures: metrics.ConsecutiveFailures,
 						circuitBroken:       metrics.CircuitBrokenAt != nil,
+						circuitState:        metrics.CircuitState,
+						nextRetryAt:         nextRetryCopy,
+						halfOpenSuccesses:   metrics.HalfOpenSuccesses,
+						breakerFailureRate:  breakerFailureRate,
 					}
 				}
 			}
 		}
 	}
 
-	// 聚合历史 Key 的指标（只计入总数，不显示在 KeyMetrics 中）
 	if len(historicalKeys) > 0 && len(historicalKeys[0]) > 0 {
 		for _, baseURL := range baseURLs {
 			for _, apiKey := range historicalKeys[0] {
@@ -1544,20 +2027,22 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 					resp.RequestCount += metrics.RequestCount
 					resp.SuccessCount += metrics.SuccessCount
 					resp.FailureCount += metrics.FailureCount
-					// 历史 Key 不计入 totalResults（不影响实时失败率计算）
-					// 历史 Key 不计入 maxConsecutiveFailures（不影响熔断判断）
 				}
 			}
 		}
 	}
 
-	// 构建按 Key 聚合后的响应（保持 activeKeys 顺序）
 	var keyResponses []*KeyMetricsResponse
 	for _, apiKey := range activeKeys {
 		if agg, ok := keyAggMap[apiKey]; ok {
 			keySuccessRate := float64(100)
 			if agg.requestCount > 0 {
 				keySuccessRate = float64(agg.successCount) / float64(agg.requestCount) * 100
+			}
+			var nextRetryText *string
+			if agg.nextRetryAt != nil {
+				t := agg.nextRetryAt.Format(time.RFC3339)
+				nextRetryText = &t
 			}
 			keyResponses = append(keyResponses, &KeyMetricsResponse{
 				KeyMask:             agg.keyMask,
@@ -1567,12 +2052,25 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 				SuccessRate:         keySuccessRate,
 				ConsecutiveFailures: agg.consecutiveFailures,
 				CircuitBroken:       agg.circuitBroken,
+				CircuitState:        agg.circuitState.String(),
+				NextRetryAt:         nextRetryText,
+				HalfOpenSuccesses:   agg.halfOpenSuccesses,
+				BreakerFailureRate:  agg.breakerFailureRate,
 			})
 		}
 	}
 
-	// 计算聚合失败率
 	resp.ConsecutiveFailures = maxConsecutiveFailures
+	resp.HalfOpenSuccesses = maxHalfOpenSuccesses
+	resp.CircuitState = channelState.String()
+
+	if resp.RequestCount > 0 {
+		resp.SuccessRate = float64(resp.SuccessCount) / float64(resp.RequestCount) * 100
+		resp.ErrorRate = float64(resp.FailureCount) / float64(resp.RequestCount) * 100
+	} else {
+		resp.SuccessRate = 100
+		resp.ErrorRate = 0
+	}
 
 	if len(totalResults) > 0 {
 		failures := 0
@@ -1582,11 +2080,9 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 			}
 		}
 		failureRate := float64(failures) / float64(len(totalResults))
-		resp.SuccessRate = (1 - failureRate) * 100
-		resp.ErrorRate = failureRate * 100
+		resp.BreakerFailureRate = failureRate * 100
 	} else {
-		resp.SuccessRate = 100
-		resp.ErrorRate = 0
+		resp.BreakerFailureRate = 0
 	}
 
 	if latestSuccess != nil {
@@ -1601,10 +2097,12 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 		t := latestCircuitBroken.Format(time.RFC3339)
 		resp.CircuitBrokenAt = &t
 	}
+	if latestNextRetry != nil {
+		t := latestNextRetry.Format(time.RFC3339)
+		resp.NextRetryAt = &t
+	}
 
 	resp.KeyMetrics = keyResponses
-
-	// 计算聚合的时间窗口统计（多 URL 版本）
 	resp.TimeWindows = m.calculateAggregatedTimeWindowsMultiURL(baseURLs, activeKeys)
 
 	return resp
@@ -1612,102 +2110,7 @@ func (m *MetricsManager) ToResponseMultiURL(channelIndex int, baseURLs []string,
 
 // ToResponse 转换为 API 响应格式（需要提供 baseURL 和 activeKeys）
 func (m *MetricsManager) ToResponse(channelIndex int, baseURL string, activeKeys []string, latency int64) *MetricsResponse {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
-	resp := &MetricsResponse{
-		ChannelIndex: channelIndex,
-		Latency:      latency,
-	}
-
-	if len(activeKeys) == 0 {
-		resp.SuccessRate = 100
-		resp.ErrorRate = 0
-		return resp
-	}
-
-	var keyResponses []*KeyMetricsResponse
-	var latestSuccess, latestFailure, latestCircuitBroken *time.Time
-	var totalResults []bool
-	var maxConsecutiveFailures int64
-
-	for _, apiKey := range activeKeys {
-		metricsKey := generateMetricsKey(baseURL, apiKey)
-		if metrics, exists := m.keyMetrics[metricsKey]; exists {
-			resp.RequestCount += metrics.RequestCount
-			resp.SuccessCount += metrics.SuccessCount
-			resp.FailureCount += metrics.FailureCount
-			resp.ActiveRequests += metrics.ActiveRequests
-			if metrics.ConsecutiveFailures > maxConsecutiveFailures {
-				maxConsecutiveFailures = metrics.ConsecutiveFailures
-			}
-			totalResults = append(totalResults, metrics.recentResults...)
-
-			// 取最新的时间戳
-			if metrics.LastSuccessAt != nil && (latestSuccess == nil || metrics.LastSuccessAt.After(*latestSuccess)) {
-				latestSuccess = metrics.LastSuccessAt
-			}
-			if metrics.LastFailureAt != nil && (latestFailure == nil || metrics.LastFailureAt.After(*latestFailure)) {
-				latestFailure = metrics.LastFailureAt
-			}
-			if metrics.CircuitBrokenAt != nil && (latestCircuitBroken == nil || metrics.CircuitBrokenAt.After(*latestCircuitBroken)) {
-				latestCircuitBroken = metrics.CircuitBrokenAt
-			}
-
-			// 单个 Key 的指标
-			keySuccessRate := float64(100)
-			if metrics.RequestCount > 0 {
-				keySuccessRate = float64(metrics.SuccessCount) / float64(metrics.RequestCount) * 100
-			}
-			keyResponses = append(keyResponses, &KeyMetricsResponse{
-				KeyMask:             metrics.KeyMask,
-				RequestCount:        metrics.RequestCount,
-				SuccessCount:        metrics.SuccessCount,
-				FailureCount:        metrics.FailureCount,
-				SuccessRate:         keySuccessRate,
-				ConsecutiveFailures: metrics.ConsecutiveFailures,
-				CircuitBroken:       metrics.CircuitBrokenAt != nil,
-			})
-		}
-	}
-
-	// 计算聚合失败率
-	resp.ConsecutiveFailures = maxConsecutiveFailures
-
-	if len(totalResults) > 0 {
-		failures := 0
-		for _, success := range totalResults {
-			if !success {
-				failures++
-			}
-		}
-		failureRate := float64(failures) / float64(len(totalResults))
-		resp.SuccessRate = (1 - failureRate) * 100
-		resp.ErrorRate = failureRate * 100
-	} else {
-		resp.SuccessRate = 100
-		resp.ErrorRate = 0
-	}
-
-	if latestSuccess != nil {
-		t := latestSuccess.Format(time.RFC3339)
-		resp.LastSuccessAt = &t
-	}
-	if latestFailure != nil {
-		t := latestFailure.Format(time.RFC3339)
-		resp.LastFailureAt = &t
-	}
-	if latestCircuitBroken != nil {
-		t := latestCircuitBroken.Format(time.RFC3339)
-		resp.CircuitBrokenAt = &t
-	}
-
-	resp.KeyMetrics = keyResponses
-
-	// 计算聚合的时间窗口统计
-	resp.TimeWindows = m.calculateAggregatedTimeWindowsInternal(baseURL, activeKeys)
-
-	return resp
+	return m.ToResponseMultiURL(channelIndex, []string{baseURL}, activeKeys, latency)
 }
 
 // calculateAggregatedTimeWindowsInternal 计算聚合的时间窗口统计（内部方法，调用前需持有锁）
@@ -1896,24 +2299,112 @@ func (m *MetricsManager) ShouldSuspend(channelIndex int) bool {
 	return false
 }
 
-// ShouldSuspendKey 判断单个 Key 是否应该熔断
-func (m *MetricsManager) ShouldSuspendKey(baseURL, apiKey string) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// GetKeyCircuitState 获取单个 Key 当前的 breaker 状态。
+func (m *MetricsManager) GetKeyCircuitState(baseURL, apiKey string) CircuitState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	metricsKey := generateMetricsKey(baseURL, apiKey)
+	metrics, exists := m.keyMetrics[metricsKey]
+	if !exists {
+		return CircuitStateClosed
+	}
+	m.advanceCircuitStateIfDueLocked(metrics, time.Now())
+	return metrics.CircuitState
+}
+
+// TryAcquireProbe 尝试占用 half-open 探针资格。
+func (m *MetricsManager) TryAcquireProbe(baseURL, apiKey string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	metricsKey := generateMetricsKey(baseURL, apiKey)
 	metrics, exists := m.keyMetrics[metricsKey]
 	if !exists {
 		return false
 	}
-
-	// 最小请求数保护：至少 max(3, windowSize/2) 次请求才判断
-	minRequests := max(3, m.windowSize/2)
-	if len(metrics.recentResults) < minRequests {
+	m.advanceCircuitStateIfDueLocked(metrics, time.Now())
+	if metrics.CircuitState != CircuitStateHalfOpen || metrics.ProbeInFlight {
 		return false
 	}
+	metrics.ProbeInFlight = true
+	return true
+}
 
-	return m.calculateKeyFailureRateInternal(metrics) >= m.failureThreshold
+// ReleaseProbe 释放 half-open 探针占用。
+func (m *MetricsManager) ReleaseProbe(baseURL, apiKey string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	metricsKey := generateMetricsKey(baseURL, apiKey)
+	if metrics, exists := m.keyMetrics[metricsKey]; exists {
+		metrics.ProbeInFlight = false
+	}
+}
+
+// GetChannelCircuitStateMultiURL 获取多 BaseURL 聚合后的 channel breaker 状态。
+func (m *MetricsManager) GetChannelCircuitStateMultiURL(baseURLs []string, activeKeys []string) CircuitState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	hasHalfOpen := false
+	now := time.Now()
+	for _, baseURL := range baseURLs {
+		for _, apiKey := range activeKeys {
+			metricsKey := generateMetricsKey(baseURL, apiKey)
+			metrics, exists := m.keyMetrics[metricsKey]
+			if !exists {
+				return CircuitStateClosed
+			}
+			m.advanceCircuitStateIfDueLocked(metrics, now)
+			switch metrics.CircuitState {
+			case CircuitStateClosed:
+				return CircuitStateClosed
+			case CircuitStateHalfOpen:
+				hasHalfOpen = true
+			}
+		}
+	}
+	if hasHalfOpen {
+		return CircuitStateHalfOpen
+	}
+	return CircuitStateOpen
+}
+
+// HasProbeCandidateMultiURL 判断渠道是否存在可用的 half-open 探针候选。
+func (m *MetricsManager) HasProbeCandidateMultiURL(baseURLs []string, activeKeys []string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	now := time.Now()
+	for _, baseURL := range baseURLs {
+		for _, apiKey := range activeKeys {
+			metricsKey := generateMetricsKey(baseURL, apiKey)
+			metrics, exists := m.keyMetrics[metricsKey]
+			if !exists {
+				return true
+			}
+			m.advanceCircuitStateIfDueLocked(metrics, now)
+			if metrics.CircuitState == CircuitStateHalfOpen && !metrics.ProbeInFlight {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ShouldSuspendKey 判断单个 Key 是否应该熔断
+func (m *MetricsManager) ShouldSuspendKey(baseURL, apiKey string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	metricsKey := generateMetricsKey(baseURL, apiKey)
+	metrics, exists := m.keyMetrics[metricsKey]
+	if !exists {
+		return false
+	}
+	m.advanceCircuitStateIfDueLocked(metrics, time.Now())
+	return metrics.CircuitState == CircuitStateOpen
 }
 
 // ============ 历史数据查询方法（用于图表可视化）============

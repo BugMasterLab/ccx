@@ -273,7 +273,7 @@
             <div class="channel-actions" @click.stop>
               <!-- Show resume button for suspended status -->
               <v-btn
-                v-if="element.status === 'suspended'"
+                v-if="element.status === 'suspended' || isAutoTripped(element)"
                 icon
                 size="x-small"
                 variant="text"
@@ -358,7 +358,7 @@
                     <v-list-item-title>{{ t('orchestration.moveBottom') }}</v-list-item-title>
                   </v-list-item>
                   <v-divider />
-                  <v-list-item v-if="element.status === 'suspended'" @click="resumeChannel(element.index)">
+                  <v-list-item v-if="element.status === 'suspended' || isAutoTripped(element)" @click="resumeChannel(element.index)">
                     <template #prepend>
                       <v-icon size="small" color="success">mdi-play-circle</v-icon>
                     </template>
@@ -1333,6 +1333,11 @@ const resumeChannelInternal = async (
   return result
 }
 
+const isAutoTripped = (channel: Channel): boolean => {
+  const channelMetrics = getChannelMetrics(channel.index)
+  return channelMetrics?.circuitState === 'open' || channelMetrics?.circuitState === 'half_open'
+}
+
 // Resume channel (reset metrics and set it to active)
 const resumeChannel = async (channelId: number) => {
   try {
@@ -1355,7 +1360,7 @@ const setPromotion = async (channel: Channel) => {
     const PROMOTION_DURATION = 300 // 5 minutes
 
     // If the channel is in a tripped state, resume it first
-    if (channel.status === 'suspended') {
+    if (channel.status === 'suspended' || isAutoTripped(channel)) {
       await resumeChannelInternal(channel.index, { refresh: false, notify: false })
     }
 

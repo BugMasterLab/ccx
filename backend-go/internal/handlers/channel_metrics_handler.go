@@ -40,6 +40,9 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,  // 各 Key 的详细指标
 				"timeWindows":         resp.TimeWindows, // 分时段统计 (15m, 1h, 6h, 24h)
 			}
@@ -52,6 +55,9 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 			}
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
+			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
 			}
 
 			result = append(result, item)
@@ -86,6 +92,8 @@ func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 				"failureCount":        m.FailureCount,
 				"successRate":         successRate,
 				"consecutiveFailures": m.ConsecutiveFailures,
+				"circuitState":        m.CircuitState.String(),
+				"halfOpenSuccesses":   m.HalfOpenSuccesses,
 			}
 
 			if m.LastSuccessAt != nil {
@@ -96,6 +104,9 @@ func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 			}
 			if m.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = m.CircuitBrokenAt.Format("2006-01-02T15:04:05Z07:00")
+			}
+			if m.NextRetryAt != nil {
+				item["nextRetryAt"] = m.NextRetryAt.Format("2006-01-02T15:04:05Z07:00")
 			}
 
 			result = append(result, item)
@@ -132,6 +143,8 @@ func GetChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 				"failureCount":        m.FailureCount,
 				"successRate":         successRate,
 				"consecutiveFailures": m.ConsecutiveFailures,
+				"circuitState":        m.CircuitState.String(),
+				"halfOpenSuccesses":   m.HalfOpenSuccesses,
 			}
 
 			if m.LastSuccessAt != nil {
@@ -142,6 +155,9 @@ func GetChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 			}
 			if m.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = m.CircuitBrokenAt.Format("2006-01-02T15:04:05Z07:00")
+			}
+			if m.NextRetryAt != nil {
+				item["nextRetryAt"] = m.NextRetryAt.Format("2006-01-02T15:04:05Z07:00")
 			}
 
 			result = append(result, item)
@@ -217,13 +233,17 @@ func GetSchedulerStats(sch *scheduler.ChannelScheduler) gin.HandlerFunc {
 		}
 
 		stats := gin.H{
-			"multiChannelMode":    sch.IsMultiChannelMode(kind),
-			"activeChannelCount":  sch.GetActiveChannelCount(kind),
-			"traceAffinityCount":  sch.GetTraceAffinityManager().Size(),
-			"traceAffinityTTL":    sch.GetTraceAffinityManager().GetTTL().String(),
-			"failureThreshold":    metricsManager.GetFailureThreshold() * 100,
-			"windowSize":          metricsManager.GetWindowSize(),
-			"circuitRecoveryTime": metricsManager.GetCircuitRecoveryTime().String(),
+			"multiChannelMode":                      sch.IsMultiChannelMode(kind),
+			"activeChannelCount":                    sch.GetActiveChannelCount(kind),
+			"traceAffinityCount":                    sch.GetTraceAffinityManager().Size(),
+			"traceAffinityTTL":                      sch.GetTraceAffinityManager().GetTTL().String(),
+			"failureThreshold":                      metricsManager.GetFailureThreshold() * 100,
+			"windowSize":                            metricsManager.GetWindowSize(),
+			"circuitRecoveryTime":                   metricsManager.GetCircuitRecoveryTime().String(),
+			"consecutiveRetryableFailuresThreshold": metricsManager.GetConsecutiveRetryableFailuresThreshold(),
+			"halfOpenSuccessTarget":                 metricsManager.GetHalfOpenSuccessTarget(),
+			"circuitBackoffBase":                    metricsManager.GetCircuitBackoffBase().String(),
+			"circuitBackoffMax":                     metricsManager.GetCircuitBackoffMax().String(),
 		}
 
 		c.JSON(200, stats)
@@ -683,6 +703,9 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,
 				"timeWindows":         resp.TimeWindows,
 			}
@@ -696,19 +719,26 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
 			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
+			}
 
 			metricsResult = append(metricsResult, item)
 		}
 
 		// 3. 构建 stats 数据
 		stats := gin.H{
-			"multiChannelMode":    sch.IsMultiChannelMode(kind),
-			"activeChannelCount":  sch.GetActiveChannelCount(kind),
-			"traceAffinityCount":  sch.GetTraceAffinityManager().Size(),
-			"traceAffinityTTL":    sch.GetTraceAffinityManager().GetTTL().String(),
-			"failureThreshold":    metricsManager.GetFailureThreshold() * 100,
-			"windowSize":          metricsManager.GetWindowSize(),
-			"circuitRecoveryTime": metricsManager.GetCircuitRecoveryTime().String(),
+			"multiChannelMode":                      sch.IsMultiChannelMode(kind),
+			"activeChannelCount":                    sch.GetActiveChannelCount(kind),
+			"traceAffinityCount":                    sch.GetTraceAffinityManager().Size(),
+			"traceAffinityTTL":                      sch.GetTraceAffinityManager().GetTTL().String(),
+			"failureThreshold":                      metricsManager.GetFailureThreshold() * 100,
+			"windowSize":                            metricsManager.GetWindowSize(),
+			"circuitRecoveryTime":                   metricsManager.GetCircuitRecoveryTime().String(),
+			"consecutiveRetryableFailuresThreshold": metricsManager.GetConsecutiveRetryableFailuresThreshold(),
+			"halfOpenSuccessTarget":                 metricsManager.GetHalfOpenSuccessTarget(),
+			"circuitBackoffBase":                    metricsManager.GetCircuitBackoffBase().String(),
+			"circuitBackoffMax":                     metricsManager.GetCircuitBackoffMax().String(),
 		}
 
 		// 4. 构建 recentActivity 数据（最近 15 分钟分段活跃度）
@@ -915,6 +945,9 @@ func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager 
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,  // 各 Key 的详细指标
 				"timeWindows":         resp.TimeWindows, // 分时段统计 (15m, 1h, 6h, 24h)
 			}
@@ -927,6 +960,9 @@ func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager 
 			}
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
+			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
 			}
 
 			result = append(result, item)
@@ -953,6 +989,9 @@ func GetChatChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *c
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,
 				"timeWindows":         resp.TimeWindows,
 			}
@@ -964,6 +1003,9 @@ func GetChatChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *c
 			}
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
+			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
 			}
 			result = append(result, item)
 		}

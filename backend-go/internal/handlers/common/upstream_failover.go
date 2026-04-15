@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
@@ -86,18 +87,21 @@ func TryUpstreamWithAllKeys(
 
 	var lastFailoverError *FailoverError
 	deprioritizeCandidates := make(map[string]bool)
+	probeAcquired := make(map[string]bool)
+	defer func() {
+		for key := range probeAcquired {
+			parts := strings.SplitN(key, "|", 2)
+			if len(parts) == 2 {
+				metricsManager.ReleaseProbe(parts[0], parts[1])
+			}
+		}
+	}()
 
 	// 计算重定向后的模型（用于日志记录）
 	redirectedModel := config.RedirectModel(model, upstream)
 	var originalModel string
 	if redirectedModel != model {
 		originalModel = model // 仅当发生重定向时记录原始模型
-	}
-
-	// 强制探测模式：基于本次优先尝试的 BaseURL 判断（避免 BaseURL/BaseURLs 不一致导致误判）
-	forceProbeMode := AreAllKeysSuspended(metricsManager, urlResults[0].URL, upstream.APIKeys)
-	if forceProbeMode {
-		log.Printf("[%s-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", apiType, upstream.Name)
 	}
 
 	for urlIdx, urlResult := range urlResults {
@@ -116,10 +120,21 @@ func TryUpstreamWithAllKeys(
 			}
 
 			// 检查熔断状态
-			if !forceProbeMode && metricsManager.ShouldSuspendKey(currentBaseURL, apiKey) {
+			circuitState := metricsManager.GetKeyCircuitState(currentBaseURL, apiKey)
+			if circuitState == metrics.CircuitStateOpen {
 				failedKeys[apiKey] = true
-				log.Printf("[%s-Circuit] 跳过熔断中的 Key: %s", apiType, utils.MaskAPIKey(apiKey))
+				log.Printf("[%s-Circuit] 跳过 open 状态中的 Key: %s", apiType, utils.MaskAPIKey(apiKey))
 				continue
+			}
+			if circuitState == metrics.CircuitStateHalfOpen {
+				probeKey := currentBaseURL + "|" + apiKey
+				if !metricsManager.TryAcquireProbe(currentBaseURL, apiKey) {
+					failedKeys[apiKey] = true
+					log.Printf("[%s-Circuit] 跳过 half-open 探针已占用的 Key: %s", apiType, utils.MaskAPIKey(apiKey))
+					continue
+				}
+				probeAcquired[probeKey] = true
+				log.Printf("[%s-Circuit] 使用 half-open 探针 Key: %s", apiType, utils.MaskAPIKey(apiKey))
 			}
 
 			if envCfg.ShouldLog("info") {
@@ -160,7 +175,7 @@ func TryUpstreamWithAllKeys(
 				// 真实渠道故障：计入失败，继续 failover
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey, apiType)
-				metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+				metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassRetryable)
 				channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 				if markURLFailure != nil {
 					markURLFailure(currentBaseURL)
@@ -193,7 +208,11 @@ func TryUpstreamWithAllKeys(
 					lastError = fmt.Errorf("上游错误: %d", resp.StatusCode)
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					failureClass := metrics.FailureClassRetryable
+					if isQuotaRelated {
+						failureClass = metrics.FailureClassQuota
+					}
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, failureClass)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
@@ -215,7 +234,7 @@ func TryUpstreamWithAllKeys(
 				}
 
 				// 非 failover 错误，记录失败指标后返回（请求已处理）
-				metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+				metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassNonRetryable)
 				channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 				// 记录渠道日志
 				RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, resp.StatusCode, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, string(respBodyBytes), apiType, attempt > 0 || urlIdx > 0)
@@ -247,7 +266,7 @@ func TryUpstreamWithAllKeys(
 					// 空响应或无效响应体（如 HTML）：Header 未发送，可安全 failover
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
@@ -266,7 +285,7 @@ func TryUpstreamWithAllKeys(
 						}
 					}
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
@@ -277,7 +296,7 @@ func TryUpstreamWithAllKeys(
 				} else {
 					// 真实渠道故障：计入失败指标
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					// 记录渠道日志
 					RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, http.StatusOK, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, err.Error(), apiType, attempt > 0 || urlIdx > 0)
@@ -288,6 +307,10 @@ func TryUpstreamWithAllKeys(
 
 			metricsManager.RecordRequestFinalizeSuccess(currentBaseURL, apiKey, requestID, usage)
 			channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
+			if probeKey := currentBaseURL + "|" + apiKey; probeAcquired[probeKey] {
+				metricsManager.ReleaseProbe(currentBaseURL, apiKey)
+				delete(probeAcquired, probeKey)
+			}
 			// 记录渠道日志
 			RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, http.StatusOK, time.Since(attemptStart).Milliseconds(), true, apiKey, currentBaseURL, "", apiType, attempt > 0 || urlIdx > 0)
 			return true, apiKey, originalIdx, nil, usage, nil

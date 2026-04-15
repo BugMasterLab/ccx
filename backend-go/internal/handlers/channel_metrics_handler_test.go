@@ -28,11 +28,20 @@ func (f *fakePersistenceStore) LoadRecords(since time.Time, apiType string) ([]m
 func (f *fakePersistenceStore) LoadLatestTimestamps(apiType string) (map[string]*metrics.KeyLatestTimestamps, error) {
 	return nil, nil
 }
+func (f *fakePersistenceStore) LoadCircuitStates(apiType string) (map[string]*metrics.PersistentCircuitState, error) {
+	return nil, nil
+}
+func (f *fakePersistenceStore) UpsertCircuitState(state metrics.PersistentCircuitState) error {
+	return nil
+}
 func (f *fakePersistenceStore) QueryAggregatedHistory(apiType string, since time.Time, intervalSeconds int64, metricsKey string, baseURL string) ([]metrics.AggregatedBucket, error) {
 	return append([]metrics.AggregatedBucket(nil), f.bucketsByMetricsKey[metricsKey]...), nil
 }
 func (f *fakePersistenceStore) CleanupOldRecords(before time.Time) (int64, error) { return 0, nil }
 func (f *fakePersistenceStore) DeleteRecordsByMetricsKeys(metricsKeys []string, apiType string) (int64, error) {
+	return 0, nil
+}
+func (f *fakePersistenceStore) DeleteCircuitStatesByMetricsKeys(metricsKeys []string, apiType string) (int64, error) {
 	return 0, nil
 }
 func (f *fakePersistenceStore) Close() error { return nil }

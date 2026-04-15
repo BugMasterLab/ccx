@@ -158,16 +158,13 @@ func (s *ChannelScheduler) SelectChannel(
 		activeChannels = filtered
 	}
 
-	// 获取对应类型的指标管理器
-	metricsManager := s.getMetricsManager(kind)
-
 	// 0. 检查促销期渠道（最高优先级，绕过健康检查）
 	promotedChannel := s.findPromotedChannel(activeChannels, kind)
 	if promotedChannel != nil && !failedChannels[promotedChannel.Index] {
 		// 促销渠道存在且未失败，直接使用（不检查健康状态，让用户设置的促销渠道有机会尝试）
 		upstream := s.getUpstreamByIndex(promotedChannel.Index, kind)
 		if upstream != nil && len(upstream.APIKeys) > 0 {
-			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
+			failureRate := s.channelFailureRate(upstream, kind)
 			prefix := kindSchedulerLogPrefix(kind)
 			log.Printf("[%s-Promotion] 促销期优先选择渠道: [%d] %s (失败率: %.1f%%, 绕过健康检查)", prefix, promotedChannel.Index, upstream.Name, failureRate*100)
 			return &SelectionResult{
@@ -205,7 +202,7 @@ func (s *ChannelScheduler) SelectChannel(
 					}
 					// 检查渠道是否健康
 					upstream := s.getUpstreamByIndex(preferredIdx, kind)
-					if upstream != nil && metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, upstream.APIKeys) {
+					if upstream != nil && s.channelIsHealthy(upstream, kind) {
 						prefix := kindSchedulerLogPrefix(kind)
 						log.Printf("[%s-Affinity] Trace亲和选择渠道: [%d] %s (user: %s)", prefix, preferredIdx, upstream.Name, maskUserID(userID))
 						return &SelectionResult{
@@ -239,10 +236,15 @@ func (s *ChannelScheduler) SelectChannel(
 		}
 
 		// 跳过失败率过高的渠道（已熔断或即将熔断）
-		if !metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, upstream.APIKeys) {
-			failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
+		channelState := s.channelCircuitState(upstream, kind)
+		if channelState == metrics.CircuitStateOpen || !s.channelIsHealthy(upstream, kind) {
+			failureRate := s.channelFailureRate(upstream, kind)
 			prefix := kindSchedulerLogPrefix(kind)
-			log.Printf("[%s-Channel] 警告: 跳过不健康渠道: [%d] %s (失败率: %.1f%%)", prefix, ch.Index, ch.Name, failureRate*100)
+			if channelState == metrics.CircuitStateOpen {
+				log.Printf("[%s-Channel] 警告: 跳过 open 渠道: [%d] %s (失败率: %.1f%%)", prefix, ch.Index, ch.Name, failureRate*100)
+			} else {
+				log.Printf("[%s-Channel] 警告: 跳过不健康渠道: [%d] %s (失败率: %.1f%%)", prefix, ch.Index, ch.Name, failureRate*100)
+			}
 			continue
 		}
 
@@ -257,6 +259,27 @@ func (s *ChannelScheduler) SelectChannel(
 
 	// 3. 所有健康渠道都失败，选择失败率最低的作为降级
 	return s.selectFallbackChannel(activeChannels, failedChannels, kind)
+}
+
+func (s *ChannelScheduler) channelCircuitState(upstream *config.UpstreamConfig, kind ChannelKind) metrics.CircuitState {
+	if upstream == nil {
+		return metrics.CircuitStateClosed
+	}
+	return s.getMetricsManager(kind).GetChannelCircuitStateMultiURL(upstream.GetAllBaseURLs(), upstream.APIKeys)
+}
+
+func (s *ChannelScheduler) channelFailureRate(upstream *config.UpstreamConfig, kind ChannelKind) float64 {
+	if upstream == nil {
+		return 0
+	}
+	return s.getMetricsManager(kind).CalculateChannelFailureRateMultiURL(upstream.GetAllBaseURLs(), upstream.APIKeys)
+}
+
+func (s *ChannelScheduler) channelIsHealthy(upstream *config.UpstreamConfig, kind ChannelKind) bool {
+	if upstream == nil {
+		return false
+	}
+	return s.getMetricsManager(kind).IsChannelHealthyMultiURL(upstream.GetAllBaseURLs(), upstream.APIKeys)
 }
 
 // findPromotedChannel 查找处于促销期的渠道
@@ -284,7 +307,6 @@ func (s *ChannelScheduler) selectFallbackChannel(
 	failedChannels map[int]bool,
 	kind ChannelKind,
 ) (*SelectionResult, error) {
-	metricsManager := s.getMetricsManager(kind)
 	var bestChannel *ChannelInfo
 	var bestUpstream *config.UpstreamConfig
 	bestFailureRate := float64(2) // 初始化为不可能的值
@@ -304,7 +326,12 @@ func (s *ChannelScheduler) selectFallbackChannel(
 			continue
 		}
 
-		failureRate := metricsManager.CalculateChannelFailureRate(upstream.BaseURL, upstream.APIKeys)
+		channelState := s.channelCircuitState(upstream, kind)
+		if channelState == metrics.CircuitStateOpen {
+			continue
+		}
+
+		failureRate := s.channelFailureRate(upstream, kind)
 		if failureRate < bestFailureRate {
 			bestFailureRate = failureRate
 			bestChannel = ch
@@ -395,7 +422,6 @@ func (s *ChannelScheduler) findBestAvailableChannelPriority(
 	failedChannels map[int]bool,
 	kind ChannelKind,
 ) int {
-	metricsManager := s.getMetricsManager(kind)
 	bestPriority := -1
 
 	for _, ch := range activeChannels {
@@ -407,7 +433,7 @@ func (s *ChannelScheduler) findBestAvailableChannelPriority(
 		if upstream == nil || len(upstream.APIKeys) == 0 {
 			continue
 		}
-		if !metricsManager.IsChannelHealthyWithKeys(upstream.BaseURL, upstream.APIKeys) {
+		if s.channelCircuitState(upstream, kind) == metrics.CircuitStateOpen || !s.channelIsHealthy(upstream, kind) {
 			continue
 		}
 

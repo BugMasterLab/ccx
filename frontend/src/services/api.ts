@@ -63,6 +63,8 @@ export interface TimeWindowStats {
   cacheHitRate?: number
 }
 
+export type CircuitState = 'closed' | 'open' | 'half_open'
+
 export interface ChannelMetrics {
   channelIndex: number
   requestCount: number
@@ -72,6 +74,11 @@ export interface ChannelMetrics {
   errorRate: number         // 0-100
   consecutiveFailures: number
   latency: number           // ms
+  circuitState?: CircuitState
+  circuitBrokenAt?: string
+  nextRetryAt?: string
+  halfOpenSuccesses?: number
+  breakerFailureRate?: number
   lastSuccessAt?: string
   lastFailureAt?: string
   // 分时段统计 (15m, 1h, 6h, 24h)
@@ -147,6 +154,10 @@ export interface SchedulerStatsResponse {
   failureThreshold: number
   windowSize: number
   circuitRecoveryTime?: string
+  consecutiveRetryableFailuresThreshold?: number
+  halfOpenSuccessTarget?: number
+  circuitBackoffBase?: string
+  circuitBackoffMax?: string
 }
 
 export interface PingResult {

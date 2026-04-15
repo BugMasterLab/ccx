@@ -14,6 +14,10 @@
             <div>{{ t('status.metrics.requests') }}: {{ metrics.requestCount }}</div>
             <div>{{ t('status.metrics.successRate') }}: {{ metrics.successRate?.toFixed(1) || 0 }}%</div>
             <div>{{ t('status.metrics.consecutiveFailures') }}: {{ metrics.consecutiveFailures }}</div>
+            <div v-if="metrics.circuitState">{{ t('status.metrics.circuitState') }}: {{ t(`status.circuit.${metrics.circuitState}` as Parameters<typeof t>[0]) }}</div>
+            <div v-if="metrics.breakerFailureRate !== undefined">{{ t('status.metrics.breakerFailureRate') }}: {{ metrics.breakerFailureRate?.toFixed(1) || 0 }}%</div>
+            <div v-if="metrics.halfOpenSuccesses">{{ t('status.metrics.halfOpenSuccesses') }}: {{ metrics.halfOpenSuccesses }}</div>
+            <div v-if="metrics.nextRetryAt">{{ t('status.metrics.nextRetry') }}: {{ formatTime(metrics.nextRetryAt) }}</div>
             <div v-if="metrics.lastSuccessAt">{{ t('status.metrics.lastSuccess') }}: {{ formatTime(metrics.lastSuccessAt) }}</div>
             <div v-if="metrics.lastFailureAt">{{ t('status.metrics.lastFailure') }}: {{ formatTime(metrics.lastFailureAt) }}</div>
           </div>
@@ -41,6 +45,14 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 
+const effectiveStatus = computed(() => {
+  if (props.status === 'disabled') return 'disabled'
+  if (props.status === 'suspended') return 'suspended'
+  if (props.metrics?.circuitState === 'open') return 'breaker-open'
+  if (props.metrics?.circuitState === 'half_open') return 'breaker-half-open'
+  return props.status
+})
+
 // 状态配置映射
 const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string; class: string }> = {
   active: {
@@ -67,6 +79,18 @@ const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string
     label: 'status.disabled',
     class: 'status-disabled'
   },
+  'breaker-open': {
+    icon: 'mdi-alert-octagon',
+    color: 'error',
+    label: 'status.breakerOpen',
+    class: 'status-breaker-open'
+  },
+  'breaker-half-open': {
+    icon: 'mdi-progress-clock',
+    color: 'info',
+    label: 'status.breakerHalfOpen',
+    class: 'status-breaker-half-open'
+  },
   error: {
     icon: 'mdi-alert-circle',
     color: 'error',
@@ -83,7 +107,7 @@ const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string
 
 // 计算属性
 const statusConfig = computed(() => {
-  return STATUS_CONFIG[props.status] || STATUS_CONFIG.unknown
+  return STATUS_CONFIG[effectiveStatus.value] || STATUS_CONFIG.unknown
 })
 
 const statusIcon = computed(() => statusConfig.value.icon)
@@ -229,6 +253,47 @@ const formatTime = (dateStr: string): string => {
 
 .v-theme--dark .status-disabled .badge-content .status-icon {
   color: #9ca3af !important;
+}
+
+.status-breaker-open .badge-content {
+  background: #fecaca;
+  color: #991b1b;
+  border-color: #991b1b;
+  animation: pixel-blink 1.2s step-end infinite;
+}
+
+.status-breaker-open .badge-content .status-icon {
+  color: #991b1b !important;
+}
+
+.v-theme--dark .status-breaker-open .badge-content {
+  background: #7f1d1d;
+  color: #fecaca;
+  border-color: #fecaca;
+}
+
+.v-theme--dark .status-breaker-open .badge-content .status-icon {
+  color: #fecaca !important;
+}
+
+.status-breaker-half-open .badge-content {
+  background: #dbeafe;
+  color: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.status-breaker-half-open .badge-content .status-icon {
+  color: #1d4ed8 !important;
+}
+
+.v-theme--dark .status-breaker-half-open .badge-content {
+  background: #1e3a8a;
+  color: #dbeafe;
+  border-color: #dbeafe;
+}
+
+.v-theme--dark .status-breaker-half-open .badge-content .status-icon {
+  color: #dbeafe !important;
 }
 
 .status-error .badge-content {

@@ -120,11 +120,28 @@ func initSchema(db *sql.DB) error {
 			key_mask TEXT NOT NULL,
 			timestamp INTEGER NOT NULL,
 			success INTEGER NOT NULL,
+			failure_class TEXT NOT NULL DEFAULT '',
 			input_tokens INTEGER DEFAULT 0,
 			output_tokens INTEGER DEFAULT 0,
 			cache_creation_tokens INTEGER DEFAULT 0,
 			cache_read_tokens INTEGER DEFAULT 0,
 			api_type TEXT NOT NULL DEFAULT 'messages'
+		);
+
+		CREATE TABLE IF NOT EXISTS circuit_states (
+			metrics_key TEXT NOT NULL,
+			api_type TEXT NOT NULL,
+			base_url TEXT NOT NULL,
+			key_mask TEXT NOT NULL,
+			circuit_state TEXT NOT NULL DEFAULT 'closed',
+			circuit_opened_at INTEGER,
+			half_open_at INTEGER,
+			next_retry_at INTEGER,
+			backoff_level INTEGER NOT NULL DEFAULT 0,
+			half_open_successes INTEGER NOT NULL DEFAULT 0,
+			consecutive_failures INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (metrics_key, api_type)
 		);
 
 		-- 索引：按 api_type 和时间查询
@@ -159,6 +176,22 @@ func initSchema(db *sql.DB) error {
 			}
 		}
 		log.Printf("[SQLite-Migration] schema 升级: v0 -> v1 (添加 model 列)")
+		version = 1
+	}
+
+	if version < 2 {
+		migrations := []string{
+			"ALTER TABLE request_records ADD COLUMN failure_class TEXT NOT NULL DEFAULT ''",
+			"PRAGMA user_version = 2",
+		}
+		for _, sql := range migrations {
+			if _, err := db.Exec(sql); err != nil {
+				if !strings.Contains(err.Error(), "duplicate column name") {
+					return fmt.Errorf("migration v1->v2 failed: %w", err)
+				}
+			}
+		}
+		log.Printf("[SQLite-Migration] schema 升级: v1 -> v2 (添加 failure_class 列与 circuit_states 表)")
 	}
 
 	return nil
@@ -224,9 +257,9 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 
 	stmt, err := tx.Prepare(`
 		INSERT INTO request_records
-		(metrics_key, base_url, key_mask, timestamp, success,
+		(metrics_key, base_url, key_mask, timestamp, success, failure_class,
 		 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, api_type, model)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -239,7 +272,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 			success = 1
 		}
 		_, err := stmt.Exec(
-			r.MetricsKey, r.BaseURL, r.KeyMask, r.Timestamp.Unix(), success,
+			r.MetricsKey, r.BaseURL, r.KeyMask, r.Timestamp.Unix(), success, string(r.FailureClass),
 			r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens, r.APIType, r.Model,
 		)
 		if err != nil {
@@ -253,7 +286,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 // LoadRecords 加载指定时间范围内的记录
 func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]PersistentRecord, error) {
 	rows, err := s.db.Query(`
-		SELECT metrics_key, base_url, key_mask, timestamp, success,
+		SELECT metrics_key, base_url, key_mask, timestamp, success, failure_class,
 		       input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model
 		FROM request_records
 		WHERE timestamp >= ? AND api_type = ?
@@ -270,8 +303,10 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 		var ts int64
 		var success int
 
+		var failureClass string
+
 		err := rows.Scan(
-			&r.MetricsKey, &r.BaseURL, &r.KeyMask, &ts, &success,
+			&r.MetricsKey, &r.BaseURL, &r.KeyMask, &ts, &success, &failureClass,
 			&r.InputTokens, &r.OutputTokens, &r.CacheCreationTokens, &r.CacheReadTokens, &r.Model,
 		)
 		if err != nil {
@@ -280,11 +315,98 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 
 		r.Timestamp = time.Unix(ts, 0)
 		r.Success = success == 1
+		r.FailureClass = FailureClass(failureClass)
 		r.APIType = apiType
 		records = append(records, r)
 	}
 
 	return records, rows.Err()
+}
+
+// LoadCircuitStates 加载指定 API 类型的 breaker 状态。
+func (s *SQLiteStore) LoadCircuitStates(apiType string) (map[string]*PersistentCircuitState, error) {
+	rows, err := s.db.Query(`
+		SELECT metrics_key, base_url, key_mask, circuit_state,
+		       circuit_opened_at, half_open_at, next_retry_at,
+		       backoff_level, half_open_successes, consecutive_failures
+		FROM circuit_states
+		WHERE api_type = ?
+	`, apiType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := make(map[string]*PersistentCircuitState)
+	for rows.Next() {
+		var state PersistentCircuitState
+		var openedAt, halfOpenAt, nextRetryAt sql.NullInt64
+		if err := rows.Scan(
+			&state.MetricsKey,
+			&state.BaseURL,
+			&state.KeyMask,
+			&state.CircuitState,
+			&openedAt,
+			&halfOpenAt,
+			&nextRetryAt,
+			&state.BackoffLevel,
+			&state.HalfOpenSuccesses,
+			&state.ConsecutiveFailures,
+		); err != nil {
+			return nil, err
+		}
+		state.APIType = apiType
+		if openedAt.Valid {
+			t := time.Unix(openedAt.Int64, 0)
+			state.CircuitOpenedAt = &t
+		}
+		if halfOpenAt.Valid {
+			t := time.Unix(halfOpenAt.Int64, 0)
+			state.HalfOpenAt = &t
+		}
+		if nextRetryAt.Valid {
+			t := time.Unix(nextRetryAt.Int64, 0)
+			state.NextRetryAt = &t
+		}
+		result[state.MetricsKey] = &state
+	}
+
+	return result, rows.Err()
+}
+
+// UpsertCircuitState 写入或更新 breaker 状态。
+func (s *SQLiteStore) UpsertCircuitState(state PersistentCircuitState) error {
+	var openedAt any
+	if state.CircuitOpenedAt != nil {
+		openedAt = state.CircuitOpenedAt.Unix()
+	}
+	var halfOpenAt any
+	if state.HalfOpenAt != nil {
+		halfOpenAt = state.HalfOpenAt.Unix()
+	}
+	var nextRetryAt any
+	if state.NextRetryAt != nil {
+		nextRetryAt = state.NextRetryAt.Unix()
+	}
+	_, err := s.db.Exec(`
+		INSERT INTO circuit_states (
+			metrics_key, api_type, base_url, key_mask, circuit_state,
+			circuit_opened_at, half_open_at, next_retry_at,
+			backoff_level, half_open_successes, consecutive_failures, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(metrics_key, api_type) DO UPDATE SET
+			base_url = excluded.base_url,
+			key_mask = excluded.key_mask,
+			circuit_state = excluded.circuit_state,
+			circuit_opened_at = excluded.circuit_opened_at,
+			half_open_at = excluded.half_open_at,
+			next_retry_at = excluded.next_retry_at,
+			backoff_level = excluded.backoff_level,
+			half_open_successes = excluded.half_open_successes,
+			consecutive_failures = excluded.consecutive_failures,
+			updated_at = excluded.updated_at
+	`, state.MetricsKey, state.APIType, state.BaseURL, state.KeyMask, state.CircuitState, openedAt, halfOpenAt, nextRetryAt, state.BackoffLevel, state.HalfOpenSuccesses, state.ConsecutiveFailures, time.Now().Unix())
+	return err
 }
 
 // LoadLatestTimestamps 从全量历史记录中查询每个 key 的最后成功/失败时间
@@ -386,6 +508,45 @@ func (s *SQLiteStore) DeleteRecordsByMetricsKeys(metricsKeys []string, apiType s
 		result, err := s.db.Exec(query, args...)
 		if err != nil {
 			return totalDeleted, fmt.Errorf("batch %d-%d failed: %w", i, end, err)
+		}
+		affected, _ := result.RowsAffected()
+		totalDeleted += affected
+	}
+
+	return totalDeleted, nil
+}
+
+// DeleteCircuitStatesByMetricsKeys 按 metrics_key 和 api_type 批量删除 breaker 状态。
+func (s *SQLiteStore) DeleteCircuitStatesByMetricsKeys(metricsKeys []string, apiType string) (int64, error) {
+	if len(metricsKeys) == 0 {
+		return 0, nil
+	}
+
+	s.flushMu.Lock()
+	defer s.flushMu.Unlock()
+	const batchSize = 500
+	var totalDeleted int64
+
+	for i := 0; i < len(metricsKeys); i += batchSize {
+		end := i + batchSize
+		if end > len(metricsKeys) {
+			end = len(metricsKeys)
+		}
+		batch := metricsKeys[i:end]
+		placeholders := make([]string, len(batch))
+		args := make([]interface{}, 0, len(batch)+1)
+		args = append(args, apiType)
+		for j, key := range batch {
+			placeholders[j] = "?"
+			args = append(args, key)
+		}
+		query := fmt.Sprintf(
+			"DELETE FROM circuit_states WHERE api_type = ? AND metrics_key IN (%s)",
+			strings.Join(placeholders, ","),
+		)
+		result, err := s.db.Exec(query, args...)
+		if err != nil {
+			return totalDeleted, fmt.Errorf("delete circuit states batch %d-%d failed: %w", i, end, err)
 		}
 		affected, _ := result.RowsAffected()
 		totalDeleted += affected

@@ -235,13 +235,8 @@ func tryCompactChannelWithAllKeys(
 	metricsManager := channelScheduler.GetResponsesMetricsManager()
 
 	failedKeys := make(map[string]bool)
+	probeAcquired := make(map[string]bool)
 	var lastErr *compactError
-
-	// 强制探测模式
-	forceProbeMode := common.AreAllKeysSuspended(metricsManager, upstream.BaseURL, upstream.APIKeys)
-	if forceProbeMode {
-		log.Printf("[Compact-Probe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", upstream.Name)
-	}
 
 	for attempt := 0; attempt < len(upstream.APIKeys); attempt++ {
 		apiKey, err := cfgManager.GetNextResponsesAPIKey(upstream, failedKeys)
@@ -250,17 +245,35 @@ func tryCompactChannelWithAllKeys(
 		}
 
 		// 检查熔断状态
-		if !forceProbeMode && metricsManager.ShouldSuspendKey(upstream.BaseURL, apiKey) {
+		circuitState := metricsManager.GetKeyCircuitState(upstream.BaseURL, apiKey)
+		if circuitState == metrics.CircuitStateOpen {
 			failedKeys[apiKey] = true
-			log.Printf("[Compact-Key] 跳过熔断中的 Key: %s", utils.MaskAPIKey(apiKey))
+			log.Printf("[Compact-Circuit] 跳过 open 状态中的 Key: %s", utils.MaskAPIKey(apiKey))
 			continue
+		}
+		if circuitState == metrics.CircuitStateHalfOpen {
+			probeKey := upstream.BaseURL + "|" + apiKey
+			if !metricsManager.TryAcquireProbe(upstream.BaseURL, apiKey) {
+				failedKeys[apiKey] = true
+				log.Printf("[Compact-Circuit] 跳过 half-open 探针已占用的 Key: %s", utils.MaskAPIKey(apiKey))
+				continue
+			}
+			probeAcquired[probeKey] = true
+			log.Printf("[Compact-Circuit] 使用 half-open 探针 Key: %s", utils.MaskAPIKey(apiKey))
 		}
 
 		attemptStart := time.Now()
 		success, compactErr := tryCompactWithKey(c, upstream, apiKey, bodyBytes, envCfg, cfgManager)
+
 		if success {
 			common.RecordChannelLog(channelLogStore, channelIndex, requestModel, "", http.StatusOK, time.Since(attemptStart).Milliseconds(), true, apiKey, upstream.BaseURL, "", "Responses", attempt > 0)
 			channelScheduler.RecordSuccessWithUsage(upstream.BaseURL, apiKey, nil, scheduler.ChannelKindResponses)
+			// 释放探针
+			probeKey := upstream.BaseURL + "|" + apiKey
+			if probeAcquired[probeKey] {
+				metricsManager.ReleaseProbe(upstream.BaseURL, apiKey)
+				delete(probeAcquired, probeKey)
+			}
 			return true, apiKey, nil
 		}
 
@@ -271,10 +284,22 @@ func tryCompactChannelWithAllKeys(
 				cfgManager.MarkKeyAsFailed(apiKey, "Responses")
 				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, scheduler.ChannelKindResponses)
 				common.RecordChannelLog(channelLogStore, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0)
+				// 释放探针
+				probeKey := upstream.BaseURL + "|" + apiKey
+				if probeAcquired[probeKey] {
+					metricsManager.ReleaseProbe(upstream.BaseURL, apiKey)
+					delete(probeAcquired, probeKey)
+				}
 				continue
 			}
 			// 非故障转移错误，返回但标记渠道成功（请求已处理）
 			common.RecordChannelLog(channelLogStore, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0)
+			// 释放探针
+			probeKey := upstream.BaseURL + "|" + apiKey
+			if probeAcquired[probeKey] {
+				metricsManager.ReleaseProbe(upstream.BaseURL, apiKey)
+				delete(probeAcquired, probeKey)
+			}
 			c.Data(compactErr.status, "application/json", compactErr.body)
 			return true, "", nil
 		}

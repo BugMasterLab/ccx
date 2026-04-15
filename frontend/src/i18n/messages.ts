@@ -314,6 +314,15 @@ export type MessageKey =
   | 'status.metrics.lastSuccess'
   | 'status.metrics.lastFailure'
   | 'status.metrics.noData'
+  | 'status.breakerOpen'
+  | 'status.breakerHalfOpen'
+  | 'status.circuit.closed'
+  | 'status.circuit.open'
+  | 'status.circuit.half_open'
+  | 'status.metrics.circuitState'
+  | 'status.metrics.breakerFailureRate'
+  | 'status.metrics.halfOpenSuccesses'
+  | 'status.metrics.nextRetry'
   | 'status.metrics.justNow'
   | 'status.metrics.minutesAgo'
   | 'status.metrics.hoursAgo'
@@ -667,12 +676,21 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'status.active': 'Active',
     'status.healthy': 'Healthy',
     'status.suspended': 'Suspended',
+    'status.breakerOpen': 'Circuit Open',
+    'status.breakerHalfOpen': 'Half-Open',
     'status.disabled': 'Disabled',
     'status.error': 'Error',
     'status.unknown': 'Unknown',
+    'status.circuit.closed': 'Closed',
+    'status.circuit.open': 'Open',
+    'status.circuit.half_open': 'Half-open',
     'status.metrics.requests': 'Requests',
     'status.metrics.successRate': 'Success rate',
     'status.metrics.consecutiveFailures': 'Consecutive failures',
+    'status.metrics.circuitState': 'Circuit state',
+    'status.metrics.breakerFailureRate': 'Breaker failure rate',
+    'status.metrics.halfOpenSuccesses': 'Half-open successes',
+    'status.metrics.nextRetry': 'Next retry',
     'status.metrics.lastSuccess': 'Last success',
     'status.metrics.lastFailure': 'Last failure',
     'status.metrics.noData': 'No metrics yet',
@@ -1028,12 +1046,21 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'status.active': 'Aktif',
     'status.healthy': 'Sehat',
     'status.suspended': 'Ditangguhkan',
+    'status.breakerOpen': 'Circuit Open',
+    'status.breakerHalfOpen': 'Half-Open',
     'status.disabled': 'Nonaktif',
     'status.error': 'Error',
     'status.unknown': 'Tidak diketahui',
+    'status.circuit.closed': 'Closed',
+    'status.circuit.open': 'Open',
+    'status.circuit.half_open': 'Half-open',
     'status.metrics.requests': 'Request',
     'status.metrics.successRate': 'Tingkat sukses',
     'status.metrics.consecutiveFailures': 'Gagal beruntun',
+    'status.metrics.circuitState': 'Status circuit',
+    'status.metrics.breakerFailureRate': 'Rasio gagal breaker',
+    'status.metrics.halfOpenSuccesses': 'Sukses half-open',
+    'status.metrics.nextRetry': 'Coba lagi',
     'status.metrics.lastSuccess': 'Sukses terakhir',
     'status.metrics.lastFailure': 'Gagal terakhir',
     'status.metrics.noData': 'Belum ada metrik',
@@ -1389,12 +1416,21 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'status.active': '活跃',
     'status.healthy': '健康',
     'status.suspended': '熔断',
+    'status.breakerOpen': '自动熔断',
+    'status.breakerHalfOpen': '半开探测',
     'status.disabled': '禁用',
     'status.error': '错误',
     'status.unknown': '未知',
+    'status.circuit.closed': '关闭',
+    'status.circuit.open': '打开',
+    'status.circuit.half_open': '半开',
     'status.metrics.requests': '请求数',
     'status.metrics.successRate': '成功率',
     'status.metrics.consecutiveFailures': '连续失败',
+    'status.metrics.circuitState': '熔断状态',
+    'status.metrics.breakerFailureRate': '熔断失败率',
+    'status.metrics.halfOpenSuccesses': '半开成功次数',
+    'status.metrics.nextRetry': '下次探测',
     'status.metrics.lastSuccess': '最后成功',
     'status.metrics.lastFailure': '最后失败',
     'status.metrics.noData': '暂无指标数据',
