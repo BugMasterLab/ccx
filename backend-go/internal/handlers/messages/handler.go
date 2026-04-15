@@ -51,8 +51,7 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 			bodyBytes, _ = common.RemoveBillingHeaders(bodyBytes, envCfg.EnableRequestLogs, "Messages")
 		}
 
-		// 预处理：规范化 metadata.user_id（兼容 Claude Code v2.1.78+ JSON 对象格式）
-		bodyBytes = common.NormalizeMetadataUserID(bodyBytes)
+		// 入口保留原始请求体；按渠道在发往上游前决定是否规范化 metadata.user_id
 		c.Set("requestBodyBytes", bodyBytes)
 
 		// 解析请求
@@ -61,8 +60,9 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 			_ = json.Unmarshal(bodyBytes, &claudeReq)
 		}
 
-		// 提取 user_id 用于 Trace 亲和性
-		userID := common.ExtractUserID(bodyBytes)
+		// 提取 user_id 用于 Trace 亲和性（保持默认开启时的既有路由语义）
+		affinityBody := common.NormalizeMetadataUserID(bodyBytes)
+		userID := common.ExtractUserID(affinityBody)
 
 		// 记录原始请求信息（仅在入口处记录一次）
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Messages")
@@ -144,11 +144,11 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindMessages, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					if claudeReq.Stream {
-						return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, claudeReq.Model)
+						return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, actualRequestBody, claudeReq.Model)
 					}
-					return handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, upstreamCopy, apiKey)
+					return handleNormalResponse(c, resp, provider, envCfg, startTime, actualRequestBody, upstreamCopy, apiKey)
 				},
 				claudeReq.Model,
 				selection.ChannelIndex,
@@ -236,11 +236,11 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			if claudeReq.Stream {
-				return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, bodyBytes, claudeReq.Model)
+				return common.HandleStreamResponse(c, resp, provider, envCfg, startTime, upstreamCopy, actualRequestBody, claudeReq.Model)
 			}
-			return handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, upstreamCopy, apiKey)
+			return handleNormalResponse(c, resp, provider, envCfg, startTime, actualRequestBody, upstreamCopy, apiKey)
 		},
 		claudeReq.Model,
 		channelIndex,

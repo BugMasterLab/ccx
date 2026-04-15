@@ -48,8 +48,7 @@ func Handler(
 			return
 		}
 
-		// 预处理：规范化 metadata.user_id（兼容 Claude Code v2.1.78+ JSON 对象格式）
-		bodyBytes = common.NormalizeMetadataUserID(bodyBytes)
+		// 入口保留原始请求体；按渠道在发往上游前决定是否规范化 metadata.user_id
 		c.Set("requestBodyBytes", bodyBytes)
 
 		// 解析 Responses 请求
@@ -58,8 +57,9 @@ func Handler(
 			_ = json.Unmarshal(bodyBytes, &responsesReq)
 		}
 
-		// 提取对话标识用于 Trace 亲和性
-		userID := common.ExtractConversationID(c, bodyBytes)
+		// 提取对话标识用于 Trace 亲和性（保持默认开启时的既有路由语义）
+		affinityBody := common.NormalizeMetadataUserID(bodyBytes)
+		userID := common.ExtractConversationID(c, affinityBody)
 
 		// 记录原始请求信息（仅在入口处记录一次）
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Responses")
@@ -137,8 +137,8 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindResponses, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
-					return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
+				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+					return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, actualRequestBody)
 				},
 				responsesReq.Model,
 				selection.ChannelIndex,
@@ -223,8 +223,8 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
-			return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
+		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+			return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, actualRequestBody)
 		},
 		responsesReq.Model,
 		channelIndex,

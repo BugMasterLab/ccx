@@ -343,3 +343,31 @@ func TestSanitizeMalformedThinkingBlocks_ContentObject(t *testing.T) {
 		t.Fatalf("content.type = %v, want text", content["type"])
 	}
 }
+
+func TestRestoreRequestBodyAndContextCacheUseAttemptBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	original := []byte(`{"model":"claude-3","metadata":{"user_id":"{\"device_id\":\"abc\"}"}}`)
+	attemptBody := NormalizeMetadataUserID(original)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(original))
+
+	RestoreRequestBody(c, attemptBody)
+	c.Set("requestBodyBytes", attemptBody)
+
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		t.Fatalf("ReadAll() err = %v", err)
+	}
+	if string(body) != string(attemptBody) {
+		t.Fatalf("request body = %s, want %s", string(body), string(attemptBody))
+	}
+
+	cached, ok := c.Get("requestBodyBytes")
+	if !ok {
+		t.Fatal("requestBodyBytes not found in context")
+	}
+	if string(cached.([]byte)) != string(attemptBody) {
+		t.Fatalf("cached body = %s, want %s", string(cached.([]byte)), string(attemptBody))
+	}
+}

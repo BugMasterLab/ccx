@@ -23,7 +23,8 @@ describe('buildChannelPayload', () => {
       proxyUrl: ' http://127.0.0.1:7890 ',
       routePrefix: '',
       supportedModels: ['gpt-5'],
-      autoBlacklistBalance: true
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
     })
 
     expect(result.name).toBe('test-channel')
@@ -59,7 +60,8 @@ describe('buildChannelPayload', () => {
       proxyUrl: '',
       routePrefix: '',
       supportedModels: [],
-      autoBlacklistBalance: true
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
     })
 
     expect(result.baseUrl).toBe('https://api.example.com/v1#')
@@ -87,7 +89,8 @@ describe('buildChannelPayload', () => {
       proxyUrl: '',
       routePrefix: '',
       supportedModels: ['opus'],
-      autoBlacklistBalance: true
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
     })
 
     expect(result.modelMapping).toEqual({ opus: 'claude-3-7-sonnet' })
@@ -117,9 +120,38 @@ describe('buildChannelPayload', () => {
       proxyUrl: '',
       routePrefix: '',
       supportedModels: [],
-      autoBlacklistBalance: false
+      autoBlacklistBalance: false,
+      normalizeMetadataUserId: true
     })
 
     expect(result.autoBlacklistBalance).toBe(false)
+  })
+
+  it('应携带 normalizeMetadataUserId 开关', () => {
+    const result = buildChannelPayload({
+      name: 'metadata-guard',
+      serviceType: 'responses',
+      baseUrl: 'https://api.example.com/v1',
+      baseUrls: [],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: false
+    })
+
+    expect(result.normalizeMetadataUserId).toBe(false)
   })
 })

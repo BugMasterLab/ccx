@@ -38,6 +38,8 @@ type UpstreamConfig struct {
 	RPM            int        `json:"rpm"`                      // 能力测试发送速率（每分钟请求数，仅影响能力测试）
 	// 自动拉黑开关
 	AutoBlacklistBalance *bool `json:"autoBlacklistBalance,omitempty"` // 余额不足时自动拉黑 Key（默认 true）
+	// metadata.user_id 规范化开关
+	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"` // 规范化 metadata.user_id（默认 true）
 	// Gemini 特定配置
 	InjectDummyThoughtSignature bool `json:"injectDummyThoughtSignature,omitempty"` // 给空 thought_signature 注入 dummy 值（兼容 x666.me 等要求必须有该字段的 API）
 	StripThoughtSignature       bool `json:"stripThoughtSignature,omitempty"`       // 移除 thought_signature 字段（兼容旧版 Gemini API）
@@ -67,6 +69,14 @@ func (u *UpstreamConfig) IsAutoBlacklistBalanceEnabled() bool {
 	return *u.AutoBlacklistBalance
 }
 
+// IsNormalizeMetadataUserIDEnabled 检查 metadata.user_id 规范化是否启用（默认 true）
+func (u *UpstreamConfig) IsNormalizeMetadataUserIDEnabled() bool {
+	if u.NormalizeMetadataUserID == nil {
+		return true
+	}
+	return *u.NormalizeMetadataUserID
+}
+
 // UpstreamUpdate 用于部分更新 UpstreamConfig
 type UpstreamUpdate struct {
 	Name               *string           `json:"name"`
@@ -82,12 +92,13 @@ type UpstreamUpdate struct {
 	TextVerbosity      *string           `json:"textVerbosity"`
 	FastMode           *bool             `json:"fastMode"`
 	// 多渠道调度相关字段
-	Priority             *int       `json:"priority"`
-	Status               *string    `json:"status"`
-	PromotionUntil       *time.Time `json:"promotionUntil"`
-	LowQuality           *bool      `json:"lowQuality"`
-	RPM                  *int       `json:"rpm"`
-	AutoBlacklistBalance *bool      `json:"autoBlacklistBalance"`
+	Priority                *int       `json:"priority"`
+	Status                  *string    `json:"status"`
+	PromotionUntil          *time.Time `json:"promotionUntil"`
+	LowQuality              *bool      `json:"lowQuality"`
+	RPM                     *int       `json:"rpm"`
+	AutoBlacklistBalance    *bool      `json:"autoBlacklistBalance"`
+	NormalizeMetadataUserID *bool      `json:"normalizeMetadataUserId"`
 	// Gemini 特定配置
 	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
 	StripThoughtSignature       *bool `json:"stripThoughtSignature"`

@@ -1611,8 +1611,14 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 				if typeLower == "authentication_error" || typeLower == "invalid_api_key" {
 					return "authentication_error", truncateMsg(errMsg)
 				}
+				if isAuthenticationMessage(errMsg) {
+					return "authentication_error", truncateMsg(errMsg)
+				}
 				// 权限错误
 				if typeLower == "permission_error" || typeLower == "permission_denied" {
+					return "permission_error", truncateMsg(errMsg)
+				}
+				if isPermissionMessage(errMsg) {
 					return "permission_error", truncateMsg(errMsg)
 				}
 				// 余额不足（明确的错误类型或错误码）
@@ -1625,11 +1631,23 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 				}
 			}
 			if errStr, ok := data["error"].(string); ok {
+				if isAuthenticationMessage(errStr) {
+					return "authentication_error", truncateMsg(errStr)
+				}
+				if isPermissionMessage(errStr) {
+					return "permission_error", truncateMsg(errStr)
+				}
 				if isInsufficientBalanceMessage(errStr) {
 					return "insufficient_balance", truncateMsg(errStr)
 				}
 			}
 			if msg, ok := data["message"].(string); ok {
+				if isAuthenticationMessage(msg) {
+					return "authentication_error", truncateMsg(msg)
+				}
+				if isPermissionMessage(msg) {
+					return "permission_error", truncateMsg(msg)
+				}
 				if isInsufficientBalanceMessage(msg) {
 					return "insufficient_balance", truncateMsg(msg)
 				}

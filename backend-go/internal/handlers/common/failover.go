@@ -575,6 +575,15 @@ func ShouldBlacklistKey(statusCode int, bodyBytes []byte) BlacklistResult {
 		}
 	}
 
+	// 某些上游只返回 401/403 + 明确的认证失败消息，没有 type/code
+	if (statusCode == 401 || statusCode == 403) && isAuthenticationMessage(errMessage) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "authentication_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+
 	// 权限错误: permission_error / permission_denied
 	if typeLower == "permission_error" || typeLower == "permission_denied" {
 		return BlacklistResult{
@@ -621,6 +630,62 @@ func isInsufficientBalanceMessage(msg string) bool {
 		"额度不足",
 		"预扣费额度失败",
 		"需要预扣费额度",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuthenticationMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"invalid api key",
+		"invalid_api_key",
+		"invalid key",
+		"invalid token",
+		"authentication failed",
+		"authentication error",
+		"unauthorized",
+		"api key is invalid",
+		"api key provided is invalid",
+		"无效的api key",
+		"api key无效",
+		"无效 api key",
+		"认证失败",
+		"身份验证失败",
+		"无效的令牌",
+		"令牌无效",
+		"鉴权失败",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPermissionMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"permission denied",
+		"permission error",
+		"forbidden",
+		"access denied",
+		"权限不足",
+		"没有权限",
+		"禁止访问",
 	}
 	for _, keyword := range keywords {
 		if strings.Contains(msgLower, keyword) {

@@ -41,7 +41,8 @@ type DeprioritizeKeyFunc func(apiKey string)
 
 // HandleSuccessFunc 处理成功响应（负责写回客户端），并返回 usage（可为 nil）
 // 注意：实现方需要自行关闭 resp.Body（与现有 handlers 保持一致）。
-type HandleSuccessFunc func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error)
+// actualRequestBody 为本次实际转发给上游的请求体，可用于 usage 估算等后处理。
+type HandleSuccessFunc func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error)
 
 // TryUpstreamWithAllKeys 尝试一个 upstream 的所有 BaseURL + Key（纯 failover）
 // 返回:
@@ -111,7 +112,12 @@ func TryUpstreamWithAllKeys(
 		maxRetries := len(upstream.APIKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
-			RestoreRequestBody(c, requestBody)
+			attemptBody := requestBody
+			if upstream.IsNormalizeMetadataUserIDEnabled() {
+				attemptBody = NormalizeMetadataUserID(requestBody)
+			}
+			RestoreRequestBody(c, attemptBody)
+			c.Set("requestBodyBytes", attemptBody)
 
 			apiKey, err := nextAPIKey(upstream, failedKeys)
 			if err != nil {
@@ -253,7 +259,7 @@ func TryUpstreamWithAllKeys(
 				markURLSuccess(currentBaseURL)
 			}
 
-			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey)
+			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
 			if err != nil {
 				lastError = err
 				// 区分客户端错误和渠道故障

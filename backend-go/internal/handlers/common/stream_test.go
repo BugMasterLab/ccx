@@ -612,6 +612,24 @@ data: {"type":"error","message":"API Key额度不足，请访问https://right.co
 			wantReason:  "insufficient_balance",
 			wantMessage: "API Key额度不足，请访问https://right.codes查看详情",
 		},
+		{
+			name: "string error field invalid api key",
+			event: `event: error
+data: {"type":"error","error":"无效的API Key"}
+
+`,
+			wantReason:  "authentication_error",
+			wantMessage: "无效的API Key",
+		},
+		{
+			name: "nested permission message without type",
+			event: `event: error
+data: {"type":"error","error":{"message":"permission denied for this resource"}}
+
+`,
+			wantReason:  "permission_error",
+			wantMessage: "permission denied for this resource",
+		},
 	}
 
 	for _, tt := range tests {

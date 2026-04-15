@@ -57,6 +57,7 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				"routePrefix":                 up.RoutePrefix,
 				"disabledApiKeys":             up.DisabledAPIKeys,
 				"autoBlacklistBalance":        up.IsAutoBlacklistBalanceEnabled(),
+				"normalizeMetadataUserId":     up.IsNormalizeMetadataUserIDEnabled(),
 			}
 		}
 

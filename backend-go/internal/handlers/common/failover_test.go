@@ -556,6 +556,16 @@ func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
 			},
 		},
 		{
+			name:       "401 string error invalid api key without type should blacklist",
+			statusCode: 401,
+			body:       `{"error":"无效的API Key"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "authentication_error",
+				Message:         "无效的API Key",
+			},
+		},
+		{
 			name:       "403 top level insufficient account balance message should blacklist",
 			statusCode: 403,
 			body:       `{"message":"Insufficient account balance"}`,

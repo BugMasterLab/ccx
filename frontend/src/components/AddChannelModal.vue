@@ -694,6 +694,19 @@
               </div>
             </v-col>
 
+            <v-col v-if="props.channelType === 'messages' || props.channelType === 'responses'" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-identifier</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.normalizeMetadataUserIdLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.normalizeMetadataUserIdHint') }}</div>
+                  </div>
+                </div>
+                <v-switch v-model="form.normalizeMetadataUserId" inset color="primary" hide-details />
+              </div>
+            </v-col>
+
             <!-- 能力测试 RPM -->
             <v-col cols="12" md="6">
               <v-text-field
@@ -1422,6 +1435,7 @@ const form = reactive({
   routePrefix: '',
   supportedModels: [] as string[],
   autoBlacklistBalance: true,
+  normalizeMetadataUserId: true,
   rpm: 10
 })
 
@@ -1671,6 +1685,7 @@ const resetForm = () => {
   form.routePrefix = ''
   form.supportedModels = []
   form.autoBlacklistBalance = true
+  form.normalizeMetadataUserId = true
   form.rpm = 10
   newApiKey.value = ''
   newMapping.source = ''
@@ -1743,6 +1758,7 @@ const loadChannelData = (channel: Channel) => {
   form.routePrefix = channel.routePrefix || ''
   form.supportedModels = channel.supportedModels || []
   form.autoBlacklistBalance = channel.autoBlacklistBalance ?? true
+  form.normalizeMetadataUserId = channel.normalizeMetadataUserId ?? true
   form.rpm = channel.rpm ?? 10
 
   // 立即同步 baseUrl 到预览变量，避免等待 debounce
