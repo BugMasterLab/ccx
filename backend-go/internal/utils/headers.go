@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +12,92 @@ import (
 // PrepareUpstreamHeaders 准备上游请求头（统一头部处理逻辑）
 // 保留原始请求头，移除代理相关头部，设置认证头
 // 注意：此函数适用于Claude类型渠道，对于其他类型请使用 PrepareMinimalHeaders
+// ExtractUnifiedSessionID 统一提取会话/缓存标识，供 Messages/Responses/Chat/Gemini 复用。
+// 优先级: Conversation_id > Session_id > X-Claude-Code-Session-Id > X-Client-Request-Id > X-Gemini-Api-Privileged-User-Id > user > prompt_cache_key > metadata.user_id
+func ExtractUnifiedSessionID(c *gin.Context, bodyBytes []byte) string {
+	if c != nil {
+		if convID := c.GetHeader("Conversation_id"); convID != "" {
+			return convID
+		}
+
+		if sessID := c.GetHeader("Session_id"); sessID != "" {
+			return sessID
+		}
+
+		if claudeCodeSessionID := c.GetHeader("X-Claude-Code-Session-Id"); claudeCodeSessionID != "" {
+			return claudeCodeSessionID
+		}
+
+		if clientRequestID := c.GetHeader("X-Client-Request-Id"); clientRequestID != "" {
+			return clientRequestID
+		}
+
+		if geminiUserID := c.GetHeader("X-Gemini-Api-Privileged-User-Id"); geminiUserID != "" {
+			return geminiUserID
+		}
+	}
+
+	var req map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &req); err != nil {
+		return ""
+	}
+
+	if user, ok := req["user"].(string); ok && user != "" {
+		return user
+	}
+	if promptCacheKey, ok := req["prompt_cache_key"].(string); ok && promptCacheKey != "" {
+		return promptCacheKey
+	}
+	if metadata, ok := req["metadata"].(map[string]interface{}); ok {
+		if userID, ok := metadata["user_id"].(string); ok && userID != "" {
+			return userID
+		}
+		if flattened := flattenMetadataUserID(metadata["user_id"]); flattened != "" {
+			return flattened
+		}
+	}
+
+	return ""
+}
+
+func flattenMetadataUserID(raw interface{}) string {
+	if raw == nil {
+		return ""
+	}
+
+	parsed, ok := raw.(map[string]interface{})
+	if !ok || len(parsed) == 0 {
+		return ""
+	}
+
+	var parts []string
+	if deviceID, ok := parsed["device_id"].(string); ok && deviceID != "" {
+		parts = append(parts, "user_"+deviceID)
+		if accountUUID, ok := parsed["account_uuid"].(string); ok && accountUUID != "" {
+			parts = append(parts, "account_"+accountUUID)
+		}
+		if sessionID, ok := parsed["session_id"].(string); ok && sessionID != "" {
+			parts = append(parts, "session_"+sessionID)
+		}
+	} else {
+		keys := make([]string, 0, len(parsed))
+		for k := range parsed {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if v, ok := parsed[k].(string); ok && v != "" {
+				parts = append(parts, k+"_"+v)
+			}
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, "_")
+}
+
 func PrepareUpstreamHeaders(c *gin.Context, targetHost string) http.Header {
 	headers := c.Request.Header.Clone()
 

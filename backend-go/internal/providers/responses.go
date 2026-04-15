@@ -38,7 +38,7 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 		p.SessionManager = newDefaultSessionManager()
 	}
 
-	providerReq, reqBodyForURL, err := p.buildProviderRequestBody(c.Request.URL.Path, bodyBytes, upstream)
+	providerReq, reqBodyForURL, err := p.buildProviderRequestBody(c, c.Request.URL.Path, bodyBytes, upstream)
 	if err != nil {
 		return nil, bodyBytes, err
 	}
@@ -76,9 +76,9 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 	return req, bodyBytes, nil
 }
 
-func (p *ResponsesProvider) buildProviderRequestBody(requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
+func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
 	if strings.HasSuffix(requestPath, "/v1/messages") {
-		responsesReq, err := p.buildResponsesRequestFromClaude(bodyBytes, upstream)
+		responsesReq, err := p.buildResponsesRequestFromClaude(c, bodyBytes, upstream)
 		if err != nil {
 			return nil, nil, fmt.Errorf("解析 Claude Messages 请求失败: %w", err)
 		}
@@ -137,7 +137,7 @@ func (p *ResponsesProvider) buildProviderRequestBody(requestPath string, bodyByt
 	return providerReq, bodyBytes, nil
 }
 
-func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
+func (p *ResponsesProvider) buildResponsesRequestFromClaude(c *gin.Context, bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
 	var claudeReq types.ClaudeRequest
 	if err := json.Unmarshal(bodyBytes, &claudeReq); err != nil {
 		return nil, err
@@ -221,6 +221,12 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, up
 	if claudeReq.Temperature > 0 {
 		responsesReq["temperature"] = claudeReq.Temperature
 	}
+	if claudeReq.TopP > 0 {
+		responsesReq["top_p"] = claudeReq.TopP
+	}
+	if claudeReq.ToolChoice != nil {
+		responsesReq["tool_choice"] = claudeReq.ToolChoice
+	}
 	if len(claudeReq.Tools) > 0 {
 		tools := make([]map[string]interface{}, 0, len(claudeReq.Tools))
 		for _, tool := range claudeReq.Tools {
@@ -235,6 +241,24 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, up
 			tools = append(tools, item)
 		}
 		responsesReq["tools"] = tools
+		if claudeReq.ParallelToolCalls != nil {
+			responsesReq["parallel_tool_calls"] = *claudeReq.ParallelToolCalls
+		} else {
+			responsesReq["parallel_tool_calls"] = true
+		}
+	}
+	if claudeReq.Metadata != nil {
+		if userID, ok := claudeReq.Metadata["user_id"].(string); ok && userID != "" {
+			responsesReq["user"] = userID
+		}
+	}
+	if _, exists := responsesReq["user"]; !exists {
+		if sessionID := utils.ExtractUnifiedSessionID(c, bodyBytes); sessionID != "" {
+			responsesReq["user"] = sessionID
+		}
+	}
+	if cacheKey := utils.ExtractUnifiedSessionID(c, bodyBytes); cacheKey != "" {
+		responsesReq["prompt_cache_key"] = cacheKey
 	}
 	return responsesReq, nil
 }

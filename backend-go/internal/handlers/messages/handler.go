@@ -61,8 +61,8 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 			_ = json.Unmarshal(bodyBytes, &claudeReq)
 		}
 
-		// 提取 user_id 用于 Trace 亲和性
-		userID := common.ExtractUserID(bodyBytes)
+		// 提取统一会话标识用于 Trace 亲和性
+		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 
 		// 记录原始请求信息（仅在入口处记录一次）
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Messages")

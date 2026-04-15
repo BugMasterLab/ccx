@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/BenedictKing/ccx/internal/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -132,6 +133,99 @@ func TestNormalizeMetadataUserID(t *testing.T) {
 						t.Errorf("model changed: got %q, want %q", resultModel, origModel)
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestExtractUnifiedSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name     string
+		headers  map[string]string
+		body     string
+		expected string
+	}{
+		{
+			name:     "conversation header has highest priority",
+			headers:  map[string]string{"Conversation_id": "conv_1", "Session_id": "sess_1"},
+			body:     `{"user":"body_user","prompt_cache_key":"cache_1","metadata":{"user_id":"meta_1"}}`,
+			expected: "conv_1",
+		},
+		{
+			name:     "session header outranks claude code session header",
+			headers:  map[string]string{"Session_id": "sess_2", "X-Claude-Code-Session-Id": "claude_2"},
+			body:     `{"user":"body_user"}`,
+			expected: "sess_2",
+		},
+		{
+			name:     "claude code session header outranks client request id",
+			headers:  map[string]string{"X-Claude-Code-Session-Id": "claude_3", "X-Client-Request-Id": "req_3"},
+			body:     `{"prompt_cache_key":"cache_3"}`,
+			expected: "claude_3",
+		},
+		{
+			name:     "client request id outranks gemini privileged user",
+			headers:  map[string]string{"X-Client-Request-Id": "req_4", "X-Gemini-Api-Privileged-User-Id": "gemini_4"},
+			body:     `{}`,
+			expected: "req_4",
+		},
+		{
+			name:     "body user outranks prompt cache key and metadata user id",
+			headers:  map[string]string{},
+			body:     `{"user":"body_user","prompt_cache_key":"cache_5","metadata":{"user_id":"meta_5"}}`,
+			expected: "body_user",
+		},
+		{
+			name:     "prompt cache key outranks metadata user id",
+			headers:  map[string]string{},
+			body:     `{"prompt_cache_key":"cache_6","metadata":{"user_id":"meta_6"}}`,
+			expected: "cache_6",
+		},
+		{
+			name:     "metadata user id is final fallback",
+			headers:  map[string]string{},
+			body:     `{"metadata":{"user_id":"meta_7"}}`,
+			expected: "meta_7",
+		},
+		{
+			name:     "metadata user id object falls back to flattened value after user and prompt cache key",
+			headers:  map[string]string{},
+			body:     `{"metadata":{"user_id":{"device_id":"dev1","account_uuid":"acc1","session_id":"sess1"}}}`,
+			expected: "user_dev1_account_acc1_session_sess1",
+		},
+		{
+			name:     "invalid metadata user id type does not discard valid user",
+			headers:  map[string]string{},
+			body:     `{"user":"body_user","metadata":{"user_id":{"device_id":"dev1"}}}`,
+			expected: "body_user",
+		},
+		{
+			name:     "invalid metadata user id type does not discard valid prompt cache key",
+			headers:  map[string]string{},
+			body:     `{"prompt_cache_key":"cache_8","metadata":{"user_id":{"device_id":"dev1"}}}`,
+			expected: "cache_8",
+		},
+		{
+			name:     "empty request returns empty string",
+			headers:  map[string]string{},
+			body:     `{}`,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewBufferString(tt.body))
+			for k, v := range tt.headers {
+				c.Request.Header.Set(k, v)
+			}
+
+			if got := utils.ExtractUnifiedSessionID(c, []byte(tt.body)); got != tt.expected {
+				t.Fatalf("ExtractUnifiedSessionID() = %q, want %q", got, tt.expected)
 			}
 		})
 	}

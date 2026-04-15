@@ -13,7 +13,7 @@ func TestResponsesProvider_BuildProviderRequestBody_DoesNotCreateSessionWithoutP
 	provider := &ResponsesProvider{SessionManager: manager}
 	upstream := &config.UpstreamConfig{ServiceType: "openai"}
 
-	_, _, err := provider.buildProviderRequestBody("/v1/responses", []byte(`{"model":"gpt-5","input":"hello"}`), upstream)
+	_, _, err := provider.buildProviderRequestBody(nil, "/v1/responses", []byte(`{"model":"gpt-5","input":"hello"}`), upstream)
 	if err != nil {
 		t.Fatalf("buildProviderRequestBody() err = %v", err)
 	}

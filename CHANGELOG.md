@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### Changed
+
+- **统一四协议的会话亲和与缓存身份提取** - 为 Messages / Responses / Chat / Gemini 入口统一引入会话标识提取优先级，新增 `X-Claude-Code-Session-Id` 与 `X-Client-Request-Id` 支持，并保留旧提取函数兼容现有调用
+- **补全 Messages→Responses 桥接字段映射** - 在 Claude Messages 转 Responses 上游请求时补齐 `prompt_cache_key`、`user`、`top_p`、`tool_choice`、`parallel_tool_calls` 等字段，提升跨接口缓存复用与参数传递完整性
+
+### Added
+
+- **新增跨接口一致性与桥接回归测试** - 增加统一会话标识提取测试、Messages→Responses 身份映射测试，以及 handlers 层跨 messages / responses / chat / gemini 的 affinity 一致性测试，覆盖缓存键与用户标识回退逻辑
+
 ## [v2.6.57] - 2026-04-14
 
 ### Fixed
