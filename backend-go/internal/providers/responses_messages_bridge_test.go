@@ -1,8 +1,10 @@
 package providers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/BenedictKing/ccx/internal/config"
@@ -34,7 +36,7 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude(t *testing.T) {
 		"tools":[{"name":"weather","description":"weather tool","input_schema":{"type":"object"}}]
 	}`)
 
-	result, err := provider.buildResponsesRequestFromClaude(body, upstream)
+	result, err := provider.buildResponsesRequestFromClaude(nil, body, upstream)
 	if err != nil {
 		t.Fatalf("buildResponsesRequestFromClaude() err = %v", err)
 	}
@@ -128,7 +130,7 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_AssistantTextUsesOutp
 		]
 	}`)
 
-	result, err := provider.buildResponsesRequestFromClaude(body, upstream)
+	result, err := provider.buildResponsesRequestFromClaude(nil, body, upstream)
 	if err != nil {
 		t.Fatalf("buildResponsesRequestFromClaude() err = %v", err)
 	}
@@ -183,6 +185,75 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_AssistantTextUsesOutp
 	assertMessageBlockType(5, "user", "input_text", "继续总结")
 }
 
+func TestResponsesProvider_BuildResponsesRequestFromClaude_MapsPromptCacheAndUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &ResponsesProvider{}
+	upstream := &config.UpstreamConfig{ServiceType: "responses"}
+
+	parallelToolCalls := true
+	body := []byte(`{
+		"model":"gpt-5",
+		"top_p":0.8,
+		"tool_choice":{"type":"auto"},
+		"parallel_tool_calls":true,
+		"metadata":{"user_id":"user_123"},
+		"messages":[{"role":"user","content":"hello"}],
+		"tools":[{"name":"weather","input_schema":{"type":"object"}}]
+	}`)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("X-Claude-Code-Session-Id", "sess_from_header")
+
+	result, err := provider.buildResponsesRequestFromClaude(c, body, upstream)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestFromClaude() err = %v", err)
+	}
+	if got := result["prompt_cache_key"]; got != "sess_from_header" {
+		t.Fatalf("prompt_cache_key = %v, want sess_from_header", got)
+	}
+	if got := result["user"]; got != "user_123" {
+		t.Fatalf("user = %v, want user_123", got)
+	}
+	if got := result["top_p"]; got != 0.8 {
+		t.Fatalf("top_p = %v, want 0.8", got)
+	}
+	toolChoice, ok := result["tool_choice"].(map[string]interface{})
+	if !ok || toolChoice["type"] != "auto" {
+		t.Fatalf("tool_choice = %#v, want type=auto", result["tool_choice"])
+	}
+	if got, ok := result["parallel_tool_calls"].(bool); !ok || got != parallelToolCalls {
+		t.Fatalf("parallel_tool_calls = %v, want true", result["parallel_tool_calls"])
+	}
+}
+
+func TestResponsesProvider_BuildResponsesRequestFromClaude_FallsBackUserToUnifiedSessionID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &ResponsesProvider{}
+	upstream := &config.UpstreamConfig{ServiceType: "responses"}
+	body := []byte(`{
+		"model":"gpt-5",
+		"messages":[{"role":"user","content":"hello"}]
+	}`)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+	c.Request.Header.Set("X-Client-Request-Id", "req_123")
+
+	result, err := provider.buildResponsesRequestFromClaude(c, body, upstream)
+	if err != nil {
+		t.Fatalf("buildResponsesRequestFromClaude() err = %v", err)
+	}
+	if got := result["prompt_cache_key"]; got != "req_123" {
+		t.Fatalf("prompt_cache_key = %v, want req_123", got)
+	}
+	if got := result["user"]; got != "req_123" {
+		t.Fatalf("user = %v, want req_123", got)
+	}
+}
+
 func TestExtractResponsesInstructions_SkipsLeadingBillingHeader(t *testing.T) {
 	instructions := extractResponsesInstructions([]interface{}{
 		map[string]interface{}{"type": "text", "text": "x-anthropic-billing-header: cc_version=2.1.78"},
@@ -222,7 +293,7 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_OmitsInstructionsWhen
 		]
 	}`)
 
-	result, err := provider.buildResponsesRequestFromClaude(body, upstream)
+	result, err := provider.buildResponsesRequestFromClaude(nil, body, upstream)
 	if err != nil {
 		t.Fatalf("buildResponsesRequestFromClaude() err = %v", err)
 	}
@@ -246,7 +317,7 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude_FiltersBillingHeaderF
 		]
 	}`)
 
-	result, err := provider.buildResponsesRequestFromClaude(body, upstream)
+	result, err := provider.buildResponsesRequestFromClaude(nil, body, upstream)
 	if err != nil {
 		t.Fatalf("buildResponsesRequestFromClaude() err = %v", err)
 	}
@@ -365,7 +436,7 @@ func TestResponsesProvider_BuildProviderRequestBody_NormalizesPassthroughInputTe
 		]
 	}`)
 
-	reqBody, _, err := provider.buildProviderRequestBody("/v1/responses", body, upstream)
+	reqBody, _, err := provider.buildProviderRequestBody(nil, "/v1/responses", body, upstream)
 	if err != nil {
 		t.Fatalf("buildProviderRequestBody() err = %v", err)
 	}

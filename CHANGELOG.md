@@ -12,10 +12,13 @@
   - Dashboard API 返回完整 breaker 字段（circuitState/halfOpenSuccesses/breakerFailureRate/nextRetryAt）
   - 前端状态徽章支持 breaker-open/half-open 显示，恢复按钮识别自动熔断
   - 涉及文件：`internal/metrics/channel_metrics.go`, `internal/metrics/persistence.go`, `internal/metrics/sqlite_store.go`, `internal/scheduler/channel_scheduler.go`, `internal/handlers/common/upstream_failover.go`, `internal/handlers/responses/compact.go`, `internal/handlers/channel_metrics_handler.go`, `frontend/src/components/ChannelStatusBadge.vue`, `frontend/src/components/ChannelOrchestration.vue`
+- **新增跨接口一致性与桥接回归测试** - 增加统一会话标识提取测试、Messages→Responses 身份映射测试，以及 handlers 层跨 messages / responses / chat / gemini 的 affinity 一致性测试，覆盖缓存键与用户标识回退逻辑
 
 ### Changed
 
 - **为 Messages/Responses 渠道增加 metadata.user_id 规范化开关** - 新增默认开启的 `normalizeMetadataUserId` 渠道配置与前端开关；请求入口保留原始 `metadata.user_id`，仅在发往上游前按渠道决定是否将 JSON 对象字符串扁平化，兼容需要透传原始对象和依赖旧扁平格式的不同上游；同步更新渠道列表/dashboard 返回与前后端回归测试
+- **统一四协议的会话亲和与缓存身份提取** - 为 Messages / Responses / Chat / Gemini 入口统一引入会话标识提取优先级，新增 `X-Claude-Code-Session-Id` 与 `X-Client-Request-Id` 支持，并保留旧提取函数兼容现有调用
+- **补全 Messages→Responses 桥接字段映射** - 在 Claude Messages 转 Responses 上游请求时补齐 `prompt_cache_key`、`user`、`top_p`、`tool_choice`、`parallel_tool_calls` 等字段，提升跨接口缓存复用与参数传递完整性
 
 ### Fixed
 

@@ -44,6 +44,16 @@ type DeprioritizeKeyFunc func(apiKey string)
 // actualRequestBody 为本次实际转发给上游的请求体，可用于 usage 估算等后处理。
 type HandleSuccessFunc func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error)
 
+func shouldNormalizeMetadataUserID(kind scheduler.ChannelKind, upstream *config.UpstreamConfig) bool {
+	if upstream == nil {
+		return false
+	}
+	if kind != scheduler.ChannelKindMessages && kind != scheduler.ChannelKindResponses {
+		return false
+	}
+	return upstream.IsNormalizeMetadataUserIDEnabled()
+}
+
 // TryUpstreamWithAllKeys 尝试一个 upstream 的所有 BaseURL + Key（纯 failover）
 // 返回:
 //   - handled: 是否已向客户端写回响应（成功或非 failover 错误）
@@ -113,7 +123,7 @@ func TryUpstreamWithAllKeys(
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
 			attemptBody := requestBody
-			if upstream.IsNormalizeMetadataUserIDEnabled() {
+			if shouldNormalizeMetadataUserID(kind, upstream) {
 				attemptBody = NormalizeMetadataUserID(requestBody)
 			}
 			RestoreRequestBody(c, attemptBody)

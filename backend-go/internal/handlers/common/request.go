@@ -488,6 +488,7 @@ func NormalizeMetadataUserID(bodyBytes []byte) []byte {
 	return newBytes
 }
 
+// Deprecated: 使用 utils.ExtractUnifiedSessionID 替代。
 // ExtractUserID 从请求体中提取 user_id（用于 Messages API）
 func ExtractUserID(bodyBytes []byte) string {
 	var req struct {
@@ -501,41 +502,10 @@ func ExtractUserID(bodyBytes []byte) string {
 	return ""
 }
 
+// Deprecated: 使用 utils.ExtractUnifiedSessionID 替代。
 // ExtractConversationID 从请求中提取对话标识（用于 Responses API）
-// 优先级: Conversation_id Header > Session_id Header > X-Gemini-Api-Privileged-User-Id > prompt_cache_key > metadata.user_id
 func ExtractConversationID(c *gin.Context, bodyBytes []byte) string {
-	// 1. HTTP Header: Conversation_id
-	if convID := c.GetHeader("Conversation_id"); convID != "" {
-		return convID
-	}
-
-	// 2. HTTP Header: Session_id
-	if sessID := c.GetHeader("Session_id"); sessID != "" {
-		return sessID
-	}
-
-	// 3. HTTP Header: X-Gemini-Api-Privileged-User-Id (Gemini 专用)
-	if geminiUserID := c.GetHeader("X-Gemini-Api-Privileged-User-Id"); geminiUserID != "" {
-		return geminiUserID
-	}
-
-	// 4. Request Body: prompt_cache_key 或 metadata.user_id
-	var req struct {
-		PromptCacheKey string `json:"prompt_cache_key"`
-		Metadata       struct {
-			UserID string `json:"user_id"`
-		} `json:"metadata"`
-	}
-	if err := json.Unmarshal(bodyBytes, &req); err == nil {
-		if req.PromptCacheKey != "" {
-			return req.PromptCacheKey
-		}
-		if req.Metadata.UserID != "" {
-			return req.Metadata.UserID
-		}
-	}
-
-	return ""
+	return utils.ExtractUnifiedSessionID(c, bodyBytes)
 }
 
 // cchPattern 匹配 cch=xxx; 部分（包括前后空格）

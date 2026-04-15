@@ -81,8 +81,8 @@ func Handler(
 		// 判断是否流式
 		isStream := strings.Contains(c.Request.URL.Path, "streamGenerateContent")
 
-		// 提取对话标识用于 Trace 亲和性
-		userID := common.ExtractConversationID(c, bodyBytes)
+		// 提取统一会话标识用于 Trace 亲和性
+		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 
 		// 记录原始请求信息
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Gemini")
