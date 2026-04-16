@@ -271,9 +271,9 @@
 
             <!-- Action buttons -->
             <div class="channel-actions" @click.stop>
-              <!-- Show resume button for suspended status -->
+              <!-- Show resume button for breaker-managed channels -->
               <v-btn
-                v-if="element.status === 'suspended' || isAutoTripped(element)"
+                v-if="isBreakerManagedChannel(element)"
                 icon
                 size="x-small"
                 variant="text"
@@ -358,7 +358,7 @@
                     <v-list-item-title>{{ t('orchestration.moveBottom') }}</v-list-item-title>
                   </v-list-item>
                   <v-divider />
-                  <v-list-item v-if="element.status === 'suspended' || isAutoTripped(element)" @click="resumeChannel(element.index)">
+                  <v-list-item v-if="isBreakerManagedChannel(element)" @click="resumeChannel(element.index)">
                     <template #prepend>
                       <v-icon size="small" color="success">mdi-play-circle</v-icon>
                     </template>
@@ -1333,18 +1333,19 @@ const resumeChannelInternal = async (
   return result
 }
 
-const isAutoTripped = (channel: Channel): boolean => {
+const isTrippedChannel = (channel: Channel): boolean => {
   const channelMetrics = getChannelMetrics(channel.index)
-  return channelMetrics?.circuitState === 'open' || channelMetrics?.circuitState === 'half_open'
+  return channel.status === 'suspended' || channelMetrics?.circuitState === 'open'
+}
+
+const isBreakerManagedChannel = (channel: Channel): boolean => {
+  const channelMetrics = getChannelMetrics(channel.index)
+  return channel.status === 'suspended' || channelMetrics?.circuitState === 'open' || channelMetrics?.circuitState === 'half_open'
 }
 
 const getChannelRowClass = (channel: Channel) => {
-  const channelMetrics = getChannelMetrics(channel.index)
-
   return {
-    'is-suspended': channel.status === 'suspended',
-    'is-breaker-open': channelMetrics?.circuitState === 'open',
-    'is-breaker-half-open': channelMetrics?.circuitState === 'half_open'
+    'is-tripped': isTrippedChannel(channel)
   }
 }
 
@@ -1369,8 +1370,8 @@ const setPromotion = async (channel: Channel) => {
   try {
     const PROMOTION_DURATION = 300 // 5 minutes
 
-    // If the channel is in a tripped state, resume it first
-    if (channel.status === 'suspended' || isAutoTripped(channel)) {
+    // If the channel is in a breaker-managed state, resume it first
+    if (isBreakerManagedChannel(channel)) {
       await resumeChannelInternal(channel.index, { refresh: false, notify: false })
     }
 
@@ -1552,64 +1553,25 @@ defineExpose({
   border-color: rgba(255, 255, 255, 0.7);
 }
 
-/* Visual distinction for suspended and breaker states */
-.channel-row.is-suspended {
+/* Visual distinction for unavailable channels */
+.channel-row.is-tripped {
   background: var(--ccx-channel-row-suspended-bg);
   border-color: var(--ccx-channel-row-suspended-border);
   box-shadow: var(--ccx-channel-row-shadow);
 }
-.channel-row.is-suspended:hover {
+.channel-row.is-tripped:hover {
   background: var(--ccx-channel-row-suspended-hover-bg);
   box-shadow: var(--ccx-channel-row-shadow-hover);
 }
 
-.channel-row.is-breaker-open {
-  background: var(--ccx-channel-row-breaker-open-bg);
-  border-color: var(--ccx-channel-row-breaker-open-border);
-  box-shadow: var(--ccx-channel-row-shadow);
-}
-.channel-row.is-breaker-open:hover {
-  background: var(--ccx-channel-row-breaker-open-hover-bg);
-  box-shadow: var(--ccx-channel-row-shadow-hover);
-}
-
-.channel-row.is-breaker-half-open {
-  background: var(--ccx-channel-row-breaker-half-open-bg);
-  border-color: var(--ccx-channel-row-breaker-half-open-border);
-  box-shadow: var(--ccx-channel-row-shadow);
-}
-.channel-row.is-breaker-half-open:hover {
-  background: var(--ccx-channel-row-breaker-half-open-hover-bg);
-  box-shadow: var(--ccx-channel-row-shadow-hover);
-}
-
-.v-theme--dark .channel-row.is-suspended {
+.v-theme--dark .channel-row.is-tripped {
+  background: var(--ccx-channel-row-suspended-bg);
+  border-color: var(--ccx-channel-row-suspended-border);
   box-shadow: var(--ccx-channel-row-shadow);
 }
 
-.v-theme--dark .channel-row.is-suspended:hover {
-  box-shadow: var(--ccx-channel-row-shadow-hover);
-}
-
-.v-theme--dark .channel-row.is-breaker-open {
-  background: var(--ccx-channel-row-breaker-open-bg);
-  border-color: var(--ccx-channel-row-breaker-open-border);
-  box-shadow: var(--ccx-channel-row-shadow);
-}
-
-.v-theme--dark .channel-row.is-breaker-open:hover {
-  background: var(--ccx-channel-row-breaker-open-hover-bg);
-  box-shadow: var(--ccx-channel-row-shadow-hover);
-}
-
-.v-theme--dark .channel-row.is-breaker-half-open {
-  background: var(--ccx-channel-row-breaker-half-open-bg);
-  border-color: var(--ccx-channel-row-breaker-half-open-border);
-  box-shadow: var(--ccx-channel-row-shadow);
-}
-
-.v-theme--dark .channel-row.is-breaker-half-open:hover {
-  background: var(--ccx-channel-row-breaker-half-open-hover-bg);
+.v-theme--dark .channel-row.is-tripped:hover {
+  background: var(--ccx-channel-row-suspended-hover-bg);
   box-shadow: var(--ccx-channel-row-shadow-hover);
 }
 

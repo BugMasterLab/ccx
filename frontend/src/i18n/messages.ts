@@ -290,11 +290,10 @@ export type MessageKey =
   | 'chart.successRate'
   | 'chart.inputTokens'
   | 'chart.outputTokens'
-  | 'chart.success'
   | 'chart.input'
   | 'chart.output'
   | 'chart.requestUnit'
-  | 'chart.failed'
+  | 'chart.issueCount'
   | 'chart.total'
   | 'chart.collapse'
   | 'chart.noModelRequestsInRange'
@@ -304,27 +303,16 @@ export type MessageKey =
   | 'chart.keyHistoryLoadFailed'
   | 'chart.noRequestsInRange'
   | 'chart.noKeyUsageInRange'
-  | 'status.active'
-  | 'status.healthy'
-  | 'status.suspended'
+  | 'status.normal'
+  | 'status.tripped'
   | 'status.disabled'
   | 'status.error'
   | 'status.unknown'
   | 'status.metrics.requests'
   | 'status.metrics.successRate'
-  | 'status.metrics.consecutiveFailures'
   | 'status.metrics.lastSuccess'
   | 'status.metrics.lastFailure'
   | 'status.metrics.noData'
-  | 'status.breakerOpen'
-  | 'status.breakerHalfOpen'
-  | 'status.circuit.closed'
-  | 'status.circuit.open'
-  | 'status.circuit.half_open'
-  | 'status.metrics.circuitState'
-  | 'status.metrics.breakerFailureRate'
-  | 'status.metrics.halfOpenSuccesses'
-  | 'status.metrics.nextRetry'
   | 'status.metrics.justNow'
   | 'status.metrics.minutesAgo'
   | 'status.metrics.hoursAgo'
@@ -660,14 +648,13 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.tokens': 'Tokens',
     'chart.cacheRw': 'Cache R/W',
     'chart.totalRequests': 'Total requests',
-    'chart.successRate': 'Success rate',
+    'chart.successRate': 'Availability',
     'chart.inputTokens': 'Input tokens',
     'chart.outputTokens': 'Output tokens',
-    'chart.success': 'success',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'requests',
-    'chart.failed': 'failed',
+    'chart.issueCount': 'issues',
     'chart.total': 'Total',
     'chart.collapse': 'Collapse',
     'chart.noModelRequestsInRange': 'No model request records in the selected time range',
@@ -677,26 +664,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.keyHistoryLoadFailed': 'Failed to load key history data',
     'chart.noRequestsInRange': 'No request records in the selected time range',
     'chart.noKeyUsageInRange': 'No key usage records in the selected time range',
-    'status.active': 'Active',
-    'status.healthy': 'Healthy',
-    'status.suspended': 'Suspended',
-    'status.breakerOpen': 'Circuit Open',
-    'status.breakerHalfOpen': 'Half-Open',
+    'status.normal': 'Normal',
+    'status.tripped': 'Tripped',
     'status.disabled': 'Disabled',
     'status.error': 'Error',
     'status.unknown': 'Unknown',
-    'status.circuit.closed': 'Closed',
-    'status.circuit.open': 'Open',
-    'status.circuit.half_open': 'Half-open',
     'status.metrics.requests': 'Requests',
-    'status.metrics.successRate': 'Success rate',
-    'status.metrics.consecutiveFailures': 'Consecutive failures',
-    'status.metrics.circuitState': 'Circuit state',
-    'status.metrics.breakerFailureRate': 'Breaker failure rate',
-    'status.metrics.halfOpenSuccesses': 'Half-open successes',
-    'status.metrics.nextRetry': 'Next retry',
-    'status.metrics.lastSuccess': 'Last success',
-    'status.metrics.lastFailure': 'Last failure',
+    'status.metrics.successRate': 'Availability',
+    'status.metrics.lastSuccess': 'Recent success',
+    'status.metrics.lastFailure': 'Recent issue',
     'status.metrics.noData': 'No metrics yet',
     'status.metrics.justNow': 'just now',
     'status.metrics.minutesAgo': '{count} min ago',
@@ -1032,14 +1008,13 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.tokens': 'Token',
     'chart.cacheRw': 'Cache R/W',
     'chart.totalRequests': 'Total request',
-    'chart.successRate': 'Tingkat sukses',
+    'chart.successRate': 'Ketersediaan',
     'chart.inputTokens': 'Input token',
     'chart.outputTokens': 'Output token',
-    'chart.success': 'sukses',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'request',
-    'chart.failed': 'gagal',
+    'chart.issueCount': 'masalah',
     'chart.total': 'Total',
     'chart.collapse': 'Ciutkan',
     'chart.noModelRequestsInRange': 'Tidak ada request model dalam rentang waktu yang dipilih',
@@ -1049,26 +1024,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.keyHistoryLoadFailed': 'Gagal memuat histori key',
     'chart.noRequestsInRange': 'Tidak ada request dalam rentang waktu yang dipilih',
     'chart.noKeyUsageInRange': 'Tidak ada penggunaan key dalam rentang waktu yang dipilih',
-    'status.active': 'Aktif',
-    'status.healthy': 'Sehat',
-    'status.suspended': 'Ditangguhkan',
-    'status.breakerOpen': 'Circuit Open',
-    'status.breakerHalfOpen': 'Half-Open',
+    'status.normal': 'Normal',
+    'status.tripped': 'Terputus',
     'status.disabled': 'Nonaktif',
     'status.error': 'Error',
     'status.unknown': 'Tidak diketahui',
-    'status.circuit.closed': 'Closed',
-    'status.circuit.open': 'Open',
-    'status.circuit.half_open': 'Half-open',
     'status.metrics.requests': 'Request',
-    'status.metrics.successRate': 'Tingkat sukses',
-    'status.metrics.consecutiveFailures': 'Gagal beruntun',
-    'status.metrics.circuitState': 'Status circuit',
-    'status.metrics.breakerFailureRate': 'Rasio gagal breaker',
-    'status.metrics.halfOpenSuccesses': 'Sukses half-open',
-    'status.metrics.nextRetry': 'Coba lagi',
+    'status.metrics.successRate': 'Ketersediaan',
     'status.metrics.lastSuccess': 'Sukses terakhir',
-    'status.metrics.lastFailure': 'Gagal terakhir',
+    'status.metrics.lastFailure': 'Masalah terakhir',
     'status.metrics.noData': 'Belum ada metrik',
     'status.metrics.justNow': 'baru saja',
     'status.metrics.minutesAgo': '{count} mnt lalu',
@@ -1404,14 +1368,13 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.tokens': 'Token',
     'chart.cacheRw': '缓存 R/W',
     'chart.totalRequests': '总请求',
-    'chart.successRate': '成功率',
+    'chart.successRate': '可用率',
     'chart.inputTokens': '输入 Token',
     'chart.outputTokens': '输出 Token',
-    'chart.success': '成功',
     'chart.input': '输入',
     'chart.output': '输出',
     'chart.requestUnit': '请求',
-    'chart.failed': '失败',
+    'chart.issueCount': '异常',
     'chart.total': '合计',
     'chart.collapse': '收起',
     'chart.noModelRequestsInRange': '选定时间范围内没有模型请求记录',
@@ -1421,26 +1384,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.keyHistoryLoadFailed': '获取 Key 历史数据失败',
     'chart.noRequestsInRange': '选定时间范围内没有请求记录',
     'chart.noKeyUsageInRange': '选定时间范围内没有 Key 使用记录',
-    'status.active': '活跃',
-    'status.healthy': '健康',
-    'status.suspended': '熔断',
-    'status.breakerOpen': '自动熔断',
-    'status.breakerHalfOpen': '半开探测',
+    'status.normal': '正常',
+    'status.tripped': '熔断',
     'status.disabled': '禁用',
     'status.error': '错误',
     'status.unknown': '未知',
-    'status.circuit.closed': '关闭',
-    'status.circuit.open': '打开',
-    'status.circuit.half_open': '半开',
     'status.metrics.requests': '请求数',
-    'status.metrics.successRate': '成功率',
-    'status.metrics.consecutiveFailures': '连续失败',
-    'status.metrics.circuitState': '熔断状态',
-    'status.metrics.breakerFailureRate': '熔断失败率',
-    'status.metrics.halfOpenSuccesses': '半开成功次数',
-    'status.metrics.nextRetry': '下次探测',
-    'status.metrics.lastSuccess': '最后成功',
-    'status.metrics.lastFailure': '最后失败',
+    'status.metrics.successRate': '可用率',
+    'status.metrics.lastSuccess': '最近成功',
+    'status.metrics.lastFailure': '最近异常',
     'status.metrics.noData': '暂无指标数据',
     'status.metrics.justNow': '刚刚',
     'status.metrics.minutesAgo': '{count} 分钟前',

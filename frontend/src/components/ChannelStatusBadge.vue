@@ -13,11 +13,6 @@
           <div class="text-caption">
             <div>{{ t('status.metrics.requests') }}: {{ metrics.requestCount }}</div>
             <div>{{ t('status.metrics.successRate') }}: {{ metrics.successRate?.toFixed(1) || 0 }}%</div>
-            <div>{{ t('status.metrics.consecutiveFailures') }}: {{ metrics.consecutiveFailures }}</div>
-            <div v-if="metrics.circuitState">{{ t('status.metrics.circuitState') }}: {{ t(`status.circuit.${metrics.circuitState}` as Parameters<typeof t>[0]) }}</div>
-            <div v-if="metrics.breakerFailureRate !== undefined">{{ t('status.metrics.breakerFailureRate') }}: {{ metrics.breakerFailureRate?.toFixed(1) || 0 }}%</div>
-            <div v-if="metrics.halfOpenSuccesses">{{ t('status.metrics.halfOpenSuccesses') }}: {{ metrics.halfOpenSuccesses }}</div>
-            <div v-if="metrics.nextRetryAt">{{ t('status.metrics.nextRetry') }}: {{ formatTime(metrics.nextRetryAt) }}</div>
             <div v-if="metrics.lastSuccessAt">{{ t('status.metrics.lastSuccess') }}: {{ formatTime(metrics.lastSuccessAt) }}</div>
             <div v-if="metrics.lastFailureAt">{{ t('status.metrics.lastFailure') }}: {{ formatTime(metrics.lastFailureAt) }}</div>
           </div>
@@ -33,6 +28,8 @@ import { computed } from 'vue'
 import type { ChannelStatus, ChannelMetrics } from '../services/api'
 import { useI18n } from '../i18n'
 
+type DisplayStatus = 'normal' | 'tripped' | 'disabled' | 'error' | 'unknown'
+
 const props = withDefaults(defineProps<{
   status: ChannelStatus | 'healthy' | 'error' | 'unknown'
   metrics?: ChannelMetrics
@@ -45,51 +42,33 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 
-const effectiveStatus = computed(() => {
+const effectiveStatus = computed<DisplayStatus>(() => {
   if (props.status === 'disabled') return 'disabled'
-  if (props.status === 'suspended') return 'suspended'
-  if (props.metrics?.circuitState === 'open') return 'breaker-open'
-  if (props.metrics?.circuitState === 'half_open') return 'breaker-half-open'
-  return props.status
+  if (props.status === 'suspended' || props.metrics?.circuitState === 'open') return 'tripped'
+  if (props.status === 'error') return 'error'
+  if (props.status === 'unknown') return 'unknown'
+  return 'normal'
 })
 
 // 状态配置映射
-const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string; class: string }> = {
-  active: {
+const STATUS_CONFIG: Record<DisplayStatus, { icon: string; color: string; label: string; class: string }> = {
+  normal: {
     icon: 'mdi-check-circle',
     color: 'success',
-    label: 'status.active',
-    class: 'status-active'
+    label: 'status.normal',
+    class: 'status-normal'
   },
-  healthy: {
-    icon: 'mdi-check-circle',
-    color: 'success',
-    label: 'status.healthy',
-    class: 'status-active'
-  },
-  suspended: {
-    icon: 'mdi-pause-circle',
-    color: 'warning',
-    label: 'status.suspended',
-    class: 'status-suspended'
+  tripped: {
+    icon: 'mdi-alert-octagon',
+    color: 'error',
+    label: 'status.tripped',
+    class: 'status-tripped'
   },
   disabled: {
     icon: 'mdi-close-circle',
     color: 'error',
     label: 'status.disabled',
     class: 'status-disabled'
-  },
-  'breaker-open': {
-    icon: 'mdi-alert-octagon',
-    color: 'error',
-    label: 'status.breakerOpen',
-    class: 'status-breaker-open'
-  },
-  'breaker-half-open': {
-    icon: 'mdi-progress-clock',
-    color: 'info',
-    label: 'status.breakerHalfOpen',
-    class: 'status-breaker-half-open'
   },
   error: {
     icon: 'mdi-alert-circle',
@@ -194,24 +173,24 @@ const formatTime = (dateStr: string): string => {
 }
 
 /* 状态样式 - 高对比度实心边框 */
-.status-active .badge-content {
+.status-normal .badge-content {
   background: var(--ccx-status-active-bg);
   color: var(--ccx-status-active-fg);
   border-color: var(--ccx-status-active-fg);
 }
 
-.status-active .badge-content .status-icon {
+.status-normal .badge-content .status-icon {
   color: var(--ccx-status-active-fg) !important;
 }
 
-.status-suspended .badge-content {
+.status-tripped .badge-content {
   background: var(--ccx-status-suspended-bg);
   color: var(--ccx-status-suspended-fg);
   border-color: var(--ccx-status-suspended-fg);
-  animation: pixel-blink 1.5s step-end infinite;
+  animation: pixel-blink 1.2s step-end infinite;
 }
 
-.status-suspended .badge-content .status-icon {
+.status-tripped .badge-content .status-icon {
   color: var(--ccx-status-suspended-fg) !important;
 }
 
@@ -223,27 +202,6 @@ const formatTime = (dateStr: string): string => {
 
 .status-disabled .badge-content .status-icon {
   color: var(--ccx-status-disabled-fg) !important;
-}
-
-.status-breaker-open .badge-content {
-  background: var(--ccx-status-breaker-open-bg);
-  color: var(--ccx-status-breaker-open-fg);
-  border-color: var(--ccx-status-breaker-open-fg);
-  animation: pixel-blink 1.2s step-end infinite;
-}
-
-.status-breaker-open .badge-content .status-icon {
-  color: var(--ccx-status-breaker-open-fg) !important;
-}
-
-.status-breaker-half-open .badge-content {
-  background: var(--ccx-status-breaker-half-open-bg);
-  color: var(--ccx-status-breaker-half-open-fg);
-  border-color: var(--ccx-status-breaker-half-open-fg);
-}
-
-.status-breaker-half-open .badge-content .status-icon {
-  color: var(--ccx-status-breaker-half-open-fg) !important;
 }
 
 .status-error .badge-content {
@@ -286,13 +244,12 @@ const formatTime = (dateStr: string): string => {
     position: relative;
   }
 
-  /* 活跃状态 - 绿色像素点 */
-  .status-active .badge-content .v-icon {
+  .status-normal .badge-content .v-icon {
     background: var(--ccx-status-active-dot-bg);
     border: 2px solid var(--ccx-status-active-dot-border);
   }
 
-  .status-active .badge-content .v-icon::after {
+  .status-normal .badge-content .v-icon::after {
     content: '';
     position: absolute;
     top: -3px;
@@ -303,13 +260,13 @@ const formatTime = (dateStr: string): string => {
     animation: pixel-pulse 1s step-end infinite;
   }
 
-  /* 暂停状态 - 橙色像素点 */
-  .status-suspended .badge-content .v-icon {
+  /* 熔断状态 - 橙色像素点 */
+  .status-tripped .badge-content .v-icon {
     background: var(--ccx-status-suspended-dot-bg);
     border: 2px solid var(--ccx-status-suspended-dot-border);
   }
 
-  .status-suspended .badge-content .v-icon::after {
+  .status-tripped .badge-content .v-icon::after {
     content: '';
     position: absolute;
     top: -3px;
@@ -318,40 +275,6 @@ const formatTime = (dateStr: string): string => {
     height: 14px;
     background: var(--ccx-status-suspended-dot-glow);
     animation: pixel-pulse 0.75s step-end infinite;
-  }
-
-  /* 自动熔断状态 - 红色像素点 */
-  .status-breaker-open .badge-content .v-icon {
-    background: var(--ccx-status-breaker-open-dot-bg);
-    border: 2px solid var(--ccx-status-breaker-open-dot-border);
-  }
-
-  .status-breaker-open .badge-content .v-icon::after {
-    content: '';
-    position: absolute;
-    top: -3px;
-    left: -3px;
-    width: 14px;
-    height: 14px;
-    background: var(--ccx-status-breaker-open-dot-glow);
-    animation: pixel-pulse 0.75s step-end infinite;
-  }
-
-  /* half-open 状态 - 蓝色像素点 */
-  .status-breaker-half-open .badge-content .v-icon {
-    background: var(--ccx-status-breaker-half-open-dot-bg);
-    border: 2px solid var(--ccx-status-breaker-half-open-dot-border);
-  }
-
-  .status-breaker-half-open .badge-content .v-icon::after {
-    content: '';
-    position: absolute;
-    top: -3px;
-    left: -3px;
-    width: 14px;
-    height: 14px;
-    background: var(--ccx-status-breaker-half-open-dot-glow);
-    animation: pixel-pulse 0.85s step-end infinite;
   }
 
   /* 禁用状态 - 灰色像素点 */
