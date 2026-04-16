@@ -1,3 +1,13 @@
+## [Unreleased]
+
+### Changed
+
+- **统一渠道状态视觉主题并突出 breaker 状态** - 将状态徽章与渠道行的颜色/阴影抽取为全局 CSS 变量，统一明暗主题与移动端像素点样式，并让渠道编排列表对 breaker open / half-open 展示独立高亮状态
+
+### Fixed
+
+- **补齐 Responses 缓存命中 token 映射兼容** - 当上游 `usage` 未返回 `cache_read_input_tokens` 时，改为从 `input_tokens_details.cached_tokens` 回填 Claude Usage 的缓存读取 token，覆盖非流式与 SSE 流式响应，并补充对应回归测试
+
 ## [v2.6.62] - 2026-04-16
 
 ### Fixed

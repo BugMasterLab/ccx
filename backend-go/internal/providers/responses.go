@@ -428,6 +428,8 @@ func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.Provider
 		}
 		if cacheRead, ok := usageRaw["cache_read_input_tokens"].(float64); ok {
 			claudeResp.Usage.CacheReadInputTokens = int(cacheRead)
+		} else {
+			claudeResp.Usage.CacheReadInputTokens = extractResponsesCacheReadTokens(usageRaw)
 		}
 		if cacheCreation5m, ok := usageRaw["cache_creation_5m_input_tokens"].(float64); ok {
 			claudeResp.Usage.CacheCreation5mInputTokens = int(cacheCreation5m)
@@ -621,6 +623,8 @@ func (p *ResponsesProvider) HandleStreamResponse(body io.ReadCloser) (<-chan str
 				}
 				if v, ok := usage["cache_read_input_tokens"].(float64); ok {
 					latestCacheReadTokens = int(v)
+				} else {
+					latestCacheReadTokens = extractResponsesCacheReadTokens(usage)
 				}
 				if v, ok := usage["cache_creation_5m_input_tokens"].(float64); ok {
 					latestCacheCreation5mTokens = int(v)
@@ -676,6 +680,20 @@ func (p *ResponsesProvider) HandleStreamResponse(body io.ReadCloser) (<-chan str
 	}()
 
 	return eventChan, errChan, nil
+}
+
+func extractResponsesCacheReadTokens(usage map[string]interface{}) int {
+	if cacheRead, ok := usage["cache_read_input_tokens"].(float64); ok {
+		return int(cacheRead)
+	}
+	inputDetails, ok := usage["input_tokens_details"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	if cachedTokens, ok := inputDetails["cached_tokens"].(float64); ok {
+		return int(cachedTokens)
+	}
+	return 0
 }
 
 func toString(v interface{}) string {

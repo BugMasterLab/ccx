@@ -56,7 +56,7 @@
           <div v-show="matchesSearch(element)" class="channel-item-wrapper">
             <div
               class="channel-row"
-              :class="{ 'is-suspended': element.status === 'suspended' }"
+              :class="getChannelRowClass(element)"
               @click="toggleChannelChart(element.index)"
             >
               <!-- SVG activity waveform bar chart background -->
@@ -1338,6 +1338,16 @@ const isAutoTripped = (channel: Channel): boolean => {
   return channelMetrics?.circuitState === 'open' || channelMetrics?.circuitState === 'half_open'
 }
 
+const getChannelRowClass = (channel: Channel) => {
+  const channelMetrics = getChannelMetrics(channel.index)
+
+  return {
+    'is-suspended': channel.status === 'suspended',
+    'is-breaker-open': channelMetrics?.circuitState === 'open',
+    'is-breaker-half-open': channelMetrics?.circuitState === 'half_open'
+  }
+}
+
 // Resume channel (reset metrics and set it to active)
 const resumeChannel = async (channelId: number) => {
   try {
@@ -1542,23 +1552,65 @@ defineExpose({
   border-color: rgba(255, 255, 255, 0.7);
 }
 
-/* Visual distinction for suspended status */
+/* Visual distinction for suspended and breaker states */
 .channel-row.is-suspended {
-  background: rgba(var(--v-theme-warning), 0.1);
-  border-color: rgb(var(--v-theme-warning));
-  box-shadow: 4px 4px 0 0 rgb(var(--v-theme-on-surface));
+  background: var(--ccx-channel-row-suspended-bg);
+  border-color: var(--ccx-channel-row-suspended-border);
+  box-shadow: var(--ccx-channel-row-shadow);
 }
 .channel-row.is-suspended:hover {
-  background: rgba(var(--v-theme-warning), 0.15);
-  box-shadow: 6px 6px 0 0 rgb(var(--v-theme-on-surface));
+  background: var(--ccx-channel-row-suspended-hover-bg);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
+}
+
+.channel-row.is-breaker-open {
+  background: var(--ccx-channel-row-breaker-open-bg);
+  border-color: var(--ccx-channel-row-breaker-open-border);
+  box-shadow: var(--ccx-channel-row-shadow);
+}
+.channel-row.is-breaker-open:hover {
+  background: var(--ccx-channel-row-breaker-open-hover-bg);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
+}
+
+.channel-row.is-breaker-half-open {
+  background: var(--ccx-channel-row-breaker-half-open-bg);
+  border-color: var(--ccx-channel-row-breaker-half-open-border);
+  box-shadow: var(--ccx-channel-row-shadow);
+}
+.channel-row.is-breaker-half-open:hover {
+  background: var(--ccx-channel-row-breaker-half-open-hover-bg);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
 }
 
 .v-theme--dark .channel-row.is-suspended {
-  box-shadow: 4px 4px 0 0 rgba(255, 255, 255, 0.7);
+  box-shadow: var(--ccx-channel-row-shadow);
 }
 
 .v-theme--dark .channel-row.is-suspended:hover {
-  box-shadow: 6px 6px 0 0 rgba(255, 255, 255, 0.7);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
+}
+
+.v-theme--dark .channel-row.is-breaker-open {
+  background: var(--ccx-channel-row-breaker-open-bg);
+  border-color: var(--ccx-channel-row-breaker-open-border);
+  box-shadow: var(--ccx-channel-row-shadow);
+}
+
+.v-theme--dark .channel-row.is-breaker-open:hover {
+  background: var(--ccx-channel-row-breaker-open-hover-bg);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
+}
+
+.v-theme--dark .channel-row.is-breaker-half-open {
+  background: var(--ccx-channel-row-breaker-half-open-bg);
+  border-color: var(--ccx-channel-row-breaker-half-open-border);
+  box-shadow: var(--ccx-channel-row-shadow);
+}
+
+.v-theme--dark .channel-row.is-breaker-half-open:hover {
+  background: var(--ccx-channel-row-breaker-half-open-hover-bg);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
 }
 
 .channel-row.ghost {

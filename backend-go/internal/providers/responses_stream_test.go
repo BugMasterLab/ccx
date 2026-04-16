@@ -108,12 +108,12 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 	}
 }
 
-func TestResponsesProvider_HandleStreamResponse_PropagatesCacheUsage(t *testing.T) {
+func TestResponsesProvider_HandleStreamResponse_PropagatesCacheUsageFromInputTokensDetails(t *testing.T) {
 	body := `event: response.output_text.delta
 data: {"type":"response.output_text.delta","delta":"hello"}
 
 event: response.completed
-data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":10,"output_tokens":5,"cache_creation_input_tokens":3,"cache_read_input_tokens":7,"cache_creation_5m_input_tokens":2,"cache_creation_1h_input_tokens":1,"cache_ttl":"mixed"}}}
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":10,"output_tokens":5,"input_tokens_details":{"cached_tokens":7},"cache_creation_5m_input_tokens":2,"cache_ttl":"5m"}}}
 
 `
 
@@ -136,19 +136,13 @@ data: {"type":"response.completed","response":{"status":"completed","usage":{"in
 	if int(usage["input_tokens"].(float64)) != 10 || int(usage["output_tokens"].(float64)) != 5 {
 		t.Fatalf("basic usage mismatch: %#v", usage)
 	}
-	if int(usage["cache_creation_input_tokens"].(float64)) != 3 {
-		t.Fatalf("cache_creation_input_tokens mismatch: %#v", usage)
-	}
 	if int(usage["cache_read_input_tokens"].(float64)) != 7 {
 		t.Fatalf("cache_read_input_tokens mismatch: %#v", usage)
 	}
 	if int(usage["cache_creation_5m_input_tokens"].(float64)) != 2 {
 		t.Fatalf("cache_creation_5m_input_tokens mismatch: %#v", usage)
 	}
-	if int(usage["cache_creation_1h_input_tokens"].(float64)) != 1 {
-		t.Fatalf("cache_creation_1h_input_tokens mismatch: %#v", usage)
-	}
-	if usage["cache_ttl"] != "mixed" {
+	if usage["cache_ttl"] != "5m" {
 		t.Fatalf("cache_ttl mismatch: %#v", usage)
 	}
 }

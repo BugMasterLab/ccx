@@ -381,6 +381,41 @@ func TestResponsesProvider_ConvertToClaudeResponse(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_ConvertToClaudeResponse_UsesInputTokensDetailsCachedTokens(t *testing.T) {
+	provider := &ResponsesProvider{}
+	providerResp := &types.ProviderResponse{
+		StatusCode: http.StatusOK,
+		Headers:    map[string][]string{"Content-Type": {"application/json"}},
+		Body: []byte(`{
+			"id":"resp_124",
+			"status":"completed",
+			"output":[
+				{"type":"message","content":[{"type":"output_text","text":"hello world"}]}
+			],
+			"usage":{
+				"input_tokens":12,
+				"output_tokens":34,
+				"input_tokens_details":{"cached_tokens":7},
+				"cache_creation_5m_input_tokens":3,
+				"cache_ttl":"5m"
+			}
+		}`),
+	}
+
+	claudeResp, err := provider.ConvertToClaudeResponse(providerResp)
+	if err != nil {
+		t.Fatalf("ConvertToClaudeResponse() err = %v", err)
+	}
+	if claudeResp.Usage == nil ||
+		claudeResp.Usage.InputTokens != 12 ||
+		claudeResp.Usage.OutputTokens != 34 ||
+		claudeResp.Usage.CacheReadInputTokens != 7 ||
+		claudeResp.Usage.CacheCreation5mInputTokens != 3 ||
+		claudeResp.Usage.CacheTTL != "5m" {
+		t.Fatalf("usage = %#v, want cached_tokens mapped to cache_read_input_tokens", claudeResp.Usage)
+	}
+}
+
 func TestResponsesProvider_ConvertToClaudeResponse_StripsEmptyReadPages(t *testing.T) {
 	provider := &ResponsesProvider{}
 	providerResp := &types.ProviderResponse{

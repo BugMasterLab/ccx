@@ -195,145 +195,75 @@ const formatTime = (dateStr: string): string => {
 
 /* 状态样式 - 高对比度实心边框 */
 .status-active .badge-content {
-  background: #bbf7d0;
-  color: #166534;
-  border-color: #166534;
+  background: var(--ccx-status-active-bg);
+  color: var(--ccx-status-active-fg);
+  border-color: var(--ccx-status-active-fg);
 }
 
 .status-active .badge-content .status-icon {
-  color: #166534 !important;
-}
-
-.v-theme--dark .status-active .badge-content {
-  background: #166534;
-  color: #bbf7d0;
-  border-color: #bbf7d0;
-}
-
-.v-theme--dark .status-active .badge-content .status-icon {
-  color: #bbf7d0 !important;
+  color: var(--ccx-status-active-fg) !important;
 }
 
 .status-suspended .badge-content {
-  background: #fef3c7;
-  color: #92400e;
-  border-color: #92400e;
+  background: var(--ccx-status-suspended-bg);
+  color: var(--ccx-status-suspended-fg);
+  border-color: var(--ccx-status-suspended-fg);
   animation: pixel-blink 1.5s step-end infinite;
 }
 
 .status-suspended .badge-content .status-icon {
-  color: #92400e !important;
-}
-
-.v-theme--dark .status-suspended .badge-content {
-  background: #92400e;
-  color: #fef3c7;
-  border-color: #fef3c7;
-}
-
-.v-theme--dark .status-suspended .badge-content .status-icon {
-  color: #fef3c7 !important;
+  color: var(--ccx-status-suspended-fg) !important;
 }
 
 .status-disabled .badge-content {
-  background: #e5e7eb;
-  color: #6b7280;
-  border-color: #6b7280;
+  background: var(--ccx-status-disabled-bg);
+  color: var(--ccx-status-disabled-fg);
+  border-color: var(--ccx-status-disabled-fg);
 }
 
 .status-disabled .badge-content .status-icon {
-  color: #6b7280 !important;
-}
-
-.v-theme--dark .status-disabled .badge-content {
-  background: #374151;
-  color: #9ca3af;
-  border-color: #9ca3af;
-}
-
-.v-theme--dark .status-disabled .badge-content .status-icon {
-  color: #9ca3af !important;
+  color: var(--ccx-status-disabled-fg) !important;
 }
 
 .status-breaker-open .badge-content {
-  background: #fecaca;
-  color: #991b1b;
-  border-color: #991b1b;
+  background: var(--ccx-status-breaker-open-bg);
+  color: var(--ccx-status-breaker-open-fg);
+  border-color: var(--ccx-status-breaker-open-fg);
   animation: pixel-blink 1.2s step-end infinite;
 }
 
 .status-breaker-open .badge-content .status-icon {
-  color: #991b1b !important;
-}
-
-.v-theme--dark .status-breaker-open .badge-content {
-  background: #7f1d1d;
-  color: #fecaca;
-  border-color: #fecaca;
-}
-
-.v-theme--dark .status-breaker-open .badge-content .status-icon {
-  color: #fecaca !important;
+  color: var(--ccx-status-breaker-open-fg) !important;
 }
 
 .status-breaker-half-open .badge-content {
-  background: #dbeafe;
-  color: #1d4ed8;
-  border-color: #1d4ed8;
+  background: var(--ccx-status-breaker-half-open-bg);
+  color: var(--ccx-status-breaker-half-open-fg);
+  border-color: var(--ccx-status-breaker-half-open-fg);
 }
 
 .status-breaker-half-open .badge-content .status-icon {
-  color: #1d4ed8 !important;
-}
-
-.v-theme--dark .status-breaker-half-open .badge-content {
-  background: #1e3a8a;
-  color: #dbeafe;
-  border-color: #dbeafe;
-}
-
-.v-theme--dark .status-breaker-half-open .badge-content .status-icon {
-  color: #dbeafe !important;
+  color: var(--ccx-status-breaker-half-open-fg) !important;
 }
 
 .status-error .badge-content {
-  background: #fecaca;
-  color: #991b1b;
-  border-color: #991b1b;
+  background: var(--ccx-status-error-bg);
+  color: var(--ccx-status-error-fg);
+  border-color: var(--ccx-status-error-fg);
 }
 
 .status-error .badge-content .status-icon {
-  color: #991b1b !important;
-}
-
-.v-theme--dark .status-error .badge-content {
-  background: #991b1b;
-  color: #fecaca;
-  border-color: #fecaca;
-}
-
-.v-theme--dark .status-error .badge-content .status-icon {
-  color: #fecaca !important;
+  color: var(--ccx-status-error-fg) !important;
 }
 
 .status-unknown .badge-content {
-  background: #e5e7eb;
-  color: #6b7280;
-  border-color: #6b7280;
+  background: var(--ccx-status-unknown-bg);
+  color: var(--ccx-status-unknown-fg);
+  border-color: var(--ccx-status-unknown-fg);
 }
 
 .status-unknown .badge-content .status-icon {
-  color: #6b7280 !important;
-}
-
-.v-theme--dark .status-unknown .badge-content {
-  background: #374151;
-  color: #9ca3af;
-  border-color: #9ca3af;
-}
-
-.v-theme--dark .status-unknown .badge-content .status-icon {
-  color: #9ca3af !important;
+  color: var(--ccx-status-unknown-fg) !important;
 }
 
 /* 手机端隐藏状态文字，改为像素点样式 */
@@ -358,8 +288,8 @@ const formatTime = (dateStr: string): string => {
 
   /* 活跃状态 - 绿色像素点 */
   .status-active .badge-content .v-icon {
-    background: #10b981;
-    border: 2px solid #065f46;
+    background: var(--ccx-status-active-dot-bg);
+    border: 2px solid var(--ccx-status-active-dot-border);
   }
 
   .status-active .badge-content .v-icon::after {
@@ -369,14 +299,14 @@ const formatTime = (dateStr: string): string => {
     left: -3px;
     width: 14px;
     height: 14px;
-    background: rgba(16, 185, 129, 0.3);
+    background: var(--ccx-status-active-dot-glow);
     animation: pixel-pulse 1s step-end infinite;
   }
 
-  /* 熔断状态 - 橙色像素点 */
+  /* 暂停状态 - 橙色像素点 */
   .status-suspended .badge-content .v-icon {
-    background: #f59e0b;
-    border: 2px solid #92400e;
+    background: var(--ccx-status-suspended-dot-bg);
+    border: 2px solid var(--ccx-status-suspended-dot-border);
   }
 
   .status-suspended .badge-content .v-icon::after {
@@ -386,15 +316,49 @@ const formatTime = (dateStr: string): string => {
     left: -3px;
     width: 14px;
     height: 14px;
-    background: rgba(245, 158, 11, 0.3);
+    background: var(--ccx-status-suspended-dot-glow);
     animation: pixel-pulse 0.75s step-end infinite;
+  }
+
+  /* 自动熔断状态 - 红色像素点 */
+  .status-breaker-open .badge-content .v-icon {
+    background: var(--ccx-status-breaker-open-dot-bg);
+    border: 2px solid var(--ccx-status-breaker-open-dot-border);
+  }
+
+  .status-breaker-open .badge-content .v-icon::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    left: -3px;
+    width: 14px;
+    height: 14px;
+    background: var(--ccx-status-breaker-open-dot-glow);
+    animation: pixel-pulse 0.75s step-end infinite;
+  }
+
+  /* half-open 状态 - 蓝色像素点 */
+  .status-breaker-half-open .badge-content .v-icon {
+    background: var(--ccx-status-breaker-half-open-dot-bg);
+    border: 2px solid var(--ccx-status-breaker-half-open-dot-border);
+  }
+
+  .status-breaker-half-open .badge-content .v-icon::after {
+    content: '';
+    position: absolute;
+    top: -3px;
+    left: -3px;
+    width: 14px;
+    height: 14px;
+    background: var(--ccx-status-breaker-half-open-dot-glow);
+    animation: pixel-pulse 0.85s step-end infinite;
   }
 
   /* 禁用状态 - 灰色像素点 */
   .status-disabled .badge-content .v-icon,
   .status-unknown .badge-content .v-icon {
-    background: #94a3b8;
-    border: 2px solid #475569;
+    background: var(--ccx-status-disabled-dot-bg);
+    border: 2px solid var(--ccx-status-disabled-dot-border);
   }
 
   @keyframes pixel-pulse {
