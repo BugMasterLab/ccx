@@ -508,6 +508,33 @@ func TestShouldRetryWithNextKey(t *testing.T) {
 	}
 }
 
+func TestIsInsufficientBalanceMessage_HighConfidenceVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{name: "english insufficient credits", msg: "You have insufficient credits remaining", want: true},
+		{name: "english out of credits", msg: "This account is out of credits", want: true},
+		{name: "english no balance", msg: "no balance", want: true},
+		{name: "english insufficient funds", msg: "payment declined: insufficient funds", want: true},
+		{name: "english quota used up", msg: "quota used up for current billing period", want: true},
+		{name: "chinese balance exhausted", msg: "账户余额已用尽，请充值", want: true},
+		{name: "chinese quota used up", msg: "账户额度已用完", want: true},
+		{name: "chinese quota exhausted", msg: "当前额度耗尽", want: true},
+		{name: "negative billing setup", msg: "billing not enabled for this account", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isInsufficientBalanceMessage(tt.msg)
+			if got != tt.want {
+				t.Fatalf("isInsufficientBalanceMessage(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -603,6 +630,16 @@ func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
 				ShouldBlacklist: true,
 				Reason:          "insufficient_balance",
 				Message:         "该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]",
+			},
+		},
+		{
+			name:       "401 out of credits message should blacklist as insufficient balance",
+			statusCode: 401,
+			body:       `{"error":{"message":"This account is out of credits"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "This account is out of credits",
 			},
 		},
 		{

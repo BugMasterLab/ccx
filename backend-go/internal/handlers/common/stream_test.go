@@ -622,6 +622,15 @@ data: {"type":"error","error":{"type":"new_api_error","message":"该令牌额度
 			wantMessage: "该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]",
 		},
 		{
+			name: "401 top level balance exhausted message",
+			event: `event: error
+data: {"type":"error","message":"账户余额已用尽，请充值"}
+
+`,
+			wantReason:  "insufficient_balance",
+			wantMessage: "账户余额已用尽，请充值",
+		},
+		{
 			name: "string error field invalid api key",
 			event: `event: error
 data: {"type":"error","error":"无效的API Key"}
