@@ -602,8 +602,8 @@ func ShouldBlacklistKey(statusCode int, bodyBytes []byte) BlacklistResult {
 		}
 	}
 
-	// 某些上游会返回 HTTP 403/429，但在 message 中携带明确的余额不足语义
-	if (statusCode == 403 || statusCode == 429) && isInsufficientBalanceMessage(errMessage) {
+	// 某些上游会返回 HTTP 401/403/429，但在 message 中携带明确的余额不足语义
+	if (statusCode == 401 || statusCode == 403 || statusCode == 429) && isInsufficientBalanceMessage(errMessage) {
 		return BlacklistResult{
 			ShouldBlacklist: true,
 			Reason:          "insufficient_balance",
@@ -626,8 +626,11 @@ func isInsufficientBalanceMessage(msg string) bool {
 		"insufficient quota",
 		"balance too low",
 		"quota exhausted",
+		"tokenstatusexhausted",
 		"余额不足",
 		"额度不足",
+		"额度已用尽",
+		"令牌额度已用尽",
 		"预扣费额度失败",
 		"需要预扣费额度",
 	}

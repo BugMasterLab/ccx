@@ -613,6 +613,15 @@ data: {"type":"error","message":"API Key额度不足，请访问https://right.co
 			wantMessage: "API Key额度不足，请访问https://right.codes查看详情",
 		},
 		{
+			name: "401 nested token status exhausted balance",
+			event: `event: error
+data: {"type":"error","error":{"type":"new_api_error","message":"该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]"}}
+
+`,
+			wantReason:  "insufficient_balance",
+			wantMessage: "该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]",
+		},
+		{
 			name: "string error field invalid api key",
 			event: `event: error
 data: {"type":"error","error":"无效的API Key"}

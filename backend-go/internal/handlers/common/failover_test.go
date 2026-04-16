@@ -596,6 +596,16 @@ func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
 			},
 		},
 		{
+			name:       "401 token status exhausted message should blacklist as insufficient balance",
+			statusCode: 401,
+			body:       `{"error":{"code":"","message":"该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]",
+			},
+		},
+		{
 			name:       "403 billing not enabled should not be misclassified as balance",
 			statusCode: 403,
 			body:       `{"error":{"message":"billing not enabled for this account"}}`,
