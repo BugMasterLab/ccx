@@ -20,11 +20,43 @@ func RecordChannelLog(
 	apiKey, baseURL, errorInfo, interfaceType string,
 	isRetry bool,
 ) {
+	RecordChannelLogWithSource(
+		channelLogStore,
+		channelIndex,
+		model,
+		originalModel,
+		statusCode,
+		durationMs,
+		success,
+		apiKey,
+		baseURL,
+		errorInfo,
+		interfaceType,
+		isRetry,
+		metrics.RequestSourceProxy,
+	)
+}
+
+// RecordChannelLogWithSource 记录带来源标识的渠道尝试日志。
+func RecordChannelLogWithSource(
+	channelLogStore *metrics.ChannelLogStore,
+	channelIndex int,
+	model, originalModel string,
+	statusCode int,
+	durationMs int64,
+	success bool,
+	apiKey, baseURL, errorInfo, interfaceType string,
+	isRetry bool,
+	requestSource string,
+) {
 	if channelLogStore == nil {
 		return
 	}
 	if len(errorInfo) > 200 {
 		errorInfo = errorInfo[:200]
+	}
+	if requestSource == "" {
+		requestSource = metrics.RequestSourceProxy
 	}
 
 	channelLogStore.Record(channelIndex, &metrics.ChannelLog{
@@ -39,5 +71,6 @@ func RecordChannelLog(
 		ErrorInfo:     errorInfo,
 		IsRetry:       isRetry,
 		InterfaceType: interfaceType,
+		RequestSource: requestSource,
 	})
 }

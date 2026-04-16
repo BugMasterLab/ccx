@@ -269,6 +269,7 @@ export type MessageKey =
   | 'channelLogs.autoRefreshing'
   | 'channelLogs.empty'
   | 'channelLogs.retry'
+  | 'channelLogs.sourceCapabilityTest'
   | 'store.channel.updated'
   | 'store.channel.added'
   | 'store.channel.deleted'
@@ -630,6 +631,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.autoRefreshing': 'Auto refreshing',
     'channelLogs.empty': 'No logs yet',
     'channelLogs.retry': 'Retry',
+    'channelLogs.sourceCapabilityTest': 'Capability Test',
     'store.channel.updated': 'Channel updated successfully',
     'store.channel.added': 'Channel added successfully',
     'store.channel.deleted': 'Channel deleted successfully',
@@ -990,6 +992,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.autoRefreshing': 'Sedang auto refresh',
     'channelLogs.empty': 'Belum ada log',
     'channelLogs.retry': 'Retry',
+    'channelLogs.sourceCapabilityTest': 'Tes Kemampuan',
     'store.channel.updated': 'Channel berhasil diperbarui',
     'store.channel.added': 'Channel berhasil ditambahkan',
     'store.channel.deleted': 'Channel berhasil dihapus',
@@ -1350,6 +1353,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.autoRefreshing': '自动刷新中',
     'channelLogs.empty': '暂无日志记录',
     'channelLogs.retry': '重试',
+    'channelLogs.sourceCapabilityTest': '能力测试',
     'store.channel.updated': '渠道更新成功',
     'store.channel.added': '渠道添加成功',
     'store.channel.deleted': '渠道删除成功',

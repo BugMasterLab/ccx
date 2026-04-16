@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/metrics"
 	"github.com/gin-gonic/gin"
 )
 
@@ -124,7 +125,7 @@ func TestRetryCapabilityTestModel_HTTP_RejectsUnknownModel(t *testing.T) {
 	defer cfgManager.Close()
 
 	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, "messages"))
+	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
 
 	body := `{"protocol":"messages","model":"unknown"}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test/"+job.JobID+"/retry", strings.NewReader(body))
@@ -160,7 +161,7 @@ func TestRetryCapabilityTestModel_HTTP_RejectsRunningJob(t *testing.T) {
 	defer cfgManager.Close()
 
 	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, "messages"))
+	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
 
 	body := `{"protocol":"messages","model":"known"}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test/"+job.JobID+"/retry", strings.NewReader(body))
@@ -197,7 +198,7 @@ func TestRetryCapabilityTestModel_HTTP_RejectsNonRetryableModel(t *testing.T) {
 	defer cfgManager.Close()
 
 	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, "messages"))
+	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
 
 	body := `{"protocol":"messages","model":"known"}`
 	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test/"+job.JobID+"/retry", strings.NewReader(body))
@@ -207,6 +208,181 @@ func TestRetryCapabilityTestModel_HTTP_RejectsNonRetryableModel(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusConflict, w.Body.String())
+	}
+}
+
+func TestExecuteModelTest_RecordsCapabilityLogOnSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second)
+	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "claude-test", Status: CapabilityModelStatusQueued, Lifecycle: CapabilityLifecyclePending, Outcome: CapabilityOutcomeUnknown}}
+	capabilityJobs.create(job)
+
+	store := metrics.NewChannelLogStore()
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "config.json")
+	initialConfig := `{
+		"upstream": [{
+			"name": "channel",
+			"baseUrl": "REPLACE_ME",
+			"apiKeys": ["test-key"],
+			"serviceType": "claude"
+		}]
+	}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"text\":\"hello\"}}\n\n"))
+	}))
+	defer server.Close()
+
+	initialConfig = strings.Replace(initialConfig, "REPLACE_ME", server.URL, 1)
+	if err := os.WriteFile(configFile, []byte(initialConfig), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfgManager, err := config.NewConfigManager(configFile)
+	if err != nil {
+		t.Fatalf("create config manager failed: %v", err)
+	}
+	defer cfgManager.Close()
+
+	cfg := cfgManager.GetConfig()
+	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", store)
+	if !result.Success {
+		t.Fatalf("result.Success=false, want true")
+	}
+
+	logs := store.Get(0)
+	if len(logs) != 1 {
+		t.Fatalf("logs count=%d, want 1", len(logs))
+	}
+	if logs[0].RequestSource != metrics.RequestSourceCapabilityTest {
+		t.Fatalf("requestSource=%q, want %q", logs[0].RequestSource, metrics.RequestSourceCapabilityTest)
+	}
+	if !logs[0].Success {
+		t.Fatalf("success=false, want true")
+	}
+	if logs[0].InterfaceType != "messages" {
+		t.Fatalf("interfaceType=%q, want messages", logs[0].InterfaceType)
+	}
+}
+
+func TestExecuteModelTest_RecordsCapabilityLogOnFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second)
+	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "claude-test", Status: CapabilityModelStatusQueued, Lifecycle: CapabilityLifecyclePending, Outcome: CapabilityOutcomeUnknown}}
+	capabilityJobs.create(job)
+
+	store := metrics.NewChannelLogStore()
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "config.json")
+	initialConfig := `{
+		"upstream": [{
+			"name": "channel",
+			"baseUrl": "REPLACE_ME",
+			"apiKeys": ["test-key"],
+			"serviceType": "claude"
+		}]
+	}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"forbidden"}`))
+	}))
+	defer server.Close()
+
+	initialConfig = strings.Replace(initialConfig, "REPLACE_ME", server.URL, 1)
+	if err := os.WriteFile(configFile, []byte(initialConfig), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfgManager, err := config.NewConfigManager(configFile)
+	if err != nil {
+		t.Fatalf("create config manager failed: %v", err)
+	}
+	defer cfgManager.Close()
+
+	cfg := cfgManager.GetConfig()
+	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", store)
+	if result.Success {
+		t.Fatalf("result.Success=true, want false")
+	}
+
+	logs := store.Get(0)
+	if len(logs) != 1 {
+		t.Fatalf("logs count=%d, want 1", len(logs))
+	}
+	if logs[0].RequestSource != metrics.RequestSourceCapabilityTest {
+		t.Fatalf("requestSource=%q, want %q", logs[0].RequestSource, metrics.RequestSourceCapabilityTest)
+	}
+	if logs[0].Success {
+		t.Fatalf("success=true, want false")
+	}
+	if logs[0].StatusCode != http.StatusForbidden {
+		t.Fatalf("statusCode=%d, want %d", logs[0].StatusCode, http.StatusForbidden)
+	}
+	if logs[0].ErrorInfo == "" {
+		t.Fatal("errorInfo is empty, want non-empty")
+	}
+}
+
+func TestExecuteModelTest_TruncatesLargeFailureBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	job := newCapabilityTestJob(0, "channel", "messages", "claude", []string{"messages"}, 10*time.Second)
+	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "claude-test", Status: CapabilityModelStatusQueued, Lifecycle: CapabilityLifecyclePending, Outcome: CapabilityOutcomeUnknown}}
+	capabilityJobs.create(job)
+
+	store := metrics.NewChannelLogStore()
+	tmpDir := t.TempDir()
+	configFile := filepath.Join(tmpDir, "config.json")
+	initialConfig := `{
+		"upstream": [{
+			"name": "channel",
+			"baseUrl": "REPLACE_ME",
+			"apiKeys": ["test-key"],
+			"serviceType": "claude"
+		}]
+	}`
+
+	largeBody := strings.Repeat("x", 260)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(largeBody))
+	}))
+	defer server.Close()
+
+	initialConfig = strings.Replace(initialConfig, "REPLACE_ME", server.URL, 1)
+	if err := os.WriteFile(configFile, []byte(initialConfig), 0644); err != nil {
+		t.Fatalf("write config failed: %v", err)
+	}
+
+	cfgManager, err := config.NewConfigManager(configFile)
+	if err != nil {
+		t.Fatalf("create config manager failed: %v", err)
+	}
+	defer cfgManager.Close()
+
+	cfg := cfgManager.GetConfig()
+	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", store)
+	if result.Success {
+		t.Fatalf("result.Success=true, want false")
+	}
+	if result.Error == nil || len(*result.Error) != 200 {
+		t.Fatalf("result.Error len=%d, want 200", len(*result.Error))
+	}
+
+	logs := store.Get(0)
+	if len(logs) != 1 {
+		t.Fatalf("logs count=%d, want 1", len(logs))
+	}
+	if len(logs[0].ErrorInfo) != 200 {
+		t.Fatalf("log errorInfo len=%d, want 200", len(logs[0].ErrorInfo))
 	}
 }
 
@@ -251,7 +427,7 @@ func TestExecuteModelTest_RespectsAutoBlacklistBalance(t *testing.T) {
 		t.Fatalf("upstream count=%d, want 1", len(cfg.Upstream))
 	}
 
-	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key")
+	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", nil)
 	if result.Success {
 		t.Fatalf("result.Success=true, want false")
 	}

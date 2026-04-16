@@ -53,6 +53,9 @@ func TestRecordChannelLog_TruncatesAndMasks(t *testing.T) {
 	if got.InterfaceType != "Responses" {
 		t.Fatalf("interfaceType = %q, want Responses", got.InterfaceType)
 	}
+	if got.RequestSource != metrics.RequestSourceProxy {
+		t.Fatalf("requestSource = %q, want %q", got.RequestSource, metrics.RequestSourceProxy)
+	}
 	if !got.IsRetry {
 		t.Fatalf("isRetry = false, want true")
 	}
@@ -61,5 +64,33 @@ func TestRecordChannelLog_TruncatesAndMasks(t *testing.T) {
 	}
 	if got.KeyMask == "sk-test-very-secret" || got.KeyMask == "" {
 		t.Fatalf("keyMask = %q, want masked non-empty value", got.KeyMask)
+	}
+}
+
+func TestRecordChannelLogWithSource_UsesExplicitSource(t *testing.T) {
+	store := metrics.NewChannelLogStore()
+
+	RecordChannelLogWithSource(
+		store,
+		1,
+		"model-b",
+		"",
+		200,
+		45,
+		true,
+		"sk-test-another-secret",
+		"https://example.com",
+		"",
+		"Messages",
+		false,
+		metrics.RequestSourceCapabilityTest,
+	)
+
+	logs := store.Get(1)
+	if len(logs) != 1 {
+		t.Fatalf("logs count = %d, want 1", len(logs))
+	}
+	if logs[0].RequestSource != metrics.RequestSourceCapabilityTest {
+		t.Fatalf("requestSource = %q, want %q", logs[0].RequestSource, metrics.RequestSourceCapabilityTest)
 	}
 }

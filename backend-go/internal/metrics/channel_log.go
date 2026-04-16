@@ -17,10 +17,15 @@ type ChannelLog struct {
 	BaseURL       string    `json:"baseUrl"`
 	ErrorInfo     string    `json:"errorInfo"`
 	IsRetry       bool      `json:"isRetry"`
-	InterfaceType string    `json:"interfaceType"` // 接口类型（Messages/Responses/Gemini）
+	InterfaceType string    `json:"interfaceType"`           // 接口类型（Messages/Responses/Gemini）
+	RequestSource string    `json:"requestSource,omitempty"` // 请求来源（proxy/capability_test）
 }
 
-const maxChannelLogs = 50
+const (
+	RequestSourceProxy          = "proxy"
+	RequestSourceCapabilityTest = "capability_test"
+	maxChannelLogs              = 50
+)
 
 // ChannelLogStore 渠道日志存储（内存环形缓冲区）
 type ChannelLogStore struct {

@@ -39,6 +39,9 @@
                 <v-chip v-if="log.interfaceType" size="small" :color="interfaceTypeColor(log.interfaceType)" variant="tonal" class="text-uppercase">
                   {{ log.interfaceType }}
                 </v-chip>
+                <v-chip v-if="log.requestSource === 'capability_test'" size="small" color="warning" variant="tonal">
+                  {{ t('channelLogs.sourceCapabilityTest') }}
+                </v-chip>
                 <span v-if="log.originalModel" class="text-medium-emphasis log-meta">{{ log.originalModel }} →</span>
                 <span class="font-weight-medium log-model">{{ log.model }}</span>
                 <span class="text-medium-emphasis log-meta">{{ log.durationMs }}ms</span>
