@@ -58,6 +58,8 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				"disabledApiKeys":             up.DisabledAPIKeys,
 				"autoBlacklistBalance":        up.IsAutoBlacklistBalanceEnabled(),
 				"normalizeMetadataUserId":     up.IsNormalizeMetadataUserIDEnabled(),
+				"streamPassthroughEnabled":    up.IsStreamPassthroughEnabled(),
+				"failoverRules":               up.GetEffectiveFailoverRules(),
 			}
 		}
 

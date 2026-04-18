@@ -203,6 +203,13 @@ func (cm *ConfigManager) UpdateGeminiUpstream(index int, updates UpstreamUpdate)
 		v := *updates.NormalizeMetadataUserID
 		upstream.NormalizeMetadataUserID = &v
 	}
+	if updates.StreamPassthroughEnabled != nil {
+		v := *updates.StreamPassthroughEnabled
+		upstream.StreamPassthroughEnabled = &v
+	}
+	if updates.FailoverRules != nil {
+		upstream.FailoverRules = CloneFailoverRules(updates.FailoverRules)
+	}
 	if updates.InjectDummyThoughtSignature != nil {
 		upstream.InjectDummyThoughtSignature = *updates.InjectDummyThoughtSignature
 	}

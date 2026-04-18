@@ -191,6 +191,13 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		v := *u.NormalizeMetadataUserID
 		cloned.NormalizeMetadataUserID = &v
 	}
+	if u.StreamPassthroughEnabled != nil {
+		v := *u.StreamPassthroughEnabled
+		cloned.StreamPassthroughEnabled = &v
+	}
+	if len(u.FailoverRules) > 0 {
+		cloned.FailoverRules = CloneFailoverRules(u.FailoverRules)
+	}
 
 	return &cloned
 }

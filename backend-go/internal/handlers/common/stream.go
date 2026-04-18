@@ -3,6 +3,7 @@ package common
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,21 +39,34 @@ func (e *ErrBlacklistKey) Error() string {
 	return fmt.Sprintf("upstream stream error requires key blacklist: %s", e.Reason)
 }
 
-// StreamPreflightResult 流式预检测结果
-type StreamPreflightResult struct {
-	BufferedEvents   []string // 缓冲的事件（需要回放）
-	IsEmpty          bool     // 是否为空响应
-	HasError         bool     // 是否有流错误
-	Error            error    // 流错误
-	BlacklistReason  string   // 拉黑原因（非空时应拉黑 Key）
-	BlacklistMessage string   // 拉黑错误信息
-	Diagnostic       string   // 空响应诊断摘要
-	UnknownEventType string   // 首个未知 SSE data.type
+// ErrCooldownKey 上游在 SSE 流中返回了应冷却 Key 的错误（限流/临时故障）
+// Header 未发送，可安全 failover 到下一个 Key/BaseURL/渠道
+type ErrCooldownKey struct {
+	Reason   string
+	Message  string
+	Duration time.Duration
 }
 
-// PreflightStreamEvents 在发送 HTTP Header 之前预检测流式响应是否为空
-// 缓冲事件并检查实际输出内容，避免发送 200 后无法撤销
-func PreflightStreamEvents(eventChan <-chan string, errChan <-chan error) *StreamPreflightResult {
+func (e *ErrCooldownKey) Error() string {
+	return fmt.Sprintf("upstream stream error requires key cooldown: %s", e.Reason)
+}
+
+// StreamPreflightResult 流式预检结果
+type StreamPreflightResult struct {
+	BufferedEvents    []string
+	IsEmpty           bool
+	HasError          bool
+	Error             error
+	InterceptAction   string
+	InterceptReason   string
+	InterceptMessage  string
+	InterceptDuration time.Duration
+	Diagnostic        string
+	UnknownEventType  string
+}
+
+// PreflightStreamEvents 在发送 HTTP Header 之前预检流响应是否可继续
+func PreflightStreamEvents(eventChan <-chan string, errChan <-chan error, upstream *config.UpstreamConfig) *StreamPreflightResult {
 	result := &StreamPreflightResult{}
 	var textBuf bytes.Buffer
 	hasNonTextContent := false // tool_use / thinking 等非文本 content block
@@ -81,10 +95,12 @@ func PreflightStreamEvents(eventChan <-chan string, errChan <-chan error) *Strea
 			result.BufferedEvents = append(result.BufferedEvents, event)
 
 			// 检测 SSE error 事件中的拉黑条件（认证/余额错误）
-			if result.BlacklistReason == "" {
-				if reason, msg := DetectStreamBlacklistError(event); reason != "" {
-					result.BlacklistReason = reason
-					result.BlacklistMessage = msg
+			if result.InterceptAction == "" {
+				if action, reason, duration, msg := DetectStreamFailoverAction(event, upstream); action != "" {
+					result.InterceptAction = action
+					result.InterceptReason = reason
+					result.InterceptDuration = duration
+					result.InterceptMessage = msg
 				}
 			}
 
@@ -391,49 +407,6 @@ func NewStreamContext(envCfg *config.EnvConfig) *StreamContext {
 	return ctx
 }
 
-// seedSynthesizerFromRequest 将请求里预置的 assistant 文本拼接进合成器（仅用于日志可读性）
-//
-// Claude Code 的部分内部调用会在 messages 里预置一条 assistant 内容（例如 "{"），让模型只输出“续写”部分。
-// 这会导致我们仅基于 SSE delta 合成的日志缺失开头。这里用请求体做一次轻量补齐。
-func seedSynthesizerFromRequest(ctx *StreamContext, requestBody []byte) {
-	if ctx == nil || ctx.Synthesizer == nil || len(requestBody) == 0 {
-		return
-	}
-
-	var req struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content []struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			} `json:"content"`
-		} `json:"messages"`
-	}
-	if err := json.Unmarshal(requestBody, &req); err != nil {
-		return
-	}
-
-	// 只取最后一条 assistant，避免把历史上下文都拼进日志
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		msg := req.Messages[i]
-		if msg.Role != "assistant" {
-			continue
-		}
-		var b strings.Builder
-		for _, c := range msg.Content {
-			if c.Type == "text" && c.Text != "" {
-				b.WriteString(c.Text)
-			}
-		}
-		prefill := b.String()
-		// 防止把很长的预置内容刷进日志
-		if len(prefill) > 0 && len(prefill) <= 256 {
-			ctx.LogPrefillText = prefill
-		}
-		return
-	}
-}
-
 // SetupStreamHeaders 设置流式响应头
 func SetupStreamHeaders(c *gin.Context, resp *http.Response) {
 	utils.ForwardResponseHeaders(resp.Header, c.Writer)
@@ -483,6 +456,12 @@ func ProcessStreamEvents(
 
 				return nil, err
 			}
+
+		case <-c.Request.Context().Done():
+			log.Printf("[Messages-Stream] 客户端已断开，停止流处理")
+			ctx.ClientGone = true
+			go drainChannels(eventChan, errChan)
+			return nil, context.Canceled
 		}
 	}
 }
@@ -888,90 +867,109 @@ func IsClientDisconnectError(err error) bool {
 
 // HandleStreamResponse 处理流式响应（Messages API）
 //
-// 流程：provider.HandleStreamResponse → PreflightStreamEvents（预检测）
+// 流程：provider.HandleStreamResponse → PreflightStreamEvents（预检测）→ 直接透传
 //   - 空响应 → return nil, ErrEmptyStreamResponse（Header 未发送，可安全重试）
-//   - 非空   → SetupStreamHeaders → 回放缓冲事件 → ProcessStreamEvents
+//   - 拉黑错误 → return nil, ErrBlacklistKey（触发 failover + 拉黑）
+//   - 正常 → SetupStreamHeaders → 回放缓冲事件 → 透传后续事件
 func HandleStreamResponse(
 	c *gin.Context,
 	resp *http.Response,
 	provider providers.Provider,
 	envCfg *config.EnvConfig,
-	startTime time.Time,
-	upstream *config.UpstreamConfig,
 	requestBody []byte,
-	requestModel string,
+	upstream *config.UpstreamConfig,
 ) (*types.Usage, error) {
 	defer resp.Body.Close()
 
+	// 所有 serviceType 先做 preflight 检测，再按渠道配置决定是否直接透传
 	eventChan, errChan, err := provider.HandleStreamResponse(resp.Body)
 	if err != nil {
 		c.JSON(500, gin.H{"error": "Failed to handle stream response"})
 		return nil, err
 	}
-
-	// 预检测：在发送 HTTP Header 之前缓冲事件并检查是否为空响应
-	preflight := PreflightStreamEvents(eventChan, errChan)
-
-	// 流错误：排空 channel 后返回错误
+	preflight := PreflightStreamEvents(eventChan, errChan, upstream)
 	if preflight.HasError {
 		drainChannels(eventChan, errChan)
 		return nil, preflight.Error
 	}
 
-	// 空响应：Header 未发送，可安全重试
-	if preflight.IsEmpty {
-		log.Printf("[Messages-EmptyResponse] 上游返回空响应 (缓冲事件数: %d, 诊断: %s)，触发重试", len(preflight.BufferedEvents), preflight.Diagnostic)
+	if preflight.InterceptAction != "" {
 		drainChannels(eventChan, errChan)
-		// 如果同时检测到拉黑条件，优先返回拉黑错误
-		if preflight.BlacklistReason != "" {
-			return nil, &ErrBlacklistKey{Reason: preflight.BlacklistReason, Message: preflight.BlacklistMessage}
+		switch preflight.InterceptAction {
+		case failoverActionCooldown:
+			duration := preflight.InterceptDuration
+			if duration <= 0 {
+				duration = 60 * time.Minute
+			}
+			return nil, &ErrCooldownKey{
+				Reason:   preflight.InterceptReason,
+				Message:  preflight.InterceptMessage,
+				Duration: duration,
+			}
+		case failoverActionBlacklist:
+			return nil, &ErrBlacklistKey{Reason: preflight.InterceptReason, Message: preflight.InterceptMessage}
 		}
+	}
+
+	if preflight.IsEmpty {
+		log.Printf("[Messages-EmptyResponse] upstream returned empty stream response (buffered events: %d, diagnostic: %s)", len(preflight.BufferedEvents), preflight.Diagnostic)
+		drainChannels(eventChan, errChan)
 		return nil, ErrEmptyStreamResponse
 	}
 
-	// 流中有拉黑错误但内容非空（如错误前有部分输出）：仍返回拉黑错误以触发 Key 拉黑
-	if preflight.BlacklistReason != "" {
-		drainChannels(eventChan, errChan)
-		return nil, &ErrBlacklistKey{Reason: preflight.BlacklistReason, Message: preflight.BlacklistMessage}
-	}
-
-	// 非空响应：正常流程
 	SetupStreamHeaders(c, resp)
-
-	w := c.Writer
-	flusher, ok := w.(http.Flusher)
+	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		log.Printf("[Messages-Stream] 警告: ResponseWriter不支持Flush接口")
 		drainChannels(eventChan, errChan)
-		return nil, fmt.Errorf("ResponseWriter不支持Flush接口")
+		return nil, fmt.Errorf("response writer does not support flush")
 	}
 	flusher.Flush()
 
-	ctx := NewStreamContext(envCfg)
-	ctx.RequestModel = requestModel
-	ctx.LowQuality = upstream.LowQuality
-	seedSynthesizerFromRequest(ctx, requestBody)
-
-	// 回放预检测期间缓冲的事件
-	for _, bufferedEvent := range preflight.BufferedEvents {
-		ProcessStreamEvent(c, w, flusher, bufferedEvent, ctx, envCfg, requestBody)
+	// 渠道级开关：true=直接透传；false=走本地流事件处理链
+	if upstream == nil || upstream.IsStreamPassthroughEnabled() {
+		for _, buffered := range preflight.BufferedEvents {
+			fmt.Fprint(c.Writer, buffered) //nolint:errcheck
+			flusher.Flush()
+		}
+		for event := range eventChan {
+			fmt.Fprint(c.Writer, event) //nolint:errcheck
+			flusher.Flush()
+		}
+		return nil, nil
 	}
 
-	usage, err := ProcessStreamEvents(c, w, flusher, eventChan, errChan, ctx, envCfg, startTime, requestBody)
-	if err != nil {
-		return nil, err
+	if envCfg == nil {
+		envCfg = &config.EnvConfig{}
 	}
-	return annotatePromptTokensTotalForProvider(provider, usage), nil
+
+	streamCtx := NewStreamContext(envCfg)
+	streamCtx.RequestModel = extractRequestModelFromRequestBody(requestBody)
+	streamCtx.LowQuality = upstream.LowQuality
+	startTime := time.Now()
+
+	for _, buffered := range preflight.BufferedEvents {
+		ProcessStreamEvent(c, c.Writer, flusher, buffered, streamCtx, envCfg, requestBody)
+		if streamCtx.ClientGone {
+			drainChannels(eventChan, errChan)
+			return nil, context.Canceled
+		}
+	}
+
+	return ProcessStreamEvents(c, c.Writer, flusher, eventChan, errChan, streamCtx, envCfg, startTime, requestBody)
 }
 
-func annotatePromptTokensTotalForProvider(provider providers.Provider, usage *types.Usage) *types.Usage {
-	if usage == nil {
-		return nil
+func extractRequestModelFromRequestBody(requestBody []byte) string {
+	if len(requestBody) == 0 {
+		return ""
 	}
-	if _, ok := provider.(*providers.ResponsesProvider); ok && usage.InputTokens > 0 {
-		usage.PromptTokensTotal = usage.InputTokens
+
+	var req map[string]interface{}
+	if err := json.Unmarshal(requestBody, &req); err != nil {
+		return ""
 	}
-	return usage
+
+	model, _ := req["model"].(string)
+	return strings.TrimSpace(model)
 }
 
 // ========== Token 检测和修补相关函数 ==========
@@ -1588,6 +1586,44 @@ func ExtractTextFromEvent(event string, buf *bytes.Buffer) {
 
 // DetectStreamBlacklistError 检测 SSE error 事件中是否包含应拉黑 Key 的错误
 // 返回 (reason, message)，reason 非空表示应拉黑
+
+// DetectStreamFailoverAction 检测 SSE 事件是否触发渠道级 failover 动作
+// 返回 (action, reason, duration, message)
+func DetectStreamFailoverAction(event string, upstream *config.UpstreamConfig) (string, string, time.Duration, string) {
+	if upstream != nil {
+		for _, line := range strings.Split(event, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			payload := ""
+			if jsonStr, ok := extractSSEJSONLine(line); ok {
+				payload = jsonStr
+			} else if strings.HasPrefix(line, "{") {
+				payload = line
+			}
+			if payload == "" {
+				continue
+			}
+
+			if decision := matchChannelFailoverRule(upstream, http.StatusOK, []byte(payload), "", "", ""); decision.Matched {
+				return decision.Action, decision.Reason, decision.Duration, decision.Message
+			}
+		}
+	}
+
+	// 兼容旧逻辑：从 SSE error 事件中提取标准错误并映射到动作
+	reason, message := DetectStreamBlacklistError(event)
+	switch reason {
+	case "":
+		return "", "", 0, ""
+	case "rate_limit":
+		return failoverActionCooldown, reason, 60 * time.Minute, message
+	default:
+		return failoverActionBlacklist, reason, 0, message
+	}
+}
 func DetectStreamBlacklistError(event string) (reason string, message string) {
 	// 检查是否为 error 事件
 	isErrorEvent := false
@@ -1602,9 +1638,15 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 
 	// 即使不是显式的 event: error，也检查 data 中的 type == "error"
 	for _, line := range strings.Split(event, "\n") {
+		line = strings.TrimSpace(line)
 		jsonStr, ok := extractSSEJSONLine(line)
 		if !ok {
-			continue
+			// 兜底：裸 JSON（bigmodel 等不规范 SSE，error 对象直接作为行内容，无 data: 前缀）
+			if strings.HasPrefix(line, "{") {
+				jsonStr = line
+			} else {
+				continue
+			}
 		}
 
 		var data map[string]interface{}
@@ -1612,36 +1654,52 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 			continue
 		}
 
-		// Claude 格式: {"type":"error","error":{"type":"authentication_error","message":"..."}}
-		if dataType, _ := data["type"].(string); dataType == "error" || isErrorEvent {
-			if errObj, ok := data["error"].(map[string]interface{}); ok {
+		// Claude 格式: {"type":"error","error":{"type":"...","message":"..."}}
+		// bigmodel 格式: {"error":{"code":"1113","message":"..."}} (data 和 event: error 分两包发送)
+		errObj, hasErrObj := data["error"].(map[string]interface{})
+		dataType, _ := data["type"].(string)
+		if dataType == "error" || isErrorEvent || hasErrObj {
+			if hasErrObj {
 				errType, _ := errObj["type"].(string)
 				errMsg, _ := errObj["message"].(string)
-				errCode, _ := errObj["code"].(string)
+				// code 字段可能是字符串或数字，统一转为字符串
+				var errCode string
+				switch v := errObj["code"].(type) {
+				case string:
+					errCode = v
+				case float64:
+					errCode = fmt.Sprintf("%.0f", v)
+				}
 
 				typeLower := strings.ToLower(errType)
+				msgLower := strings.ToLower(errMsg)
 
 				// 认证错误
-				if typeLower == "authentication_error" || typeLower == "invalid_api_key" {
-					return "authentication_error", truncateMsg(errMsg)
-				}
-				if isAuthenticationMessage(errMsg) {
+				if typeLower == "authentication_error" || typeLower == "invalid_api_key" || isAuthenticationMessage(errMsg) {
 					return "authentication_error", truncateMsg(errMsg)
 				}
 				// 权限错误
-				if typeLower == "permission_error" || typeLower == "permission_denied" {
-					return "permission_error", truncateMsg(errMsg)
-				}
-				if isPermissionMessage(errMsg) {
+				if typeLower == "permission_error" || typeLower == "permission_denied" || isPermissionMessage(errMsg) {
 					return "permission_error", truncateMsg(errMsg)
 				}
 				// 余额不足（明确的错误类型或错误码）
 				if typeLower == "insufficient_balance" || typeLower == "insufficient_quota" || typeLower == "billing_error" {
 					return "insufficient_balance", truncateMsg(errMsg)
 				}
-				// 已知的余额不足错误码（如 Kimi 的 1113）
+				// 已知的余额不足错误码（如 bigmodel/Kimi 的 1113）
 				if isInsufficientBalanceCode(errCode) || isInsufficientBalanceMessage(errMsg) {
 					return "insufficient_balance", truncateMsg(errMsg)
+				}
+				// 速率限制（临时冷却，非永久拉黑）
+				if isRateLimitCode(errCode) {
+					return "rate_limit", truncateMsg(errMsg)
+				}
+				if typeLower == "rate_limit_error" || typeLower == "rate_limit" {
+					return "rate_limit", truncateMsg(errMsg)
+				}
+				if strings.Contains(msgLower, "速率限制") || strings.Contains(msgLower, "请求频率") ||
+					strings.Contains(msgLower, "访问量过大") || strings.Contains(msgLower, "稍后再试") && strings.Contains(msgLower, "模型") {
+					return "rate_limit", truncateMsg(errMsg)
 				}
 			}
 			if errStr, ok := data["error"].(string); ok {
@@ -1671,10 +1729,24 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 	return "", ""
 }
 
-// isInsufficientBalanceCode 检查错误码是否为已知的余额不足代码
+// isInsufficientBalanceCode 检查错误码是否为已知的余额/限额不足代码（触发永久拉黑）
 func isInsufficientBalanceCode(code string) bool {
 	knownCodes := []string{
-		"1113", // Kimi: 余额不足或无可用资源包
+		"1113", // bigmodel/Kimi: 余额不足或无可用资源包
+	}
+	for _, c := range knownCodes {
+		if code == c {
+			return true
+		}
+	}
+	return false
+}
+
+// isRateLimitCode 检查错误码是否为已知的速率限制代码（触发冷却重试，非永久拉黑）
+func isRateLimitCode(code string) bool {
+	knownCodes := []string{
+		"1302", // bigmodel: 账户已达到速率限制
+		"1305", // bigmodel: 该模型当前访问量过大（临时限速，非余额问题）
 	}
 	for _, c := range knownCodes {
 		if code == c {

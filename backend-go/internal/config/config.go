@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"log"
 	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/utils"
@@ -51,6 +53,10 @@ type UpstreamConfig struct {
 	SupportedModels []string `json:"supportedModels,omitempty"` // 支持的模型白名单（空=全部），支持通配符如 gpt-4*
 	// 路由前缀
 	RoutePrefix string `json:"routePrefix,omitempty"` // 路由前缀（如 "kimi"），客户端可通过 /:routePrefix/v1/messages 访问
+	// Claude 流式转发模式：true=直接透传，false=走本地流事件处理链
+	StreamPassthroughEnabled *bool `json:"streamPassthroughEnabled,omitempty"`
+	// 渠道级故障规则：按状态码/错误码/关键词命中后执行冷却或拉黑
+	FailoverRules []FailoverRule `json:"failoverRules,omitempty"`
 }
 
 // DisabledKeyInfo 被拉黑的 API Key 信息
@@ -77,6 +83,75 @@ func (u *UpstreamConfig) IsNormalizeMetadataUserIDEnabled() bool {
 	return *u.NormalizeMetadataUserID
 }
 
+// IsStreamPassthroughEnabled 检查流式是否直接透传（默认 true）
+func (u *UpstreamConfig) IsStreamPassthroughEnabled() bool {
+	if u.StreamPassthroughEnabled == nil {
+		return true
+	}
+	return *u.StreamPassthroughEnabled
+}
+
+// GetEffectiveFailoverRules 获取渠道级故障规则（Claude 默认规则可覆盖）
+func (u *UpstreamConfig) GetEffectiveFailoverRules() []FailoverRule {
+	if len(u.FailoverRules) > 0 {
+		return CloneFailoverRules(u.FailoverRules)
+	}
+
+	if strings.EqualFold(u.ServiceType, "claude") {
+		return DefaultClaudeFailoverRules()
+	}
+
+	return nil
+}
+
+// FailoverRule 渠道级故障规则
+type FailoverRule struct {
+	Description     string   `json:"description,omitempty"`
+	Action          string   `json:"action"` // "cooldown" | "blacklist"
+	StatusCodes     []int    `json:"statusCodes,omitempty"`
+	ErrorCodes      []string `json:"errorCodes,omitempty"`
+	Keywords        []string `json:"keywords,omitempty"`
+	DurationMinutes int      `json:"durationMinutes,omitempty"` // action=cooldown 时生效
+}
+
+// DefaultClaudeFailoverRules Claude 默认故障规则
+func DefaultClaudeFailoverRules() []FailoverRule {
+	return []FailoverRule{
+		{
+			Description:     "429 冷却 60 分钟",
+			Action:          "cooldown",
+			StatusCodes:     []int{429},
+			DurationMinutes: 60,
+		},
+		{
+			Description: "400/401 拉黑",
+			Action:      "blacklist",
+			StatusCodes: []int{400, 401},
+		},
+	}
+}
+
+// CloneFailoverRules 深拷贝规则切片
+func CloneFailoverRules(rules []FailoverRule) []FailoverRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	cloned := make([]FailoverRule, len(rules))
+	for i := range rules {
+		cloned[i] = rules[i]
+		if len(rules[i].StatusCodes) > 0 {
+			cloned[i].StatusCodes = append([]int(nil), rules[i].StatusCodes...)
+		}
+		if len(rules[i].ErrorCodes) > 0 {
+			cloned[i].ErrorCodes = append([]string(nil), rules[i].ErrorCodes...)
+		}
+		if len(rules[i].Keywords) > 0 {
+			cloned[i].Keywords = append([]string(nil), rules[i].Keywords...)
+		}
+	}
+	return cloned
+}
+
 // UpstreamUpdate 用于部分更新 UpstreamConfig
 type UpstreamUpdate struct {
 	Name               *string           `json:"name"`
@@ -92,13 +167,15 @@ type UpstreamUpdate struct {
 	TextVerbosity      *string           `json:"textVerbosity"`
 	FastMode           *bool             `json:"fastMode"`
 	// 多渠道调度相关字段
-	Priority                *int       `json:"priority"`
-	Status                  *string    `json:"status"`
-	PromotionUntil          *time.Time `json:"promotionUntil"`
-	LowQuality              *bool      `json:"lowQuality"`
-	RPM                     *int       `json:"rpm"`
-	AutoBlacklistBalance    *bool      `json:"autoBlacklistBalance"`
-	NormalizeMetadataUserID *bool      `json:"normalizeMetadataUserId"`
+	Priority                 *int           `json:"priority"`
+	Status                   *string        `json:"status"`
+	PromotionUntil           *time.Time     `json:"promotionUntil"`
+	LowQuality               *bool          `json:"lowQuality"`
+	RPM                      *int           `json:"rpm"`
+	AutoBlacklistBalance     *bool          `json:"autoBlacklistBalance"`
+	NormalizeMetadataUserID  *bool          `json:"normalizeMetadataUserId"`
+	StreamPassthroughEnabled *bool          `json:"streamPassthroughEnabled"`
+	FailoverRules            []FailoverRule `json:"failoverRules"`
 	// Gemini 特定配置
 	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
 	StripThoughtSignature       *bool `json:"stripThoughtSignature"`
@@ -132,30 +209,68 @@ type Config struct {
 
 	// 移除计费头中的 cch= 参数：启用时自动从 system 数组中移除 cch=xxx; 部分
 	StripBillingHeader bool `json:"stripBillingHeader"`
+
+	// 全局暂停规则：HTTP 状态码 + 关键词匹配 → 自定义暂停时间
+	PauseRules []PauseRule `json:"pauseRules,omitempty"`
+}
+
+// PauseRule 全局暂停规则：HTTP 状态码 + 关键词匹配 → 自定义暂停时间
+type PauseRule struct {
+	Description     string   `json:"description"`
+	ErrorCode       int      `json:"error_code"`
+	Keywords        []string `json:"keywords"`
+	DurationMinutes int      `json:"duration_minutes"`
 }
 
 // FailedKey 失败密钥记录
 type FailedKey struct {
-	Timestamp    time.Time
-	FailureCount int
+	Timestamp     time.Time
+	FailureCount  int
+	FixedDuration time.Duration // 非零时使用固定冷却时间，忽略指数退避
 }
 
 // ConfigManager 配置管理器
 type ConfigManager struct {
-	mu              sync.RWMutex
-	config          Config
-	configFile      string
-	watcher         *fsnotify.Watcher
-	failedKeysCache map[string]*FailedKey
-	keyRecoveryTime time.Duration
-	maxFailureCount int
-	stopChan        chan struct{} // 用于通知 goroutine 停止
-	closeOnce       sync.Once     // 确保 Close 只执行一次
+	mu                  sync.RWMutex
+	config              Config
+	configFile          string
+	watcher             *fsnotify.Watcher
+	failedKeysCache     map[string]*FailedKey
+	keyRecoveryTime     time.Duration
+	maxFailureCount     int
+	keyBackoffDurations []time.Duration
+	roundRobinCounters  map[string]*uint64
+	stopChan            chan struct{}
+	closeOnce           sync.Once
 }
 
 // failedKeyCacheKey 构造 FailedKeysCache 的复合键（apiType:apiKey）
 func failedKeyCacheKey(apiType, apiKey string) string {
 	return apiType + ":" + apiKey
+}
+
+// backoffDuration 根据失败次数返回对应冷却时间（指数退避，超出档位取最后一档）
+func (cm *ConfigManager) backoffDuration(failureCount int) time.Duration {
+	idx := failureCount - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(cm.keyBackoffDurations) {
+		idx = len(cm.keyBackoffDurations) - 1
+	}
+	return cm.keyBackoffDurations[idx]
+}
+
+// getOrCreateCounter 获取或创建 upstream 的轮询计数器
+func (cm *ConfigManager) getOrCreateCounter(upstreamName string) *uint64 {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	if c, ok := cm.roundRobinCounters[upstreamName]; ok {
+		return c
+	}
+	var c uint64
+	cm.roundRobinCounters[upstreamName] = &c
+	return &c
 }
 
 // ============== 核心共享方法 ==============
@@ -250,8 +365,10 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 		return "", fmt.Errorf("上游 %s 的所有API密钥都暂时不可用", upstream.Name)
 	}
 
-	// 纯 failover：按优先级顺序选择第一个可用密钥
-	selectedKey := availableKeys[0]
+	// 轮询：按计数器均匀分配，每次取下一个可用 key
+	counter := cm.getOrCreateCounter(upstream.Name)
+	idx := int(atomic.AddUint64(counter, 1)-1) % len(availableKeys)
+	selectedKey := availableKeys[idx]
 	// 获取该密钥在原始列表中的索引
 	keyIndex := 0
 	for i, key := range upstream.APIKeys {
@@ -260,7 +377,7 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 			break
 		}
 	}
-	log.Printf("[%s-Key] 故障转移选择密钥 %s (%d/%d)", apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
+	log.Printf("[%s-Key] 轮询选择密钥 %s (%d/%d)", apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
 	return selectedKey, nil
 }
 
@@ -302,10 +419,7 @@ func (cm *ConfigManager) MarkKeyAsFailed(apiKey string, apiType string) {
 	}
 
 	failure := cm.failedKeysCache[cacheKey]
-	recoveryTime := cm.keyRecoveryTime
-	if failure.FailureCount > cm.maxFailureCount {
-		recoveryTime = cm.keyRecoveryTime * 2
-	}
+	recoveryTime := cm.backoffDuration(failure.FailureCount)
 
 	log.Printf("[%s-Key] 标记API密钥失败: %s (失败次数: %d, 恢复时间: %v)",
 		apiType, utils.MaskAPIKey(apiKey), failure.FailureCount, recoveryTime)
@@ -322,9 +436,12 @@ func (cm *ConfigManager) isKeyFailed(apiKey, apiType string) bool {
 		return false
 	}
 
-	recoveryTime := cm.keyRecoveryTime
-	if failure.FailureCount > cm.maxFailureCount {
-		recoveryTime = cm.keyRecoveryTime * 2
+	// 优先使用固定冷却时间（暂停规则触发），否则使用指数退避
+	var recoveryTime time.Duration
+	if failure.FixedDuration > 0 {
+		recoveryTime = failure.FixedDuration
+	} else {
+		recoveryTime = cm.backoffDuration(failure.FailureCount)
 	}
 
 	return time.Since(failure.Timestamp) < recoveryTime
@@ -333,6 +450,56 @@ func (cm *ConfigManager) isKeyFailed(apiKey, apiType string) bool {
 // IsKeyFailed 检查 Key 是否在冷却期（公开方法）
 func (cm *ConfigManager) IsKeyFailed(apiKey, apiType string) bool {
 	return cm.isKeyFailed(apiKey, apiType)
+}
+
+// MarkKeyAsFailedWithDuration 标记密钥失败，使用固定冷却时间（暂停规则触发）
+func (cm *ConfigManager) MarkKeyAsFailedWithDuration(apiKey, apiType string, duration time.Duration) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	cacheKey := failedKeyCacheKey(apiType, apiKey)
+	cm.failedKeysCache[cacheKey] = &FailedKey{
+		Timestamp:     time.Now(),
+		FailureCount:  1,
+		FixedDuration: duration,
+	}
+
+	log.Printf("[%s-PauseRule] 暂停 API 密钥: %s (时长: %v)",
+		apiType, utils.MaskAPIKey(apiKey), duration)
+}
+
+// GetPauseRules 获取全局暂停规则
+func (cm *ConfigManager) GetPauseRules() []PauseRule {
+	cm.mu.RLock()
+	defer cm.mu.RUnlock()
+	return cm.config.PauseRules
+}
+
+// MatchPauseRule 根据 HTTP 状态码和响应体匹配暂停规则
+// 返回匹配的规则，未匹配返回 nil
+func (cm *ConfigManager) MatchPauseRule(statusCode int, body []byte) *PauseRule {
+	rules := cm.GetPauseRules()
+	if len(rules) == 0 {
+		return nil
+	}
+	bodyLower := strings.ToLower(string(body))
+	for i := range rules {
+		rule := &rules[i]
+		if rule.ErrorCode != statusCode {
+			continue
+		}
+		// 无关键词要求时，仅状态码匹配即可
+		if len(rule.Keywords) == 0 {
+			return rule
+		}
+		// 任一关键词命中即匹配
+		for _, kw := range rule.Keywords {
+			if strings.Contains(bodyLower, strings.ToLower(kw)) {
+				return rule
+			}
+		}
+	}
+	return nil
 }
 
 // clearFailedKeysForUpstream 清理指定渠道的所有失败 key 记录
@@ -361,10 +528,7 @@ func (cm *ConfigManager) cleanupExpiredFailures() {
 			cm.mu.Lock()
 			now := time.Now()
 			for key, failure := range cm.failedKeysCache {
-				recoveryTime := cm.keyRecoveryTime
-				if failure.FailureCount > cm.maxFailureCount {
-					recoveryTime = cm.keyRecoveryTime * 2
-				}
+				recoveryTime := cm.backoffDuration(failure.FailureCount)
 
 				if now.Sub(failure.Timestamp) > recoveryTime {
 					delete(cm.failedKeysCache, key)
