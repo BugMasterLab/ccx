@@ -23,10 +23,9 @@ export interface ChannelFormLike {
   supportedModels: string[]
   autoBlacklistBalance: boolean
   normalizeMetadataUserId: boolean
-  streamPassthroughEnabled: boolean
-  failoverRules: NonNullable<Channel['failoverRules']>
+  streamPassthroughEnabled?: boolean
+  failoverRules?: NonNullable<Channel['failoverRules']>
   rpm?: number
-
 }
 
 function normalizeBaseUrlPreservingHash(url: string): string {
@@ -98,7 +97,7 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     supportedModels: form.supportedModels,
     autoBlacklistBalance: form.autoBlacklistBalance,
     normalizeMetadataUserId: form.normalizeMetadataUserId,
-    streamPassthroughEnabled: form.serviceType === 'claude' ? form.streamPassthroughEnabled : true,
+    streamPassthroughEnabled: form.serviceType === 'claude' ? Boolean(form.streamPassthroughEnabled) : true,
     failoverRules: normalizedFailoverRules,
     rpm: form.rpm && form.rpm > 0 ? form.rpm : 10
   }
