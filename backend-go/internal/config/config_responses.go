@@ -207,6 +207,10 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 		v := *updates.StreamPassthroughEnabled
 		upstream.StreamPassthroughEnabled = &v
 	}
+	if updates.KeyAffinityEnabled != nil {
+		v := *updates.KeyAffinityEnabled
+		upstream.KeyAffinityEnabled = &v
+	}
 	if updates.FailoverRules != nil {
 		upstream.FailoverRules = CloneFailoverRules(updates.FailoverRules)
 	}

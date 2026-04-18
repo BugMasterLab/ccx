@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"hash/fnv"
 	"log"
 	"slices"
 	"strings"
@@ -55,6 +56,8 @@ type UpstreamConfig struct {
 	RoutePrefix string `json:"routePrefix,omitempty"` // 路由前缀（如 "kimi"），客户端可通过 /:routePrefix/v1/messages 访问
 	// Claude 流式转发模式：true=直接透传，false=走本地流事件处理链
 	StreamPassthroughEnabled *bool `json:"streamPassthroughEnabled,omitempty"`
+	// Key 亲和开关：按 user_id 稳定选择同一个 Key（失败时自动切换）
+	KeyAffinityEnabled *bool `json:"keyAffinityEnabled,omitempty"`
 	// 渠道级故障规则：按状态码/错误码/关键词命中后执行冷却或拉黑
 	FailoverRules []FailoverRule `json:"failoverRules,omitempty"`
 }
@@ -89,6 +92,14 @@ func (u *UpstreamConfig) IsStreamPassthroughEnabled() bool {
 		return true
 	}
 	return *u.StreamPassthroughEnabled
+}
+
+// IsKeyAffinityEnabled 检查 Key 亲和是否启用（Claude 默认 true，其它默认 false）
+func (u *UpstreamConfig) IsKeyAffinityEnabled() bool {
+	if u.KeyAffinityEnabled != nil {
+		return *u.KeyAffinityEnabled
+	}
+	return strings.EqualFold(u.ServiceType, "claude")
 }
 
 // GetEffectiveFailoverRules 获取渠道级故障规则（Claude 默认规则可覆盖）
@@ -175,6 +186,7 @@ type UpstreamUpdate struct {
 	AutoBlacklistBalance     *bool          `json:"autoBlacklistBalance"`
 	NormalizeMetadataUserID  *bool          `json:"normalizeMetadataUserId"`
 	StreamPassthroughEnabled *bool          `json:"streamPassthroughEnabled"`
+	KeyAffinityEnabled       *bool          `json:"keyAffinityEnabled"`
 	FailoverRules            []FailoverRule `json:"failoverRules"`
 	// Gemini 特定配置
 	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
@@ -321,6 +333,15 @@ func (cm *ConfigManager) GetConfig() Config {
 // GetNextAPIKey 获取下一个 API 密钥（纯 failover 模式）
 // apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
 func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[string]bool, apiType string) (string, error) {
+	return cm.getNextAPIKeyWithUserAffinity(upstream, failedKeys, apiType, "")
+}
+
+// GetNextAPIKeyForUser 获取下一个 API 密钥（支持按 user_id 的 Key 亲和）
+func (cm *ConfigManager) GetNextAPIKeyForUser(upstream *UpstreamConfig, failedKeys map[string]bool, apiType, userID string) (string, error) {
+	return cm.getNextAPIKeyWithUserAffinity(upstream, failedKeys, apiType, userID)
+}
+
+func (cm *ConfigManager) getNextAPIKeyWithUserAffinity(upstream *UpstreamConfig, failedKeys map[string]bool, apiType, userID string) (string, error) {
 	if len(upstream.APIKeys) == 0 {
 		return "", fmt.Errorf("上游 %s 没有可用的API密钥", upstream.Name)
 	}
@@ -365,20 +386,52 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 		return "", fmt.Errorf("上游 %s 的所有API密钥都暂时不可用", upstream.Name)
 	}
 
+	// 亲和优先：同一 user_id 稳定命中同一可用 key
+	if userID != "" && upstream.IsKeyAffinityEnabled() {
+		affinityKey := fmt.Sprintf("%s|%s|%s", apiType, upstream.Name, userID)
+		idx := stableHashIndex(affinityKey, len(availableKeys))
+		selectedKey := availableKeys[idx]
+		keyIndex := findKeyIndex(upstream.APIKeys, selectedKey)
+		log.Printf("[%s-Key] 亲和选择密钥 %s (%d/%d, user=%s)",
+			apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys), maskUserIDForLog(userID))
+		return selectedKey, nil
+	}
+
 	// 轮询：按计数器均匀分配，每次取下一个可用 key
 	counter := cm.getOrCreateCounter(upstream.Name)
 	idx := int(atomic.AddUint64(counter, 1)-1) % len(availableKeys)
 	selectedKey := availableKeys[idx]
-	// 获取该密钥在原始列表中的索引
-	keyIndex := 0
-	for i, key := range upstream.APIKeys {
-		if key == selectedKey {
-			keyIndex = i + 1
-			break
-		}
-	}
+	keyIndex := findKeyIndex(upstream.APIKeys, selectedKey)
 	log.Printf("[%s-Key] 轮询选择密钥 %s (%d/%d)", apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
 	return selectedKey, nil
+}
+
+func stableHashIndex(value string, mod int) int {
+	if mod <= 0 {
+		return 0
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(value))
+	return int(h.Sum32() % uint32(mod))
+}
+
+func findKeyIndex(allKeys []string, key string) int {
+	for i, k := range allKeys {
+		if k == key {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func maskUserIDForLog(userID string) string {
+	if userID == "" {
+		return ""
+	}
+	if len(userID) <= 4 {
+		return "***"
+	}
+	return userID[:2] + "***" + userID[len(userID)-2:]
 }
 
 // GetAdminAPIKey 获取管理/探测场景下的 API 密钥。

@@ -200,6 +200,10 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 		v := *updates.StreamPassthroughEnabled
 		upstream.StreamPassthroughEnabled = &v
 	}
+	if updates.KeyAffinityEnabled != nil {
+		v := *updates.KeyAffinityEnabled
+		upstream.KeyAffinityEnabled = &v
+	}
 	if updates.FailoverRules != nil {
 		upstream.FailoverRules = CloneFailoverRules(updates.FailoverRules)
 	}

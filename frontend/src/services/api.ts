@@ -126,6 +126,7 @@ export interface Channel {
   autoBlacklistBalance?: boolean
   normalizeMetadataUserId?: boolean
   streamPassthroughEnabled?: boolean
+  keyAffinityEnabled?: boolean
   failoverRules?: FailoverRule[]
   latency?: number
   status?: ChannelStatus | 'healthy' | 'error' | 'unknown' | ''

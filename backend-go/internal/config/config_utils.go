@@ -195,6 +195,10 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		v := *u.StreamPassthroughEnabled
 		cloned.StreamPassthroughEnabled = &v
 	}
+	if u.KeyAffinityEnabled != nil {
+		v := *u.KeyAffinityEnabled
+		cloned.KeyAffinityEnabled = &v
+	}
 	if len(u.FailoverRules) > 0 {
 		cloned.FailoverRules = CloneFailoverRules(u.FailoverRules)
 	}

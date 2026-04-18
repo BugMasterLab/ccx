@@ -73,7 +73,7 @@ func Handler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channel
 		if isMultiChannel {
 			handleMultiChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, userID, startTime)
 		} else {
-			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, startTime)
+			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, userID, startTime)
 		}
 	})
 }
@@ -127,7 +127,7 @@ func handleMultiChannel(
 				bodyBytes,
 				claudeReq.Stream,
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
-					return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
+					return cfgManager.GetNextAPIKeyForUser(upstream, failedKeys, "Messages", userID)
 				},
 				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
@@ -180,6 +180,7 @@ func handleSingleChannel(
 	channelScheduler *scheduler.ChannelScheduler,
 	bodyBytes []byte,
 	claudeReq types.ClaudeRequest,
+	userID string,
 	startTime time.Time,
 ) {
 	upstream, channelIndex, err := cfgManager.GetCurrentUpstreamWithIndex()
@@ -223,7 +224,7 @@ func handleSingleChannel(
 		bodyBytes,
 		claudeReq.Stream,
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
-			return cfgManager.GetNextAPIKey(upstream, failedKeys, "Messages")
+			return cfgManager.GetNextAPIKeyForUser(upstream, failedKeys, "Messages", userID)
 		},
 		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
