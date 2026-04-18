@@ -1552,52 +1552,49 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 		// bigmodel 格式: {"error":{"code":"1113","message":"..."}} (data 和 event: error 分两包发送)
 		errObj, hasErrObj := data["error"].(map[string]interface{})
 		dataType, _ := data["type"].(string)
-		if (dataType == "error" || isErrorEvent || hasErrObj) && hasErrObj {
-			errType, _ := errObj["type"].(string)
-			errMsg, _ := errObj["message"].(string)
-			// code 字段可能是字符串或数字，统一转为字符串
-			var errCode string
-			switch v := errObj["code"].(type) {
-			case string:
-				errCode = v
-			case float64:
-				errCode = fmt.Sprintf("%.0f", v)
-			}
+		if dataType == "error" || isErrorEvent || hasErrObj {
+			if hasErrObj {
+				errType, _ := errObj["type"].(string)
+				errMsg, _ := errObj["message"].(string)
+				// code 字段可能是字符串或数字，统一转为字符串
+				var errCode string
+				switch v := errObj["code"].(type) {
+				case string:
+					errCode = v
+				case float64:
+					errCode = fmt.Sprintf("%.0f", v)
+				}
 
-			typeLower := strings.ToLower(errType)
-			msgLower := strings.ToLower(errMsg)
+				typeLower := strings.ToLower(errType)
+				msgLower := strings.ToLower(errMsg)
 
-			// 认证错误
-			if typeLower == "authentication_error" || typeLower == "invalid_api_key" {
-				return "authentication_error", truncateMsg(errMsg)
-			}
-			// 权限错误
-			if typeLower == "permission_error" || typeLower == "permission_denied" {
-				return "permission_error", truncateMsg(errMsg)
-			}
-			// 余额不足（明确的错误类型或错误码）
-			if typeLower == "insufficient_balance" || typeLower == "insufficient_quota" || typeLower == "billing_error" {
-				return "insufficient_balance", truncateMsg(errMsg)
-			}
-			// 已知的余额不足错误码（如 bigmodel/Kimi 的 1113）
-			if isInsufficientBalanceCode(errCode) {
-				return "insufficient_balance", truncateMsg(errMsg)
-			}
-			// 中文余额关键词兜底（覆盖 bigmodel 等国产模型）
-			if strings.Contains(msgLower, "余额不足") || strings.Contains(msgLower, "余额") && strings.Contains(msgLower, "充值") ||
-				strings.Contains(msgLower, "无可用资源包") || strings.Contains(msgLower, "额度不足") {
-				return "insufficient_balance", truncateMsg(errMsg)
-			}
-			// 速率限制（临时冷却，非永久拉黑）
-			if isRateLimitCode(errCode) {
-				return "rate_limit", truncateMsg(errMsg)
-			}
-			if typeLower == "rate_limit_error" || typeLower == "rate_limit" {
-				return "rate_limit", truncateMsg(errMsg)
-			}
-			if strings.Contains(msgLower, "速率限制") || strings.Contains(msgLower, "请求频率") ||
-				strings.Contains(msgLower, "访问量过大") || strings.Contains(msgLower, "稍后再试") && strings.Contains(msgLower, "模型") {
-				return "rate_limit", truncateMsg(errMsg)
+				// 认证错误
+				if typeLower == "authentication_error" || typeLower == "invalid_api_key" || isAuthenticationMessage(errMsg) {
+					return "authentication_error", truncateMsg(errMsg)
+				}
+				// 权限错误
+				if typeLower == "permission_error" || typeLower == "permission_denied" || isPermissionMessage(errMsg) {
+					return "permission_error", truncateMsg(errMsg)
+				}
+				// 余额不足（明确的错误类型或错误码）
+				if typeLower == "insufficient_balance" || typeLower == "insufficient_quota" || typeLower == "billing_error" {
+					return "insufficient_balance", truncateMsg(errMsg)
+				}
+				// 已知的余额不足错误码（如 bigmodel/Kimi 的 1113）
+				if isInsufficientBalanceCode(errCode) || isInsufficientBalanceMessage(errMsg) {
+					return "insufficient_balance", truncateMsg(errMsg)
+				}
+				// 速率限制（临时冷却，非永久拉黑）
+				if isRateLimitCode(errCode) {
+					return "rate_limit", truncateMsg(errMsg)
+				}
+				if typeLower == "rate_limit_error" || typeLower == "rate_limit" {
+					return "rate_limit", truncateMsg(errMsg)
+				}
+				if strings.Contains(msgLower, "速率限制") || strings.Contains(msgLower, "请求频率") ||
+					strings.Contains(msgLower, "访问量过大") || strings.Contains(msgLower, "稍后再试") && strings.Contains(msgLower, "模型") {
+					return "rate_limit", truncateMsg(errMsg)
+				}
 			}
 			if errStr, ok := data["error"].(string); ok {
 				if isAuthenticationMessage(errStr) {

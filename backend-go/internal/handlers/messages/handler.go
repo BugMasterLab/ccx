@@ -144,11 +144,11 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindMessages, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					if claudeReq.Stream {
 						return common.HandleStreamResponse(c, resp, provider)
 					}
-					return handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, upstreamCopy, apiKey)
+					return handleNormalResponse(c, resp, provider, envCfg, startTime, actualRequestBody, upstreamCopy, apiKey)
 				},
 				claudeReq.Model,
 				selection.ChannelIndex,
@@ -236,11 +236,11 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			if claudeReq.Stream {
 				return common.HandleStreamResponse(c, resp, provider)
 			}
-			return handleNormalResponse(c, resp, provider, envCfg, startTime, bodyBytes, upstreamCopy, apiKey)
+			return handleNormalResponse(c, resp, provider, envCfg, startTime, actualRequestBody, upstreamCopy, apiKey)
 		},
 		claudeReq.Model,
 		channelIndex,
