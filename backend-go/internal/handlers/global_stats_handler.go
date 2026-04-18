@@ -13,9 +13,9 @@ import (
 func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		durationStr := c.DefaultQuery("duration", "24h")
-		duration := parseExtendedDuration(durationStr)
-		if duration < time.Minute {
-			duration = time.Minute
+		duration, err := parseExtendedDuration(durationStr)
+		if err != nil || duration < time.Minute {
+			duration = 6 * time.Hour // 回退到默认值
 		}
 		maxDuration := 30 * 24 * time.Hour
 		if duration > maxDuration {

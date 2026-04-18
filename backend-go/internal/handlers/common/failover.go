@@ -547,7 +547,7 @@ type BlacklistResult struct {
 }
 
 // ShouldBlacklistKey 判断 HTTP 错误响应是否应该永久拉黑该 Key
-// 仅识别明确的错误类型/状态码，不做模糊关键词匹配
+// 对余额不足只识别明确语义，避免将普通 403/429 误判为永久失效
 func ShouldBlacklistKey(statusCode int, bodyBytes []byte) BlacklistResult {
 	// HTTP 402: 明确的付费/余额不足
 	if statusCode == 402 {
@@ -560,7 +560,7 @@ func ShouldBlacklistKey(statusCode int, bodyBytes []byte) BlacklistResult {
 
 	// 解析响应体
 	errType, errMessage := extractErrorInfo(bodyBytes)
-	if errType == "" {
+	if errType == "" && errMessage == "" {
 		return BlacklistResult{}
 	}
 
@@ -568,6 +568,15 @@ func ShouldBlacklistKey(statusCode int, bodyBytes []byte) BlacklistResult {
 
 	// 认证错误: authentication_error / invalid_api_key
 	if typeLower == "authentication_error" || typeLower == "invalid_api_key" {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "authentication_error",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+
+	// 某些上游只返回 401/403 + 明确的认证失败消息，没有 type/code
+	if (statusCode == 401 || statusCode == 403) && isAuthenticationMessage(errMessage) {
 		return BlacklistResult{
 			ShouldBlacklist: true,
 			Reason:          "authentication_error",
@@ -593,21 +602,125 @@ func ShouldBlacklistKey(statusCode int, bodyBytes []byte) BlacklistResult {
 		}
 	}
 
+	// 某些上游会返回 HTTP 401/403/429，但在 message 中携带明确的余额不足语义
+	if (statusCode == 401 || statusCode == 403 || statusCode == 429) && isInsufficientBalanceMessage(errMessage) {
+		return BlacklistResult{
+			ShouldBlacklist: true,
+			Reason:          "insufficient_balance",
+			Message:         truncateMessage(errMessage),
+		}
+	}
+
 	return BlacklistResult{}
 }
 
-// extractErrorInfo 从 JSON 响应体中提取 error.type 和 error.message
-// 支持嵌套格式 {"error":{"type":"...","message":"..."}} 和扁平格式 {"type":"...","message":"..."}
+func isInsufficientBalanceMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"insufficient balance",
+		"insufficient account balance",
+		"insufficient quota",
+		"insufficient credits",
+		"insufficient funds",
+		"balance too low",
+		"no balance",
+		"out of credits",
+		"quota exhausted",
+		"quota used up",
+		"tokenstatusexhausted",
+		"余额不足",
+		"余额已用尽",
+		"额度不足",
+		"额度已用尽",
+		"额度已用完",
+		"额度耗尽",
+		"令牌额度已用尽",
+		"预扣费额度失败",
+		"需要预扣费额度",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isAuthenticationMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"invalid api key",
+		"invalid_api_key",
+		"invalid key",
+		"invalid token",
+		"authentication failed",
+		"authentication error",
+		"unauthorized",
+		"api key is invalid",
+		"api key provided is invalid",
+		"无效的api key",
+		"api key无效",
+		"无效 api key",
+		"认证失败",
+		"身份验证失败",
+		"无效的令牌",
+		"令牌无效",
+		"鉴权失败",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPermissionMessage(msg string) bool {
+	if msg == "" {
+		return false
+	}
+
+	msgLower := strings.ToLower(msg)
+	keywords := []string{
+		"permission denied",
+		"permission error",
+		"forbidden",
+		"access denied",
+		"权限不足",
+		"没有权限",
+		"禁止访问",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(msgLower, keyword) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractErrorInfo 从 JSON 响应体中提取错误类型和错误消息
+// 支持嵌套格式 {"error":{"type":"...","code":"...","message":"..."}}
+// 和扁平格式 {"type":"...","code":"...","message":"..."}
 func extractErrorInfo(bodyBytes []byte) (errType string, errMessage string) {
 	var resp map[string]interface{}
 	if err := json.Unmarshal(bodyBytes, &resp); err != nil {
 		return "", ""
 	}
 
-	// 优先尝试嵌套格式: {"error": {"type": "...", "message": "..."}}
+	// 优先尝试嵌套格式: {"error": {"type": "...", "code": "...", "message": "..."}}
 	if errObj, ok := resp["error"].(map[string]interface{}); ok {
 		if t, ok := errObj["type"].(string); ok {
 			errType = t
+		} else if c, ok := errObj["code"].(string); ok {
+			errType = c
 		}
 		if m, ok := errObj["message"].(string); ok {
 			errMessage = m
@@ -615,9 +728,16 @@ func extractErrorInfo(bodyBytes []byte) (errType string, errMessage string) {
 		return
 	}
 
-	// fallback: 扁平格式 {"type": "...", "message": "..."} (Anthropic 部分接口)
+	// 兼容字符串格式: {"error": "..."}
+	if errStr, ok := resp["error"].(string); ok {
+		errMessage = errStr
+	}
+
+	// fallback: 扁平格式 {"type": "...", "code": "...", "message": "..."}
 	if t, ok := resp["type"].(string); ok {
 		errType = t
+	} else if c, ok := resp["code"].(string); ok {
+		errType = c
 	}
 	if m, ok := resp["message"].(string); ok {
 		errMessage = m

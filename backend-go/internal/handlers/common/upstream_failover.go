@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
@@ -40,7 +41,18 @@ type DeprioritizeKeyFunc func(apiKey string)
 
 // HandleSuccessFunc 处理成功响应（负责写回客户端），并返回 usage（可为 nil）
 // 注意：实现方需要自行关闭 resp.Body（与现有 handlers 保持一致）。
-type HandleSuccessFunc func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error)
+// actualRequestBody 为本次实际转发给上游的请求体，可用于 usage 估算等后处理。
+type HandleSuccessFunc func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error)
+
+func shouldNormalizeMetadataUserID(kind scheduler.ChannelKind, upstream *config.UpstreamConfig) bool {
+	if upstream == nil {
+		return false
+	}
+	if kind != scheduler.ChannelKindMessages && kind != scheduler.ChannelKindResponses {
+		return false
+	}
+	return upstream.IsNormalizeMetadataUserIDEnabled()
+}
 
 // TryUpstreamWithAllKeys 尝试一个 upstream 的所有 BaseURL + Key（纯 failover）
 // 返回:
@@ -86,18 +98,21 @@ func TryUpstreamWithAllKeys(
 
 	var lastFailoverError *FailoverError
 	deprioritizeCandidates := make(map[string]bool)
+	probeAcquired := make(map[string]bool)
+	defer func() {
+		for key := range probeAcquired {
+			parts := strings.SplitN(key, "|", 2)
+			if len(parts) == 2 {
+				metricsManager.ReleaseProbe(parts[0], parts[1])
+			}
+		}
+	}()
 
 	// 计算重定向后的模型（用于日志记录）
 	redirectedModel := config.RedirectModel(model, upstream)
 	var originalModel string
 	if redirectedModel != model {
 		originalModel = model // 仅当发生重定向时记录原始模型
-	}
-
-	// 强制探测模式：基于本次优先尝试的 BaseURL 判断（避免 BaseURL/BaseURLs 不一致导致误判）
-	forceProbeMode := AreAllKeysSuspended(metricsManager, urlResults[0].URL, upstream.APIKeys)
-	if forceProbeMode {
-		log.Printf("[%s-ForceProbe] 渠道 %s 所有 Key 都被熔断，启用强制探测模式", apiType, upstream.Name)
 	}
 
 	for urlIdx, urlResult := range urlResults {
@@ -107,7 +122,12 @@ func TryUpstreamWithAllKeys(
 		maxRetries := len(upstream.APIKeys)
 
 		for attempt := 0; attempt < maxRetries; attempt++ {
-			RestoreRequestBody(c, requestBody)
+			attemptBody := requestBody
+			if shouldNormalizeMetadataUserID(kind, upstream) {
+				attemptBody = NormalizeMetadataUserID(requestBody)
+			}
+			RestoreRequestBody(c, attemptBody)
+			c.Set("requestBodyBytes", attemptBody)
 
 			apiKey, err := nextAPIKey(upstream, failedKeys)
 			if err != nil {
@@ -116,10 +136,21 @@ func TryUpstreamWithAllKeys(
 			}
 
 			// 检查熔断状态
-			if !forceProbeMode && metricsManager.ShouldSuspendKey(currentBaseURL, apiKey) {
+			circuitState := metricsManager.GetKeyCircuitState(currentBaseURL, apiKey)
+			if circuitState == metrics.CircuitStateOpen {
 				failedKeys[apiKey] = true
-				log.Printf("[%s-Circuit] 跳过熔断中的 Key: %s", apiType, utils.MaskAPIKey(apiKey))
+				log.Printf("[%s-Circuit] 跳过 open 状态中的 Key: %s", apiType, utils.MaskAPIKey(apiKey))
 				continue
+			}
+			if circuitState == metrics.CircuitStateHalfOpen {
+				probeKey := currentBaseURL + "|" + apiKey
+				if !metricsManager.TryAcquireProbe(currentBaseURL, apiKey) {
+					failedKeys[apiKey] = true
+					log.Printf("[%s-Circuit] 跳过 half-open 探针已占用的 Key: %s", apiType, utils.MaskAPIKey(apiKey))
+					continue
+				}
+				probeAcquired[probeKey] = true
+				log.Printf("[%s-Circuit] 使用 half-open 探针 Key: %s", apiType, utils.MaskAPIKey(apiKey))
 			}
 
 			if envCfg.ShouldLog("info") {
@@ -160,31 +191,13 @@ func TryUpstreamWithAllKeys(
 				// 真实渠道故障：计入失败，继续 failover
 				failedKeys[apiKey] = true
 				cfgManager.MarkKeyAsFailed(apiKey, apiType)
-				metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+				metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassRetryable)
 				channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 				if markURLFailure != nil {
 					markURLFailure(currentBaseURL)
 				}
 				// 记录渠道日志
-				if channelLogStore != nil {
-					errInfo := err.Error()
-					if len(errInfo) > 200 {
-						errInfo = errInfo[:200]
-					}
-					channelLogStore.Record(channelIndex, &metrics.ChannelLog{
-						Timestamp:     time.Now(),
-						Model:         redirectedModel,
-						OriginalModel: originalModel,
-						StatusCode:    0,
-						DurationMs:    time.Since(attemptStart).Milliseconds(),
-						Success:       false,
-						KeyMask:       utils.MaskAPIKey(apiKey),
-						BaseURL:       currentBaseURL,
-						ErrorInfo:     errInfo,
-						IsRetry:       attempt > 0 || urlIdx > 0,
-						InterfaceType: apiType,
-					})
-				}
+				RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, 0, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, err.Error(), apiType, attempt > 0 || urlIdx > 0)
 				log.Printf("[%s-Key] 警告: API密钥失败: %v", apiType, err)
 				continue
 			}
@@ -248,10 +261,18 @@ func TryUpstreamWithAllKeys(
 					if !blResult.ShouldBlacklist {
 						cfgManager.MarkKeyAsFailed(apiKey, apiType)
 					}
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					failureClass := metrics.FailureClassRetryable
+					if isQuotaRelated || blResult.Reason == "insufficient_balance" {
+						failureClass = metrics.FailureClassQuota
+					}
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, failureClass)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
+					}
+					errorSummary := truncateMessage(strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(string(respBodyBytes)), "\n", " "), "\r", " "))
+					if errorSummary != "" {
+						log.Printf("[%s-Key] 上游错误详情摘要: channel=[%d] %s, key=%s, summary=%s", apiType, channelIndex, upstream.Name, utils.MaskAPIKey(apiKey), errorSummary)
 					}
 					log.Printf("[%s-Key] 警告: API密钥失败 (状态: %d)，尝试下一个密钥", apiType, resp.StatusCode)
 
@@ -261,25 +282,7 @@ func TryUpstreamWithAllKeys(
 					}
 
 					// 记录渠道日志
-					if channelLogStore != nil {
-						errInfo := string(respBodyBytes)
-						if len(errInfo) > 200 {
-							errInfo = errInfo[:200]
-						}
-						channelLogStore.Record(channelIndex, &metrics.ChannelLog{
-							Timestamp:     time.Now(),
-							Model:         redirectedModel,
-							OriginalModel: originalModel,
-							StatusCode:    resp.StatusCode,
-							DurationMs:    time.Since(attemptStart).Milliseconds(),
-							Success:       false,
-							KeyMask:       utils.MaskAPIKey(apiKey),
-							BaseURL:       currentBaseURL,
-							ErrorInfo:     errInfo,
-							IsRetry:       attempt > 0 || urlIdx > 0,
-							InterfaceType: apiType,
-						})
-					}
+					RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, resp.StatusCode, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, string(respBodyBytes), apiType, attempt > 0 || urlIdx > 0)
 
 					if isQuotaRelated {
 						deprioritizeCandidates[apiKey] = true
@@ -288,28 +291,10 @@ func TryUpstreamWithAllKeys(
 				}
 
 				// 非 failover 错误，记录失败指标后返回（请求已处理）
-				metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+				metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassNonRetryable)
 				channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 				// 记录渠道日志
-				if channelLogStore != nil {
-					errInfo := string(respBodyBytes)
-					if len(errInfo) > 200 {
-						errInfo = errInfo[:200]
-					}
-					channelLogStore.Record(channelIndex, &metrics.ChannelLog{
-						Timestamp:     time.Now(),
-						Model:         redirectedModel,
-						OriginalModel: originalModel,
-						StatusCode:    resp.StatusCode,
-						DurationMs:    time.Since(attemptStart).Milliseconds(),
-						Success:       false,
-						KeyMask:       utils.MaskAPIKey(apiKey),
-						BaseURL:       currentBaseURL,
-						ErrorInfo:     errInfo,
-						IsRetry:       attempt > 0 || urlIdx > 0,
-						InterfaceType: apiType,
-					})
-				}
+				RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, resp.StatusCode, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, string(respBodyBytes), apiType, attempt > 0 || urlIdx > 0)
 				c.Data(resp.StatusCode, "application/json", respBodyBytes)
 				return true, "", 0, nil, nil, nil
 			}
@@ -325,7 +310,7 @@ func TryUpstreamWithAllKeys(
 				markURLSuccess(currentBaseURL)
 			}
 
-			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey)
+			usage, err = handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
 			if err != nil {
 				lastError = err
 				// 区分客户端错误和渠道故障
@@ -338,31 +323,13 @@ func TryUpstreamWithAllKeys(
 					// 空响应或无效响应体（如 HTML）：Header 未发送，可安全 failover
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
 					}
 					// 记录渠道日志
-					if channelLogStore != nil {
-						errInfo := err.Error()
-						if len(errInfo) > 200 {
-							errInfo = errInfo[:200]
-						}
-						channelLogStore.Record(channelIndex, &metrics.ChannelLog{
-							Timestamp:     time.Now(),
-							Model:         redirectedModel,
-							OriginalModel: originalModel,
-							StatusCode:    200,
-							DurationMs:    time.Since(attemptStart).Milliseconds(),
-							Success:       false,
-							KeyMask:       utils.MaskAPIKey(apiKey),
-							BaseURL:       currentBaseURL,
-							ErrorInfo:     errInfo,
-							IsRetry:       attempt > 0 || urlIdx > 0,
-							InterfaceType: apiType,
-						})
-					}
+					RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, http.StatusOK, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, err.Error(), apiType, attempt > 0 || urlIdx > 0)
 					log.Printf("[%s-InvalidResponse] 上游返回无效响应 (Key: %s): %v，尝试下一个密钥", apiType, utils.MaskAPIKey(apiKey), err)
 					continue
 				} else if blErr, ok := err.(*ErrBlacklistKey); ok {
@@ -380,7 +347,11 @@ func TryUpstreamWithAllKeys(
 							}
 						}
 					}
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					failureClass := metrics.FailureClassRetryable
+					if isBalanceError {
+						failureClass = metrics.FailureClassQuota
+					}
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, failureClass)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
@@ -389,48 +360,16 @@ func TryUpstreamWithAllKeys(
 					if isRateLimit {
 						logAction = "rate_limited"
 					}
-					if channelLogStore != nil {
-						channelLogStore.Record(channelIndex, &metrics.ChannelLog{
-							Timestamp:     time.Now(),
-							Model:         redirectedModel,
-							OriginalModel: originalModel,
-							StatusCode:    200,
-							DurationMs:    time.Since(attemptStart).Milliseconds(),
-							Success:       false,
-							KeyMask:       utils.MaskAPIKey(apiKey),
-							BaseURL:       currentBaseURL,
-							ErrorInfo:     fmt.Sprintf("key %s: %s - %s", logAction, blErr.Reason, blErr.Message),
-							IsRetry:       attempt > 0 || urlIdx > 0,
-							InterfaceType: apiType,
-						})
-					}
+					RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, http.StatusOK, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, fmt.Sprintf("key %s: %s - %s", logAction, blErr.Reason, blErr.Message), apiType, attempt > 0 || urlIdx > 0)
 					log.Printf("[%s-Blacklist] SSE 流内错误触发%s (Key: %s, 原因: %s)，尝试下一个密钥", apiType, logAction, utils.MaskAPIKey(apiKey), blErr.Reason)
 					continue
 				} else {
 					// 真实渠道故障：计入失败指标
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
-					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, requestID)
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
 					// 记录渠道日志
-					if channelLogStore != nil {
-						errInfo := err.Error()
-						if len(errInfo) > 200 {
-							errInfo = errInfo[:200]
-						}
-						channelLogStore.Record(channelIndex, &metrics.ChannelLog{
-							Timestamp:     time.Now(),
-							Model:         redirectedModel,
-							OriginalModel: originalModel,
-							StatusCode:    200,
-							DurationMs:    time.Since(attemptStart).Milliseconds(),
-							Success:       false,
-							KeyMask:       utils.MaskAPIKey(apiKey),
-							BaseURL:       currentBaseURL,
-							ErrorInfo:     errInfo,
-							IsRetry:       attempt > 0 || urlIdx > 0,
-							InterfaceType: apiType,
-						})
-					}
+					RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, http.StatusOK, time.Since(attemptStart).Milliseconds(), false, apiKey, currentBaseURL, err.Error(), apiType, attempt > 0 || urlIdx > 0)
 					log.Printf("[%s-Key] 警告: 响应处理失败: %v", apiType, err)
 				}
 				return true, "", 0, nil, usage, err
@@ -438,21 +377,12 @@ func TryUpstreamWithAllKeys(
 
 			metricsManager.RecordRequestFinalizeSuccess(currentBaseURL, apiKey, requestID, usage)
 			channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, kind)
-			// 记录渠道日志
-			if channelLogStore != nil {
-				channelLogStore.Record(channelIndex, &metrics.ChannelLog{
-					Timestamp:     time.Now(),
-					Model:         redirectedModel,
-					OriginalModel: originalModel,
-					StatusCode:    200,
-					DurationMs:    time.Since(attemptStart).Milliseconds(),
-					Success:       true,
-					KeyMask:       utils.MaskAPIKey(apiKey),
-					BaseURL:       currentBaseURL,
-					IsRetry:       attempt > 0 || urlIdx > 0,
-					InterfaceType: apiType,
-				})
+			if probeKey := currentBaseURL + "|" + apiKey; probeAcquired[probeKey] {
+				metricsManager.ReleaseProbe(currentBaseURL, apiKey)
+				delete(probeAcquired, probeKey)
 			}
+			// 记录渠道日志
+			RecordChannelLog(channelLogStore, channelIndex, redirectedModel, originalModel, http.StatusOK, time.Since(attemptStart).Milliseconds(), true, apiKey, currentBaseURL, "", apiType, attempt > 0 || urlIdx > 0)
 			return true, apiKey, originalIdx, nil, usage, nil
 		}
 

@@ -48,8 +48,7 @@ func Handler(
 			return
 		}
 
-		// 预处理：规范化 metadata.user_id（兼容 Claude Code v2.1.78+ JSON 对象格式）
-		bodyBytes = common.NormalizeMetadataUserID(bodyBytes)
+		// 入口保留原始请求体；按渠道在发往上游前决定是否规范化 metadata.user_id
 		c.Set("requestBodyBytes", bodyBytes)
 
 		// 解析 Responses 请求
@@ -58,8 +57,9 @@ func Handler(
 			_ = json.Unmarshal(bodyBytes, &responsesReq)
 		}
 
-		// 提取对话标识用于 Trace 亲和性
-		userID := common.ExtractConversationID(c, bodyBytes)
+		// 提取统一会话标识用于 Trace 亲和性（保持 metadata.user_id 默认规范化后的既有路由语义）
+		affinityBody := common.NormalizeMetadataUserID(bodyBytes)
+		userID := utils.ExtractUnifiedSessionID(c, affinityBody)
 
 		// 记录原始请求信息（仅在入口处记录一次）
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Responses")
@@ -137,8 +137,8 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindResponses, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
-					return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
+				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+					return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, actualRequestBody)
 				},
 				responsesReq.Model,
 				selection.ChannelIndex,
@@ -223,8 +223,8 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
-			return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, bodyBytes)
+		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+			return handleSuccess(c, resp, provider, upstream.ServiceType, envCfg, sessionManager, startTime, &responsesReq, actualRequestBody)
 		},
 		responsesReq.Model,
 		channelIndex,
@@ -312,6 +312,8 @@ func handleSuccess(
 	}
 
 	// Token 补全逻辑
+	originalUsage := responsesResp.Usage
+
 	patchResponsesUsage(responsesResp, originalRequestJSON, envCfg)
 
 	// 更新会话
@@ -341,15 +343,47 @@ func handleSuccess(
 	c.JSON(200, responsesResp)
 
 	// 返回 usage 数据用于指标记录
+	promptTokensTotal := promptTokensTotalFromResponsesInput(
+		originalUsage.InputTokens,
+		upstreamType,
+		responsesUsageHasClaudeCache(originalUsage),
+	)
+	return metricsUsageFromResponsesUsage(responsesResp.Usage, promptTokensTotal), nil
+}
+
+func responsesUsageHasClaudeCache(usage types.ResponsesUsage) bool {
+	return usage.CacheCreationInputTokens > 0 ||
+		usage.CacheReadInputTokens > 0 ||
+		usage.CacheCreation5mInputTokens > 0 ||
+		usage.CacheCreation1hInputTokens > 0
+}
+
+func promptTokensTotalFromResponsesInput(inputTokens int, upstreamType string, hasClaudeCache bool) int {
+	if upstreamType != "responses" || inputTokens <= 0 {
+		return 0
+	}
+	if inputTokens <= 1 && !hasClaudeCache {
+		return 0
+	}
+	return inputTokens
+}
+
+func metricsUsageFromResponsesUsage(usage types.ResponsesUsage, promptTokensTotal int) *types.Usage {
+	cacheReadTokens := usage.CacheReadInputTokens
+	if cacheReadTokens == 0 && usage.InputTokensDetails != nil && usage.InputTokensDetails.CachedTokens > 0 {
+		cacheReadTokens = usage.InputTokensDetails.CachedTokens
+	}
+
 	return &types.Usage{
-		InputTokens:                responsesResp.Usage.InputTokens,
-		OutputTokens:               responsesResp.Usage.OutputTokens,
-		CacheCreationInputTokens:   responsesResp.Usage.CacheCreationInputTokens,
-		CacheReadInputTokens:       responsesResp.Usage.CacheReadInputTokens,
-		CacheCreation5mInputTokens: responsesResp.Usage.CacheCreation5mInputTokens,
-		CacheCreation1hInputTokens: responsesResp.Usage.CacheCreation1hInputTokens,
-		CacheTTL:                   responsesResp.Usage.CacheTTL,
-	}, nil
+		InputTokens:                usage.InputTokens,
+		OutputTokens:               usage.OutputTokens,
+		CacheCreationInputTokens:   usage.CacheCreationInputTokens,
+		CacheReadInputTokens:       cacheReadTokens,
+		PromptTokensTotal:          promptTokensTotal,
+		CacheCreation5mInputTokens: usage.CacheCreation5mInputTokens,
+		CacheCreation1hInputTokens: usage.CacheCreation1hInputTokens,
+		CacheTTL:                   usage.CacheTTL,
+	}
 }
 
 // patchResponsesUsage 补全 Responses 响应的 Token 统计
@@ -690,6 +724,7 @@ func handleStreamSuccess(
 	hasUsage := false
 	needTokenPatch := false
 	clientGone := false
+	promptTokensTotal := 0
 
 	// processLine 处理单行数据（复用于缓冲行回放和后续读取）
 	processLine := func(line string) {
@@ -748,6 +783,16 @@ func handleStreamSuccess(
 					}
 				}
 				updateResponsesStreamUsage(&collectedUsage, usageData)
+				if !needConvert {
+					candidatePromptTokensTotal := promptTokensTotalFromResponsesInput(
+						usageData.InputTokens,
+						upstreamType,
+						usageData.HasClaudeCache,
+					)
+					if candidatePromptTokensTotal > promptTokensTotal {
+						promptTokensTotal = candidatePromptTokensTotal
+					}
+				}
 			}
 
 			// 在 response.completed 事件前注入/修补 usage
@@ -844,7 +889,7 @@ func handleStreamSuccess(
 	}
 
 	// 返回收集到的 usage 数据
-	return &types.Usage{
+	return metricsUsageFromResponsesUsage(types.ResponsesUsage{
 		InputTokens:                collectedUsage.InputTokens,
 		OutputTokens:               collectedUsage.OutputTokens,
 		CacheCreationInputTokens:   collectedUsage.CacheCreationInputTokens,
@@ -852,7 +897,7 @@ func handleStreamSuccess(
 		CacheCreation5mInputTokens: collectedUsage.CacheCreation5mInputTokens,
 		CacheCreation1hInputTokens: collectedUsage.CacheCreation1hInputTokens,
 		CacheTTL:                   collectedUsage.CacheTTL,
-	}, nil
+	}, promptTokensTotal), nil
 }
 
 // responsesStreamUsage 流式响应 usage 收集结构

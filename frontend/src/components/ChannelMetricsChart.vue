@@ -52,7 +52,7 @@
           />
         </div>
 
-        <!-- Success rate chart -->
+        <!-- Availability chart -->
         <div class="chart-item">
           <div class="text-caption text-medium-emphasis mb-1">{{ t('chart.successRate') }}</div>
           <apexchart
@@ -183,7 +183,7 @@ const requestCountOptions = computed<ApexOptions>(() => ({
   }
 }))
 
-// Success rate chart options
+// Availability chart options
 const successRateOptions = computed<ApexOptions>(() => ({
   ...baseChartOptions.value,
   colors: ['#4CAF50'],
@@ -218,7 +218,7 @@ const requestCountSeries = computed(() => {
   }]
 })
 
-// Success rate series data
+// Availability series data
 const successRateSeries = computed(() => {
   if (!historyData.value || !historyData.value.dataPoints) return []
   return [{

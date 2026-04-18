@@ -56,7 +56,7 @@
           <div v-show="matchesSearch(element)" class="channel-item-wrapper">
             <div
               class="channel-row"
-              :class="{ 'is-suspended': element.status === 'suspended' }"
+              :class="getChannelRowClass(element)"
               @click="toggleChannelChart(element.index)"
             >
               <!-- SVG activity waveform bar chart background -->
@@ -271,9 +271,9 @@
 
             <!-- Action buttons -->
             <div class="channel-actions" @click.stop>
-              <!-- Show resume button for suspended status -->
+              <!-- Show resume button for breaker-managed channels -->
               <v-btn
-                v-if="element.status === 'suspended'"
+                v-if="isBreakerManagedChannel(element)"
                 icon
                 size="x-small"
                 variant="text"
@@ -358,7 +358,7 @@
                     <v-list-item-title>{{ t('orchestration.moveBottom') }}</v-list-item-title>
                   </v-list-item>
                   <v-divider />
-                  <v-list-item v-if="element.status === 'suspended'" @click="resumeChannel(element.index)">
+                  <v-list-item v-if="isBreakerManagedChannel(element)" @click="resumeChannel(element.index)">
                     <template #prepend>
                       <v-icon size="small" color="success">mdi-play-circle</v-icon>
                     </template>
@@ -542,7 +542,8 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, defineAsyncComponent } from 'vue'
 import draggable from 'vuedraggable'
-import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats, type ChannelRecentActivity, expandSparseSegments } from '../services/api'
+import { api, type Channel, type ChannelMetrics, type ChannelStatus, type TimeWindowStats, type ChannelRecentActivity, type SchedulerStatsResponse, expandSparseSegments } from '../services/api'
+import { getChannelTypeApi } from '../utils/channelTypeApi'
 import { useI18n } from '../i18n'
 import ChannelStatusBadge from './ChannelStatusBadge.vue'
 // Lazy-load chart components to reduce initial JS bundle size
@@ -555,15 +556,7 @@ const props = defineProps<{
   channelType: 'messages' | 'chat' | 'responses' | 'gemini'
   // Optional: metrics and stats passed from the parent component (when using the dashboard API)
   dashboardMetrics?: ChannelMetrics[]
-  dashboardStats?: {
-    multiChannelMode: boolean
-    activeChannelCount: number
-    traceAffinityCount: number
-    traceAffinityTTL: string
-    failureThreshold: number
-    windowSize: number
-    circuitRecoveryTime?: string
-  }
+  dashboardStats?: SchedulerStatsResponse
   // Optional: realtime activity data passed from the parent component
   dashboardRecentActivity?: ChannelRecentActivity[]
 }>()
@@ -578,6 +571,7 @@ const emit = defineEmits<{
   (_e: 'success', _message: string): void
 }>()
 const { t } = useI18n()
+const getCurrentChannelTypeApi = () => getChannelTypeApi(api, props.channelType)
 
 // State
 const metrics = ref<ChannelMetrics[]>([])
@@ -597,14 +591,7 @@ const matchesSearch = (channel: Channel) => {
   )
 }
 
-const schedulerStats = ref<{
-  multiChannelMode: boolean
-  activeChannelCount: number
-  traceAffinityCount: number
-  traceAffinityTTL: string
-  failureThreshold: number
-  windowSize: number
-} | null>(null)
+const schedulerStats = ref<SchedulerStatsResponse | null>(null)
 const isLoadingMetrics = ref(false)
 const isSavingOrder = ref(false)
 
@@ -1238,15 +1225,10 @@ const hasActivityData = (channelIndex: number): boolean => {
 const refreshMetrics = async () => {
   isLoadingMetrics.value = true
   try {
+    const channelTypeApi = getCurrentChannelTypeApi()
     const [metricsData, statsData] = await Promise.all([
-      props.channelType === 'chat'
-        ? api.getChatChannelMetrics()
-        : props.channelType === 'gemini'
-          ? api.getGeminiChannelMetrics()
-          : props.channelType === 'responses'
-            ? api.getResponsesChannelMetrics()
-            : api.getChannelMetrics(),
-      api.getSchedulerStats(props.channelType)
+      channelTypeApi.getMetrics(),
+      channelTypeApi.getSchedulerStats()
     ])
     metrics.value = metricsData
     schedulerStats.value = statsData
@@ -1268,15 +1250,7 @@ const saveOrder = async () => {
   isSavingOrder.value = true
   try {
     const order = activeChannels.value.map(ch => ch.index)
-    if (props.channelType === 'chat') {
-      await api.reorderChatChannels(order)
-    } else if (props.channelType === 'gemini') {
-      await api.reorderGeminiChannels(order)
-    } else if (props.channelType === 'responses') {
-      await api.reorderResponsesChannels(order)
-    } else {
-      await api.reorderChannels(order)
-    }
+    await getCurrentChannelTypeApi().reorder(order)
     // Do not call emit('refresh') to avoid list flicker caused by parent refresh
   } catch (error) {
     console.error('Failed to save order:', error)
@@ -1311,19 +1285,22 @@ const moveChannelToBottom = async (channelIndex: number) => {
   await saveOrder()
 }
 
+const setChannelStatusInternal = async (
+  channelId: number,
+  status: ChannelStatus,
+  options: { refresh?: boolean } = {}
+) => {
+  const { refresh = true } = options
+  await getCurrentChannelTypeApi().setStatus(channelId, status)
+  if (refresh) {
+    emit('refresh')
+  }
+}
+
 // Set channel status
 const setChannelStatus = async (channelId: number, status: ChannelStatus) => {
   try {
-    if (props.channelType === 'chat') {
-      await api.setChatChannelStatus(channelId, status)
-    } else if (props.channelType === 'gemini') {
-      await api.setGeminiChannelStatus(channelId, status)
-    } else if (props.channelType === 'responses') {
-      await api.setResponsesChannelStatus(channelId, status)
-    } else {
-      await api.setChannelStatus(channelId, status)
-    }
-    emit('refresh')
+    await setChannelStatusInternal(channelId, status)
   } catch (error) {
     console.error('Failed to set channel status:', error)
     const errorMessage = error instanceof Error ? error.message : t('addChannel.unknownError')
@@ -1336,22 +1313,56 @@ const enableChannel = async (channelId: number) => {
   await setChannelStatus(channelId, 'active')
 }
 
+const resumeChannelInternal = async (
+  channelId: number,
+  options: { refresh?: boolean, notify?: boolean } = {}
+) => {
+  const { refresh = true, notify = true } = options
+
+  const result = await getCurrentChannelTypeApi().resume(channelId)
+  await setChannelStatusInternal(channelId, 'active', { refresh })
+
+  if (notify) {
+    if ((result?.restoredKeys || 0) > 0) {
+      emit('success', t('orchestration.resumeSuccessWithKeys', { count: result?.restoredKeys || 0 }))
+    } else {
+      emit('success', t('orchestration.resumeSuccess'))
+    }
+  }
+
+  return result
+}
+
+const isTrippedChannel = (channel: Channel): boolean => {
+  const channelMetrics = getChannelMetrics(channel.index)
+  return channel.status === 'suspended' || channelMetrics?.circuitState === 'open'
+}
+
+const isBreakerManagedChannel = (channel: Channel): boolean => {
+  const channelMetrics = getChannelMetrics(channel.index)
+  return channel.status === 'suspended' || channelMetrics?.circuitState === 'open' || channelMetrics?.circuitState === 'half_open'
+}
+
+const getChannelRowClass = (channel: Channel) => {
+  return {
+    'is-tripped': isTrippedChannel(channel)
+  }
+}
+
 // Resume channel (reset metrics and set it to active)
 const resumeChannel = async (channelId: number) => {
   try {
-    if (props.channelType === 'chat') {
-      await api.resumeChatChannel(channelId)
-    } else if (props.channelType === 'gemini') {
-      await api.resumeGeminiChannel(channelId)
-    } else if (props.channelType === 'responses') {
-      await api.resumeResponsesChannel(channelId)
-    } else {
-      await api.resumeChannel(channelId)
-    }
-    await setChannelStatus(channelId, 'active')
+    await resumeChannelInternal(channelId)
   } catch (error) {
     console.error('Failed to resume channel:', error)
+    const errorMessage = error instanceof Error ? error.message : t('addChannel.unknownError')
+    emit('error', t('toast.operationFailed', { message: errorMessage }))
   }
+}
+
+// Set channel promotion via the correct API for the current channel type
+const setChannelPromotionInternal = async (channelId: number, durationSeconds: number) => {
+  await getCurrentChannelTypeApi().promote(channelId, durationSeconds)
 }
 
 // Set the channel promotion period (boost priority)
@@ -1359,33 +1370,17 @@ const setPromotion = async (channel: Channel) => {
   try {
     const PROMOTION_DURATION = 300 // 5 minutes
 
-    // If the channel is in a tripped state, resume it first
-    if (channel.status === 'suspended') {
-      if (props.channelType === 'chat') {
-        await api.resumeChatChannel(channel.index)
-      } else if (props.channelType === 'gemini') {
-        await api.resumeGeminiChannel(channel.index)
-      } else if (props.channelType === 'responses') {
-        await api.resumeResponsesChannel(channel.index)
-      } else {
-        await api.resumeChannel(channel.index)
-      }
-      await setChannelStatus(channel.index, 'active')
+    // If the channel is in a breaker-managed state, resume it first
+    if (isBreakerManagedChannel(channel)) {
+      await resumeChannelInternal(channel.index, { refresh: false, notify: false })
     }
 
-    if (props.channelType === 'chat') {
-      await api.setChatChannelPromotion(channel.index, PROMOTION_DURATION)
-    } else if (props.channelType === 'gemini') {
-      await api.setGeminiChannelPromotion(channel.index, PROMOTION_DURATION)
-    } else if (props.channelType === 'responses') {
-      await api.setResponsesChannelPromotion(channel.index, PROMOTION_DURATION)
-    } else {
-      await api.setChannelPromotion(channel.index, PROMOTION_DURATION)
-    }
+    await setChannelPromotionInternal(channel.index, PROMOTION_DURATION)
     emit('refresh')
     // Notify the user
     emit('success', t('orchestration.promotionSuccess', { name: channel.name }))
   } catch (error) {
+    emit('refresh')
     console.error('Failed to set promotion:', error)
     const errorMessage = error instanceof Error ? error.message : t('addChannel.unknownError')
     emit('error', t('toast.operationFailed', { message: errorMessage }))
@@ -1558,23 +1553,26 @@ defineExpose({
   border-color: rgba(255, 255, 255, 0.7);
 }
 
-/* Visual distinction for suspended status */
-.channel-row.is-suspended {
-  background: rgba(var(--v-theme-warning), 0.1);
-  border-color: rgb(var(--v-theme-warning));
-  box-shadow: 4px 4px 0 0 rgb(var(--v-theme-on-surface));
+/* Visual distinction for unavailable channels */
+.channel-row.is-tripped {
+  background: var(--ccx-channel-row-suspended-bg);
+  border-color: var(--ccx-channel-row-suspended-border);
+  box-shadow: var(--ccx-channel-row-shadow);
 }
-.channel-row.is-suspended:hover {
-  background: rgba(var(--v-theme-warning), 0.15);
-  box-shadow: 6px 6px 0 0 rgb(var(--v-theme-on-surface));
-}
-
-.v-theme--dark .channel-row.is-suspended {
-  box-shadow: 4px 4px 0 0 rgba(255, 255, 255, 0.7);
+.channel-row.is-tripped:hover {
+  background: var(--ccx-channel-row-suspended-hover-bg);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
 }
 
-.v-theme--dark .channel-row.is-suspended:hover {
-  box-shadow: 6px 6px 0 0 rgba(255, 255, 255, 0.7);
+.v-theme--dark .channel-row.is-tripped {
+  background: var(--ccx-channel-row-suspended-bg);
+  border-color: var(--ccx-channel-row-suspended-border);
+  box-shadow: var(--ccx-channel-row-shadow);
+}
+
+.v-theme--dark .channel-row.is-tripped:hover {
+  background: var(--ccx-channel-row-suspended-hover-bg);
+  box-shadow: var(--ccx-channel-row-shadow-hover);
 }
 
 .channel-row.ghost {
@@ -1645,7 +1643,7 @@ defineExpose({
 }
 
 .channel-name .font-weight-medium {
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   flex-shrink: 0;
 }
 
@@ -1739,14 +1737,14 @@ defineExpose({
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 3px;
   width: 100%;
-  margin-top: 2px;
-  font-size: 10px;
-  font-weight: 700;
-  color: rgba(var(--v-theme-on-surface), 0.72);
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(var(--v-theme-on-surface), 0.68);
   text-transform: uppercase;
-  letter-spacing: 0.6px;
+  letter-spacing: 0;
 }
 
 .channel-keys {
@@ -1897,11 +1895,12 @@ defineExpose({
   }
 
   .rpm-tpm-values {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .rpm-tpm-labels {
-    font-size: 8px;
+    font-size: 10px;
+    letter-spacing: 0;
   }
 }
 
@@ -1971,7 +1970,7 @@ defineExpose({
 
 .metrics-chip {
   font-weight: 700;
-  letter-spacing: 0.1px;
+  letter-spacing: 0;
 }
 
 .request-summary {

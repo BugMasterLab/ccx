@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-nocheck
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -45,7 +46,7 @@ describe('createTranslator', () => {
 
   it('returns the key when the message is unknown', () => {
     const t = createTranslator('en')
-    expect((t as unknown as (key: string) => string)('missing.key')).toBe('missing.key')
+    expect((t as unknown as (_key: string) => string)('missing.key')).toBe('missing.key')
   })
 })
 
@@ -84,8 +85,8 @@ describe('messages', () => {
     ] as const
 
     for (const locale of Object.keys(messages) as Array<keyof typeof messages>) {
-      for (const key of requiredKeys) {
-        expect(messages[locale][key as keyof (typeof messages)[typeof locale]]).toBeTruthy()
+      for (const requiredKey of requiredKeys) {
+        expect(messages[locale][requiredKey as keyof (typeof messages)[typeof locale]]).toBeTruthy()
       }
     }
   })

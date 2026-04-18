@@ -22,6 +22,7 @@ export interface ChannelFormLike {
   routePrefix: string
   supportedModels: string[]
   autoBlacklistBalance: boolean
+  normalizeMetadataUserId: boolean
   rpm?: number
 
 }
@@ -83,6 +84,7 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     routePrefix: form.routePrefix.trim(),
     supportedModels: form.supportedModels,
     autoBlacklistBalance: form.autoBlacklistBalance,
+    normalizeMetadataUserId: form.normalizeMetadataUserId,
     rpm: form.rpm && form.rpm > 0 ? form.rpm : 10
   }
 

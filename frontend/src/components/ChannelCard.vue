@@ -248,8 +248,8 @@
                   <div class="d-flex flex-column flex-1-1 mr-2" style="min-width: 0;">
                     <code class="text-caption text-truncate">{{ maskApiKey(dk.key) }}</code>
                     <div class="d-flex align-center ga-1 mt-1">
-                      <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : dk.reason === 'rate_limit' ? 'info' : 'error'" variant="tonal">
-                        {{ t(getBlacklistReasonKey(dk.reason)) }}
+                      <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : 'error'" variant="tonal">
+                        {{ t(getDisabledKeyReasonLabel(dk.reason)) }}
                       </v-chip>
                       <span class="text-caption text-medium-emphasis">{{ formatDisabledTime(dk.disabledAt) }}</span>
                     </div>
@@ -333,7 +333,17 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Channel } from '../services/api'
-import { useI18n, type MessageKey } from '../i18n'
+import { useI18n } from '../i18n'
+
+const disabledKeyReasonLabelMap = {
+  insufficient_balance: 'channelCard.blacklistReason.insufficient_balance',
+  unavailable: 'channelCard.blacklistReason.unavailable',
+  rate_limited: 'channelCard.blacklistReason.rate_limited',
+  invalid: 'channelCard.blacklistReason.invalid',
+  authentication_error: 'channelCard.blacklistReason.authentication_error',
+  permission_error: 'channelCard.blacklistReason.permission_error',
+  unknown: 'channelCard.blacklistReason.unknown',
+} as const
 
 interface Props {
   channel: Channel
@@ -342,21 +352,10 @@ interface Props {
 const props = defineProps<Props>()
 const { t } = useI18n()
 
-const getBlacklistReasonKey = (reason: string): MessageKey => {
-  switch (reason) {
-    case 'insufficient_balance':
-      return 'channelCard.blacklistReason.insufficient_balance'
-    case 'permission_error':
-      return 'channelCard.blacklistReason.permission_error'
-    case 'rate_limit':
-      return 'channelCard.blacklistReason.rate_limit'
-    case 'authentication_error':
-    default:
-      return 'channelCard.blacklistReason.authentication_error'
-  }
+const getDisabledKeyReasonLabel = (reason?: string) => {
+  return disabledKeyReasonLabelMap[reason as keyof typeof disabledKeyReasonLabelMap] || disabledKeyReasonLabelMap.unknown
 }
 
-// 复制功能相关状态
 const copiedKeyIndex = ref<number | null>(null)
 
 defineEmits<{

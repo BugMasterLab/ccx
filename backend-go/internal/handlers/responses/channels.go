@@ -30,31 +30,32 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			priority := config.GetChannelPriority(&up, i)
 
 			upstreams[i] = gin.H{
-				"index":                i,
-				"name":                 up.Name,
-				"serviceType":          up.ServiceType,
-				"baseUrl":              up.BaseURL,
-				"baseUrls":             up.BaseURLs,
-				"apiKeys":              up.APIKeys,
-				"description":          up.Description,
-				"website":              up.Website,
-				"insecureSkipVerify":   up.InsecureSkipVerify,
-				"modelMapping":         up.ModelMapping,
-				"reasoningMapping":     up.ReasoningMapping,
-				"textVerbosity":        up.TextVerbosity,
-				"fastMode":             up.FastMode,
-				"latency":              nil,
-				"status":               status,
-				"priority":             priority,
-				"promotionUntil":       up.PromotionUntil,
-				"lowQuality":           up.LowQuality,
-				"rpm":                  up.RPM,
-				"customHeaders":        up.CustomHeaders,
-				"proxyUrl":             up.ProxyURL,
-				"supportedModels":      up.SupportedModels,
-				"routePrefix":          up.RoutePrefix,
-				"disabledApiKeys":      up.DisabledAPIKeys,
-				"autoBlacklistBalance": up.IsAutoBlacklistBalanceEnabled(),
+				"index":                   i,
+				"name":                    up.Name,
+				"serviceType":             up.ServiceType,
+				"baseUrl":                 up.BaseURL,
+				"baseUrls":                up.BaseURLs,
+				"apiKeys":                 up.APIKeys,
+				"description":             up.Description,
+				"website":                 up.Website,
+				"insecureSkipVerify":      up.InsecureSkipVerify,
+				"modelMapping":            up.ModelMapping,
+				"reasoningMapping":        up.ReasoningMapping,
+				"textVerbosity":           up.TextVerbosity,
+				"fastMode":                up.FastMode,
+				"latency":                 nil,
+				"status":                  status,
+				"priority":                priority,
+				"promotionUntil":          up.PromotionUntil,
+				"lowQuality":              up.LowQuality,
+				"rpm":                     up.RPM,
+				"customHeaders":           up.CustomHeaders,
+				"proxyUrl":                up.ProxyURL,
+				"supportedModels":         up.SupportedModels,
+				"routePrefix":             up.RoutePrefix,
+				"disabledApiKeys":         up.DisabledAPIKeys,
+				"autoBlacklistBalance":    up.IsAutoBlacklistBalanceEnabled(),
+				"normalizeMetadataUserId": up.IsNormalizeMetadataUserIDEnabled(),
 			}
 		}
 
@@ -123,7 +124,7 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 			return
 		}
 
-		_, err = cfgManager.RemoveResponsesUpstream(id)
+		removed, err := cfgManager.RemoveResponsesUpstream(id)
 		if err != nil {
 			if strings.Contains(err.Error(), "无效的") {
 				c.JSON(404, gin.H{"error": "Upstream not found"})
@@ -133,7 +134,8 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 			return
 		}
 
-		channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses).ClearAll()
+		channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses).RemoveAndShift(id)
+		channelScheduler.DeleteChannelMetrics(removed, scheduler.ChannelKindResponses)
 
 		c.JSON(200, gin.H{"message": "Responses upstream deleted successfully"})
 	}
@@ -318,25 +320,29 @@ func pingResponsesUpstream(upstream *config.UpstreamConfig) gin.H {
 
 	var (
 		testURL string
+		method  string
 		req     *http.Request
 	)
 	switch upstream.ServiceType {
 	case "claude":
-		testURL = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
-		req, _ = http.NewRequest("OPTIONS", testURL, nil)
+		method = http.MethodOptions
+		testURL = buildMessagesURL(baseURL)
+		req, _ = http.NewRequest(method, testURL, nil)
 		if len(upstream.APIKeys) > 0 {
 			utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 			req.Header.Set("anthropic-version", "2023-06-01")
 		}
 	case "gemini":
-		testURL = fmt.Sprintf("%s/v1beta/models", strings.TrimRight(baseURL, "/"))
-		req, _ = http.NewRequest("GET", testURL, nil)
+		method = http.MethodGet
+		testURL = buildGeminiModelsURL(baseURL)
+		req, _ = http.NewRequest(method, testURL, nil)
 		if len(upstream.APIKeys) > 0 {
 			req.Header.Set("x-goog-api-key", upstream.APIKeys[0])
 		}
 	default:
-		testURL = fmt.Sprintf("%s/v1/models", strings.TrimRight(baseURL, "/"))
-		req, _ = http.NewRequest("GET", testURL, nil)
+		method = http.MethodGet
+		testURL = buildModelsURL(baseURL)
+		req, _ = http.NewRequest(method, testURL, nil)
 		if len(upstream.APIKeys) > 0 {
 			utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 		}
@@ -398,8 +404,8 @@ func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	}
 }
 
-// buildModelsURL 构建 models 端点的 URL
-func buildModelsURL(baseURL string) string {
+// buildEndpointURL 构建带版本前缀的端点 URL
+func buildEndpointURL(baseURL, versionPrefix, endpoint string) string {
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
 	if skipVersionPrefix {
 		baseURL = strings.TrimSuffix(baseURL, "#")
@@ -409,12 +415,24 @@ func buildModelsURL(baseURL string) string {
 	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
 	hasVersionSuffix := versionPattern.MatchString(baseURL)
 
-	endpoint := "/models"
 	if !hasVersionSuffix && !skipVersionPrefix {
-		endpoint = "/v1" + endpoint
+		baseURL += versionPrefix
 	}
 
 	return baseURL + endpoint
+}
+
+func buildMessagesURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/messages")
+}
+
+func buildGeminiModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1beta", "/models")
+}
+
+// buildModelsURL 构建 models 端点的 URL
+func buildModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/models")
 }
 
 // GetModelsRequest 获取模型列表的请求体

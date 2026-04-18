@@ -81,8 +81,8 @@ func Handler(
 		// 判断是否流式
 		isStream := strings.Contains(c.Request.URL.Path, "streamGenerateContent")
 
-		// 提取对话标识用于 Trace 亲和性
-		userID := common.ExtractConversationID(c, bodyBytes)
+		// 提取统一会话标识用于 Trace 亲和性
+		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 
 		// 记录原始请求信息
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Gemini")
@@ -172,7 +172,7 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindGemini, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, geminiReq, model, isStream)
 				},
 				model,
@@ -259,7 +259,7 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, geminiReq, model, isStream)
 		},
 		model,

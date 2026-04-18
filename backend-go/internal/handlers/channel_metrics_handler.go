@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"sort"
 	"strconv"
@@ -39,6 +40,9 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,  // 各 Key 的详细指标
 				"timeWindows":         resp.TimeWindows, // 分时段统计 (15m, 1h, 6h, 24h)
 			}
@@ -51,6 +55,9 @@ func GetChannelMetricsWithConfig(metricsManager *metrics.MetricsManager, cfgMana
 			}
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
+			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
 			}
 
 			result = append(result, item)
@@ -85,6 +92,8 @@ func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 				"failureCount":        m.FailureCount,
 				"successRate":         successRate,
 				"consecutiveFailures": m.ConsecutiveFailures,
+				"circuitState":        m.CircuitState.String(),
+				"halfOpenSuccesses":   m.HalfOpenSuccesses,
 			}
 
 			if m.LastSuccessAt != nil {
@@ -95,6 +104,9 @@ func GetAllKeyMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 			}
 			if m.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = m.CircuitBrokenAt.Format("2006-01-02T15:04:05Z07:00")
+			}
+			if m.NextRetryAt != nil {
+				item["nextRetryAt"] = m.NextRetryAt.Format("2006-01-02T15:04:05Z07:00")
 			}
 
 			result = append(result, item)
@@ -131,6 +143,8 @@ func GetChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 				"failureCount":        m.FailureCount,
 				"successRate":         successRate,
 				"consecutiveFailures": m.ConsecutiveFailures,
+				"circuitState":        m.CircuitState.String(),
+				"halfOpenSuccesses":   m.HalfOpenSuccesses,
 			}
 
 			if m.LastSuccessAt != nil {
@@ -141,6 +155,9 @@ func GetChannelMetrics(metricsManager *metrics.MetricsManager) gin.HandlerFunc {
 			}
 			if m.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = m.CircuitBrokenAt.Format("2006-01-02T15:04:05Z07:00")
+			}
+			if m.NextRetryAt != nil {
+				item["nextRetryAt"] = m.NextRetryAt.Format("2006-01-02T15:04:05Z07:00")
 			}
 
 			result = append(result, item)
@@ -156,9 +173,9 @@ func GetResponsesChannelMetrics(metricsManager *metrics.MetricsManager) gin.Hand
 	return GetChannelMetrics(metricsManager)
 }
 
-// ResumeChannel 恢复熔断渠道（重置熔断状态，保留历史统计）
+// ResumeChannel 恢复熔断渠道（重置熔断状态、恢复拉黑 Key，保留历史统计）
 // isResponses 参数指定是 Messages 渠道还是 Responses 渠道
-func ResumeChannel(sch *scheduler.ChannelScheduler, isResponses bool) gin.HandlerFunc {
+func ResumeChannel(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, isResponses bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
 		id, err := strconv.Atoi(idStr)
@@ -167,16 +184,30 @@ func ResumeChannel(sch *scheduler.ChannelScheduler, isResponses bool) gin.Handle
 			return
 		}
 
-		// 重置渠道所有 Key 的熔断状态（保留历史统计）
+		apiType := "Messages"
 		kind := scheduler.ChannelKindMessages
 		if isResponses {
+			apiType = "Responses"
 			kind = scheduler.ChannelKindResponses
+		}
+
+		// 先恢复被拉黑的 Key，再重置渠道所有 Key 的熔断状态，确保恢复出来的 Key 也被重置
+		restoredCount, err := cfgManager.RestoreAllKeys(apiType, id)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
 		}
 		sch.ResetChannelMetrics(id, kind)
 
+		message := "渠道已恢复，熔断状态已重置（历史统计保留）"
+		if restoredCount > 0 {
+			message = fmt.Sprintf("渠道已恢复，熔断状态已重置，同时恢复了 %d 个被拉黑的 Key", restoredCount)
+		}
+
 		c.JSON(200, gin.H{
-			"success": true,
-			"message": "渠道已恢复，熔断状态已重置（历史统计保留）",
+			"success":      true,
+			"message":      message,
+			"restoredKeys": restoredCount,
 		})
 	}
 }
@@ -202,13 +233,17 @@ func GetSchedulerStats(sch *scheduler.ChannelScheduler) gin.HandlerFunc {
 		}
 
 		stats := gin.H{
-			"multiChannelMode":    sch.IsMultiChannelMode(kind),
-			"activeChannelCount":  sch.GetActiveChannelCount(kind),
-			"traceAffinityCount":  sch.GetTraceAffinityManager().Size(),
-			"traceAffinityTTL":    sch.GetTraceAffinityManager().GetTTL().String(),
-			"failureThreshold":    metricsManager.GetFailureThreshold() * 100,
-			"windowSize":          metricsManager.GetWindowSize(),
-			"circuitRecoveryTime": metricsManager.GetCircuitRecoveryTime().String(),
+			"multiChannelMode":                      sch.IsMultiChannelMode(kind),
+			"activeChannelCount":                    sch.GetActiveChannelCount(kind),
+			"traceAffinityCount":                    sch.GetTraceAffinityManager().Size(),
+			"traceAffinityTTL":                      sch.GetTraceAffinityManager().GetTTL().String(),
+			"failureThreshold":                      metricsManager.GetFailureThreshold() * 100,
+			"windowSize":                            metricsManager.GetWindowSize(),
+			"circuitRecoveryTime":                   metricsManager.GetCircuitRecoveryTime().String(),
+			"consecutiveRetryableFailuresThreshold": metricsManager.GetConsecutiveRetryableFailuresThreshold(),
+			"halfOpenSuccessTarget":                 metricsManager.GetHalfOpenSuccessTarget(),
+			"circuitBackoffBase":                    metricsManager.GetCircuitBackoffBase().String(),
+			"circuitBackoffMax":                     metricsManager.GetCircuitBackoffMax().String(),
 		}
 
 		c.JSON(200, stats)
@@ -320,8 +355,8 @@ func GetChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager
 	return func(c *gin.Context) {
 		// 解析 duration 参数（支持 1h, 6h, 24h, 7d, 30d）
 		durationStr := c.DefaultQuery("duration", "24h")
-		duration := parseExtendedDuration(durationStr)
-		if duration <= 0 {
+		duration, err := parseExtendedDuration(durationStr)
+		if err != nil || duration <= 0 {
 			c.JSON(400, gin.H{"error": "Invalid duration parameter"})
 			return
 		}
@@ -429,14 +464,15 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 				duration = time.Minute
 			}
 		} else {
-			duration, err = time.ParseDuration(durationStr)
+			duration, err = parseExtendedDuration(durationStr)
 			if err != nil {
-				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, or today"})
+				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
 				return
 			}
 		}
 
-		// 限制最大查询范围为 24 小时
+		// 限制最大查询范围为 24 小时（Key 级历史数据仅保留在内存中）
+		// 注意：全局统计支持 30 天是因为使用 SQLite 持久化，但 Key 级数据未持久化
 		if duration > 24*time.Hour {
 			duration = 24 * time.Hour
 		}
@@ -460,6 +496,7 @@ func GetChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfgMana
 			// 1h = 60 points (1m interval)
 			// 6h = 72 points (5m interval)
 			// 24h = 96 points (15m interval)
+			// 注意：Key 级历史数据最大支持 24h（内存限制）
 			switch {
 			case duration <= time.Hour:
 				interval = time.Minute
@@ -615,31 +652,32 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 			priority := config.GetChannelPriority(&up, i)
 
 			channel := gin.H{
-				"index":                i,
-				"name":                 up.Name,
-				"serviceType":          up.ServiceType,
-				"baseUrl":              up.BaseURL,
-				"baseUrls":             up.BaseURLs,
-				"apiKeys":              up.APIKeys,
-				"description":          up.Description,
-				"website":              up.Website,
-				"insecureSkipVerify":   up.InsecureSkipVerify,
-				"modelMapping":         up.ModelMapping,
-				"reasoningMapping":     up.ReasoningMapping,
-				"textVerbosity":        up.TextVerbosity,
-				"fastMode":             up.FastMode,
-				"customHeaders":        up.CustomHeaders,
-				"proxyUrl":             up.ProxyURL,
-				"supportedModels":      up.SupportedModels,
-				"routePrefix":          up.RoutePrefix,
-				"disabledApiKeys":      up.DisabledAPIKeys,
-				"autoBlacklistBalance": up.IsAutoBlacklistBalanceEnabled(),
-				"latency":              nil,
-				"status":               status,
-				"priority":             priority,
-				"promotionUntil":       up.PromotionUntil,
-				"lowQuality":           up.LowQuality,
-				"rpm":                  up.RPM,
+				"index":                   i,
+				"name":                    up.Name,
+				"serviceType":             up.ServiceType,
+				"baseUrl":                 up.BaseURL,
+				"baseUrls":                up.BaseURLs,
+				"apiKeys":                 up.APIKeys,
+				"description":             up.Description,
+				"website":                 up.Website,
+				"insecureSkipVerify":      up.InsecureSkipVerify,
+				"modelMapping":            up.ModelMapping,
+				"reasoningMapping":        up.ReasoningMapping,
+				"textVerbosity":           up.TextVerbosity,
+				"fastMode":                up.FastMode,
+				"customHeaders":           up.CustomHeaders,
+				"proxyUrl":                up.ProxyURL,
+				"supportedModels":         up.SupportedModels,
+				"routePrefix":             up.RoutePrefix,
+				"disabledApiKeys":         up.DisabledAPIKeys,
+				"autoBlacklistBalance":    up.IsAutoBlacklistBalanceEnabled(),
+				"normalizeMetadataUserId": up.IsNormalizeMetadataUserIDEnabled(),
+				"latency":                 nil,
+				"status":                  status,
+				"priority":                priority,
+				"promotionUntil":          up.PromotionUntil,
+				"lowQuality":              up.LowQuality,
+				"rpm":                     up.RPM,
 			}
 
 			// Gemini 特有字段
@@ -666,6 +704,9 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,
 				"timeWindows":         resp.TimeWindows,
 			}
@@ -679,19 +720,26 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
 			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
+			}
 
 			metricsResult = append(metricsResult, item)
 		}
 
 		// 3. 构建 stats 数据
 		stats := gin.H{
-			"multiChannelMode":    sch.IsMultiChannelMode(kind),
-			"activeChannelCount":  sch.GetActiveChannelCount(kind),
-			"traceAffinityCount":  sch.GetTraceAffinityManager().Size(),
-			"traceAffinityTTL":    sch.GetTraceAffinityManager().GetTTL().String(),
-			"failureThreshold":    metricsManager.GetFailureThreshold() * 100,
-			"windowSize":          metricsManager.GetWindowSize(),
-			"circuitRecoveryTime": metricsManager.GetCircuitRecoveryTime().String(),
+			"multiChannelMode":                      sch.IsMultiChannelMode(kind),
+			"activeChannelCount":                    sch.GetActiveChannelCount(kind),
+			"traceAffinityCount":                    sch.GetTraceAffinityManager().Size(),
+			"traceAffinityTTL":                      sch.GetTraceAffinityManager().GetTTL().String(),
+			"failureThreshold":                      metricsManager.GetFailureThreshold() * 100,
+			"windowSize":                            metricsManager.GetWindowSize(),
+			"circuitRecoveryTime":                   metricsManager.GetCircuitRecoveryTime().String(),
+			"consecutiveRetryableFailuresThreshold": metricsManager.GetConsecutiveRetryableFailuresThreshold(),
+			"halfOpenSuccessTarget":                 metricsManager.GetHalfOpenSuccessTarget(),
+			"circuitBackoffBase":                    metricsManager.GetCircuitBackoffBase().String(),
+			"circuitBackoffMax":                     metricsManager.GetCircuitBackoffMax().String(),
 		}
 
 		// 4. 构建 recentActivity 数据（最近 15 分钟分段活跃度）
@@ -717,8 +765,8 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 func GetGeminiChannelMetricsHistory(metricsManager *metrics.MetricsManager, cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		durationStr := c.DefaultQuery("duration", "24h")
-		duration := parseExtendedDuration(durationStr)
-		if duration <= 0 {
+		duration, err := parseExtendedDuration(durationStr)
+		if err != nil || duration <= 0 {
 			c.JSON(400, gin.H{"error": "Invalid duration parameter"})
 			return
 		}
@@ -785,14 +833,15 @@ func GetGeminiChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, c
 				duration = time.Minute
 			}
 		} else {
-			duration, err = time.ParseDuration(durationStr)
+			duration, err = parseExtendedDuration(durationStr)
 			if err != nil {
-				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, or today"})
+				c.JSON(400, gin.H{"error": "Invalid duration parameter. Use: 1h, 6h, 24h, today, 7d, or 30d"})
 				return
 			}
 		}
 
-		// 限制最大查询范围为 24 小时
+		// 限制最大查询范围为 24 小时（Key 级历史数据仅保留在内存中）
+		// 注意：全局统计支持 30 天是因为使用 SQLite 持久化，但 Key 级数据未持久化
 		if duration > 24*time.Hour {
 			duration = 24 * time.Hour
 		}
@@ -897,6 +946,9 @@ func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager 
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,  // 各 Key 的详细指标
 				"timeWindows":         resp.TimeWindows, // 分时段统计 (15m, 1h, 6h, 24h)
 			}
@@ -909,6 +961,9 @@ func GetGeminiChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager 
 			}
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
+			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
 			}
 
 			result = append(result, item)
@@ -935,6 +990,9 @@ func GetChatChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *c
 				"errorRate":           resp.ErrorRate,
 				"consecutiveFailures": resp.ConsecutiveFailures,
 				"latency":             resp.Latency,
+				"circuitState":        resp.CircuitState,
+				"halfOpenSuccesses":   resp.HalfOpenSuccesses,
+				"breakerFailureRate":  resp.BreakerFailureRate,
 				"keyMetrics":          resp.KeyMetrics,
 				"timeWindows":         resp.TimeWindows,
 			}
@@ -946,6 +1004,9 @@ func GetChatChannelMetrics(metricsManager *metrics.MetricsManager, cfgManager *c
 			}
 			if resp.CircuitBrokenAt != nil {
 				item["circuitBrokenAt"] = *resp.CircuitBrokenAt
+			}
+			if resp.NextRetryAt != nil {
+				item["nextRetryAt"] = *resp.NextRetryAt
 			}
 			result = append(result, item)
 		}
@@ -1012,24 +1073,47 @@ func GetChatChannelKeyMetricsHistory(metricsManager *metrics.MetricsManager, cfg
 	}
 }
 
-// ResumeChannelWithKind 恢复指定类型的熔断渠道
-func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, kind scheduler.ChannelKind) gin.HandlerFunc {
+// ResumeChannelWithKind 恢复指定类型的熔断渠道（重置熔断状态、恢复拉黑 Key，保留历史统计）
+func ResumeChannelWithKind(sch *scheduler.ChannelScheduler, cfgManager *config.ConfigManager, kind scheduler.ChannelKind) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
 			c.JSON(400, gin.H{"error": "Invalid channel ID"})
 			return
 		}
+
+		apiType := "Messages"
+		switch kind {
+		case scheduler.ChannelKindResponses:
+			apiType = "Responses"
+		case scheduler.ChannelKindGemini:
+			apiType = "Gemini"
+		case scheduler.ChannelKindChat:
+			apiType = "Chat"
+		}
+
+		// 先恢复被拉黑的 Key，再重置渠道所有 Key 的熔断状态，确保恢复出来的 Key 也被重置
+		restoredCount, err := cfgManager.RestoreAllKeys(apiType, id)
+		if err != nil {
+			c.JSON(400, gin.H{"error": err.Error()})
+			return
+		}
 		sch.ResetChannelMetrics(id, kind)
-		c.JSON(200, gin.H{"success": true, "message": "渠道已恢复，熔断状态已重置（历史统计保留）"})
+
+		message := "渠道已恢复，熔断状态已重置（历史统计保留）"
+		if restoredCount > 0 {
+			message = fmt.Sprintf("渠道已恢复，熔断状态已重置，同时恢复了 %d 个被拉黑的 Key", restoredCount)
+		}
+
+		c.JSON(200, gin.H{"success": true, "message": message, "restoredKeys": restoredCount})
 	}
 }
 
 // parseHistoryDuration 解析历史数据查询参数
 func parseHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 	durationStr := c.DefaultQuery("duration", "24h")
-	duration := parseExtendedDuration(durationStr)
-	if duration <= 0 {
+	duration, err := parseExtendedDuration(durationStr)
+	if err != nil || duration <= 0 {
 		duration = 24 * time.Hour
 	}
 	maxDuration := 30 * 24 * time.Hour
@@ -1042,9 +1126,9 @@ func parseHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 // parseKeyHistoryDuration 解析 Key 历史数据查询参数（支持 today）
 func parseKeyHistoryDuration(c *gin.Context) (time.Duration, time.Duration) {
 	durationStr := c.DefaultQuery("duration", "6h")
-	duration := parseExtendedDuration(durationStr)
-	if duration < time.Minute {
-		duration = time.Minute
+	duration, err := parseExtendedDuration(durationStr)
+	if err != nil || duration < time.Minute {
+		duration = 6 * time.Hour // 回退到默认值
 	}
 	maxDuration := 30 * 24 * time.Hour
 	if duration > maxDuration {
@@ -1077,20 +1161,28 @@ func selectIntervalForDuration(intervalStr string, duration time.Duration) time.
 
 // parseExtendedDuration 解析扩展的时间范围字符串
 // 支持标准 Go duration (1h, 6h, 24h) 和扩展格式 (7d, 30d, today)
-func parseExtendedDuration(s string) time.Duration {
+func parseExtendedDuration(s string) (time.Duration, error) {
 	if s == "today" {
-		return metrics.CalculateTodayDuration()
+		d := metrics.CalculateTodayDuration()
+		if d < time.Minute {
+			d = time.Minute
+		}
+		return d, nil
 	}
 	// 尝试天数格式: 7d, 30d
 	if strings.HasSuffix(s, "d") {
 		dayStr := strings.TrimSuffix(s, "d")
-		if days, err := strconv.Atoi(dayStr); err == nil && days > 0 {
-			return time.Duration(days) * 24 * time.Hour
+		days, err := strconv.Atoi(dayStr)
+		if err != nil {
+			return 0, err
 		}
+		if days <= 0 {
+			return 0, fmt.Errorf("invalid duration: days must be positive, got %d", days)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
 	}
 	// 标准 Go duration
-	d, _ := time.ParseDuration(s)
-	return d
+	return time.ParseDuration(s)
 }
 
 // filterBucketsByURLs 按渠道的 URL 和 Key 过滤 SQLite 聚合数据

@@ -14,6 +14,121 @@
   border-color: #555 !important;
 }
 
+/* 全局状态主题变量 */
+:root {
+  --ccx-status-active-bg: #bbf7d0;
+  --ccx-status-active-fg: #166534;
+  --ccx-status-suspended-bg: #fef3c7;
+  --ccx-status-suspended-fg: #92400e;
+  --ccx-status-disabled-bg: #e5e7eb;
+  --ccx-status-disabled-fg: #6b7280;
+  --ccx-status-breaker-open-bg: #fecaca;
+  --ccx-status-breaker-open-fg: #991b1b;
+  --ccx-status-breaker-half-open-bg: #dbeafe;
+  --ccx-status-breaker-half-open-fg: #1d4ed8;
+  --ccx-status-error-bg: var(--ccx-status-breaker-open-bg);
+  --ccx-status-error-fg: var(--ccx-status-breaker-open-fg);
+  --ccx-status-unknown-bg: var(--ccx-status-disabled-bg);
+  --ccx-status-unknown-fg: var(--ccx-status-disabled-fg);
+
+  --ccx-status-active-dot-bg: #10b981;
+  --ccx-status-active-dot-border: #065f46;
+  --ccx-status-active-dot-glow: rgba(16, 185, 129, 0.3);
+  --ccx-status-suspended-dot-bg: #f59e0b;
+  --ccx-status-suspended-dot-border: #92400e;
+  --ccx-status-suspended-dot-glow: rgba(245, 158, 11, 0.3);
+  --ccx-status-disabled-dot-bg: #94a3b8;
+  --ccx-status-disabled-dot-border: #475569;
+  --ccx-status-breaker-open-dot-bg: #ef4444;
+  --ccx-status-breaker-open-dot-border: #991b1b;
+  --ccx-status-breaker-open-dot-glow: rgba(239, 68, 68, 0.3);
+  --ccx-status-breaker-half-open-dot-bg: #3b82f6;
+  --ccx-status-breaker-half-open-dot-border: #1d4ed8;
+  --ccx-status-breaker-half-open-dot-glow: rgba(59, 130, 246, 0.28);
+
+  --ccx-channel-row-shadow: 4px 4px 0 0 rgb(var(--v-theme-on-surface));
+  --ccx-channel-row-shadow-hover: 6px 6px 0 0 rgb(var(--v-theme-on-surface));
+  --ccx-channel-row-suspended-bg: rgba(var(--v-theme-warning), 0.1);
+  --ccx-channel-row-suspended-hover-bg: rgba(var(--v-theme-warning), 0.15);
+  --ccx-channel-row-suspended-border: rgb(var(--v-theme-warning));
+  --ccx-channel-row-breaker-open-bg: #fee2e2;
+  --ccx-channel-row-breaker-open-hover-bg: #fecaca;
+  --ccx-channel-row-breaker-open-border: #dc2626;
+  --ccx-channel-row-breaker-half-open-bg: #dbeafe;
+  --ccx-channel-row-breaker-half-open-hover-bg: #bfdbfe;
+  --ccx-channel-row-breaker-half-open-border: #2563eb;
+}
+
+.v-theme--dark {
+  --ccx-status-active-bg: #166534;
+  --ccx-status-active-fg: #bbf7d0;
+  --ccx-status-suspended-bg: #92400e;
+  --ccx-status-suspended-fg: #fef3c7;
+  --ccx-status-disabled-bg: #374151;
+  --ccx-status-disabled-fg: #9ca3af;
+  --ccx-status-breaker-open-bg: #7f1d1d;
+  --ccx-status-breaker-open-fg: #fecaca;
+  --ccx-status-breaker-half-open-bg: #1e3a8a;
+  --ccx-status-breaker-half-open-fg: #dbeafe;
+  --ccx-status-error-bg: #991b1b;
+  --ccx-status-error-fg: #fecaca;
+  --ccx-status-unknown-bg: #374151;
+  --ccx-status-unknown-fg: #9ca3af;
+
+  --ccx-channel-row-shadow: 4px 4px 0 0 rgba(255, 255, 255, 0.7);
+  --ccx-channel-row-shadow-hover: 6px 6px 0 0 rgba(255, 255, 255, 0.7);
+  --ccx-channel-row-breaker-open-bg: #7f1d1d;
+  --ccx-channel-row-breaker-open-hover-bg: #991b1b;
+  --ccx-channel-row-breaker-open-border: #fecaca;
+  --ccx-channel-row-breaker-half-open-bg: #1e3a8a;
+  --ccx-channel-row-breaker-half-open-hover-bg: #1d4ed8;
+  --ccx-channel-row-breaker-half-open-border: #dbeafe;
+}
+
+/* 能力测试 Tooltip（全局样式，兼容 teleport 到 body） */
+.pending-tooltip,
+.error-tooltip,
+.failure-tooltip,
+.success-tooltip {
+  font-weight: 600;
+  letter-spacing: 0;
+  max-width: 400px;
+  word-break: break-word;
+}
+
+.pending-tooltip {
+  color: #1e3a8a !important;
+  background-color: #f5f9ff !important;
+  border: 1px solid #bfdbfe !important;
+}
+
+.v-theme--dark .pending-tooltip {
+  color: #dbeafe !important;
+  background-color: #15233a !important;
+  border-color: #3b82f6 !important;
+}
+
+.error-tooltip,
+.failure-tooltip {
+  color: #991b1b !important;
+  background-color: #fff7f7 !important;
+  border: 1px solid #fecaca !important;
+}
+
+.success-tooltip {
+  color: #166534 !important;
+  background-color: #f6fff8 !important;
+  border: 1px solid #bbf7d0 !important;
+}
+
+/* 对话框标题统一样式 */
+.dialog-title {
+  font-size: 1.125rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 /* 全局基础样式 */
 html {
   font-family: 'Courier New', Consolas, 'Liberation Mono', monospace;

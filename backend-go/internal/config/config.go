@@ -40,6 +40,8 @@ type UpstreamConfig struct {
 	RPM            int        `json:"rpm"`                      // 能力测试发送速率（每分钟请求数，仅影响能力测试）
 	// 自动拉黑开关
 	AutoBlacklistBalance *bool `json:"autoBlacklistBalance,omitempty"` // 余额不足时自动拉黑 Key（默认 true）
+	// metadata.user_id 规范化开关
+	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"` // 规范化 metadata.user_id（默认 true）
 	// Gemini 特定配置
 	InjectDummyThoughtSignature bool `json:"injectDummyThoughtSignature,omitempty"` // 给空 thought_signature 注入 dummy 值（兼容 x666.me 等要求必须有该字段的 API）
 	StripThoughtSignature       bool `json:"stripThoughtSignature,omitempty"`       // 移除 thought_signature 字段（兼容旧版 Gemini API）
@@ -69,6 +71,14 @@ func (u *UpstreamConfig) IsAutoBlacklistBalanceEnabled() bool {
 	return *u.AutoBlacklistBalance
 }
 
+// IsNormalizeMetadataUserIDEnabled 检查 metadata.user_id 规范化是否启用（默认 true）
+func (u *UpstreamConfig) IsNormalizeMetadataUserIDEnabled() bool {
+	if u.NormalizeMetadataUserID == nil {
+		return true
+	}
+	return *u.NormalizeMetadataUserID
+}
+
 // UpstreamUpdate 用于部分更新 UpstreamConfig
 type UpstreamUpdate struct {
 	Name               *string           `json:"name"`
@@ -84,12 +94,13 @@ type UpstreamUpdate struct {
 	TextVerbosity      *string           `json:"textVerbosity"`
 	FastMode           *bool             `json:"fastMode"`
 	// 多渠道调度相关字段
-	Priority             *int       `json:"priority"`
-	Status               *string    `json:"status"`
-	PromotionUntil       *time.Time `json:"promotionUntil"`
-	LowQuality           *bool      `json:"lowQuality"`
-	RPM                  *int       `json:"rpm"`
-	AutoBlacklistBalance *bool      `json:"autoBlacklistBalance"`
+	Priority                *int       `json:"priority"`
+	Status                  *string    `json:"status"`
+	PromotionUntil          *time.Time `json:"promotionUntil"`
+	LowQuality              *bool      `json:"lowQuality"`
+	RPM                     *int       `json:"rpm"`
+	AutoBlacklistBalance    *bool      `json:"autoBlacklistBalance"`
+	NormalizeMetadataUserID *bool      `json:"normalizeMetadataUserId"`
 	// Gemini 特定配置
 	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
 	StripThoughtSignature       *bool `json:"stripThoughtSignature"`
@@ -291,6 +302,26 @@ func (cm *ConfigManager) GetNextAPIKey(upstream *UpstreamConfig, failedKeys map[
 	}
 	log.Printf("[%s-Key] 轮询选择密钥 %s (%d/%d)", apiType, utils.MaskAPIKey(selectedKey), keyIndex, len(upstream.APIKeys))
 	return selectedKey, nil
+}
+
+// GetAdminAPIKey 获取管理/探测场景下的 API 密钥。
+// 优先使用活跃 APIKeys；若活跃密钥不可用，则临时借用 DisabledAPIKeys 中的密钥。
+// 返回值 fallback=true 表示本次借用了已拉黑密钥。
+func (cm *ConfigManager) GetAdminAPIKey(upstream *UpstreamConfig, failedKeys map[string]bool, apiType string) (apiKey string, fallback bool, err error) {
+	apiKey, err = cm.GetNextAPIKey(upstream, failedKeys, apiType)
+	if err == nil {
+		return apiKey, false, nil
+	}
+
+	for _, disabledKey := range upstream.DisabledAPIKeys {
+		if failedKeys[disabledKey.Key] {
+			continue
+		}
+		log.Printf("[%s-Key] 警告: 活跃密钥不可用，临时借用已拉黑密钥用于管理操作: %s", apiType, utils.MaskAPIKey(disabledKey.Key))
+		return disabledKey.Key, true, nil
+	}
+
+	return "", false, err
 }
 
 // MarkKeyAsFailed 标记密钥失败
@@ -583,6 +614,43 @@ func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey str
 	log.Printf("[%s-Blacklist] Key %s 已恢复 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
 
 	return cm.saveConfigLocked(cm.config)
+}
+
+// RestoreAllKeys 恢复指定渠道所有被拉黑的 Key（持久化）
+// 返回恢复的 Key 数量
+func (cm *ConfigManager) RestoreAllKeys(apiType string, channelIndex int) (int, error) {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+
+	upstreams := cm.getUpstreamSliceLocked(apiType)
+	if upstreams == nil || channelIndex < 0 || channelIndex >= len(*upstreams) {
+		return 0, fmt.Errorf("无效的渠道索引: %s[%d]", apiType, channelIndex)
+	}
+
+	upstream := &(*upstreams)[channelIndex]
+	restoredCount := len(upstream.DisabledAPIKeys)
+	if restoredCount == 0 {
+		return 0, nil
+	}
+
+	// 将所有被拉黑的 Key 移回活跃列表
+	for _, dk := range upstream.DisabledAPIKeys {
+		if !slices.Contains(upstream.APIKeys, dk.Key) {
+			upstream.APIKeys = append(upstream.APIKeys, dk.Key)
+		}
+		// 从 HistoricalAPIKeys 移除，避免 active∩historical 重复
+		upstream.HistoricalAPIKeys = slices.DeleteFunc(upstream.HistoricalAPIKeys, func(k string) bool {
+			return k == dk.Key
+		})
+		// 清除内存中的失败记录
+		cacheKey := failedKeyCacheKey(apiType, dk.Key)
+		delete(cm.failedKeysCache, cacheKey)
+	}
+
+	log.Printf("[%s-Blacklist] 渠道 [%d] %s 的 %d 个 Key 已全部恢复", apiType, channelIndex, upstream.Name, restoredCount)
+	upstream.DisabledAPIKeys = nil
+
+	return restoredCount, cm.saveConfigLocked(cm.config)
 }
 
 // getUpstreamSliceLocked 根据 apiType 获取对应的 upstream slice 指针（调用方需持有锁）

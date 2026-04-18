@@ -12,11 +12,11 @@
     <div class="chart-header d-flex align-center justify-space-between mb-3">
       <div class="d-flex align-center ga-2">
         <!-- Duration selector -->
-        <v-btn-toggle v-model="selectedDuration" mandatory density="compact" variant="outlined" divided :disabled="isLoading">
-          <v-btn value="1h" size="x-small">{{ t('chart.1h') }}</v-btn>
-          <v-btn value="6h" size="x-small">{{ t('chart.6h') }}</v-btn>
-          <v-btn value="24h" size="x-small">{{ t('chart.24h') }}</v-btn>
-          <v-btn value="today" size="x-small">{{ t('chart.today') }}</v-btn>
+        <v-btn-toggle v-model="selectedDuration" mandatory density="compact" variant="outlined" divided :disabled="isLoading" class="chart-control-toggle">
+          <v-btn value="1h" size="x-small" class="chart-control-btn">{{ t('chart.1h') }}</v-btn>
+          <v-btn value="6h" size="x-small" class="chart-control-btn">{{ t('chart.6h') }}</v-btn>
+          <v-btn value="24h" size="x-small" class="chart-control-btn">{{ t('chart.24h') }}</v-btn>
+          <v-btn value="today" size="x-small" class="chart-control-btn">{{ t('chart.today') }}</v-btn>
         </v-btn-toggle>
 
         <v-btn icon size="x-small" variant="text" :loading="isLoading" :disabled="isLoading" @click="refreshData">
@@ -25,16 +25,16 @@
       </div>
 
       <!-- View switcher -->
-      <v-btn-toggle v-model="selectedView" mandatory density="compact" variant="outlined" divided :disabled="isLoading">
-        <v-btn value="traffic" size="x-small">
+      <v-btn-toggle v-model="selectedView" mandatory density="compact" variant="outlined" divided :disabled="isLoading" class="chart-control-toggle">
+        <v-btn value="traffic" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-chart-line</v-icon>
           {{ t('chart.traffic') }}
         </v-btn>
-        <v-btn value="tokens" size="x-small">
+        <v-btn value="tokens" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-chart-line</v-icon>
           Token I/O
         </v-btn>
-        <v-btn value="cache" size="x-small">
+        <v-btn value="cache" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-database</v-icon>
           {{ t('chart.cacheRw') }}
         </v-btn>
@@ -421,8 +421,8 @@ const chartOptions = computed<ApexOptions>(() => {
       type: 'datetime',
       labels: {
         datetimeUTC: false,
-        format: selectedDuration.value === '1h' ? 'HH:mm' : 'HH:mm',
-        style: { fontSize: '10px' }
+        format: 'HH:mm',
+        style: { fontSize: '11px', colors: theme.global.current.value.dark ? '#9ca3af' : '#6b7280' }
       },
       axisBorder: { show: false },
       axisTicks: { show: false }
@@ -478,29 +478,19 @@ const buildChartSeries = (data: ChannelKeyMetricsHistoryResponse | null) => {
       // Forward direction (Input/Read)
       result.push({
         name: `${displayName} ${inLabel}`,
-        data: keyData.dataPoints.map(dp => {
-          let value = 0
-          if (mode === 'tokens') {
-            value = dp.inputTokens
-          } else {
-            value = dp.cacheReadTokens
-          }
-          return { x: new Date(dp.timestamp).getTime(), y: value }
-        })
+        data: keyData.dataPoints.map(dp => ({
+          x: new Date(dp.timestamp).getTime(),
+          y: mode === 'tokens' ? dp.inputTokens : dp.cacheReadTokens
+        }))
       })
 
       // Output/Write - distinguish with a dashed line
       result.push({
         name: `${displayName} ${outLabel}`,
-        data: keyData.dataPoints.map(dp => {
-          let value = 0
-          if (mode === 'tokens') {
-            value = dp.outputTokens
-          } else {
-            value = dp.cacheCreationTokens
-          }
-          return { x: new Date(dp.timestamp).getTime(), y: value }
-        })
+        data: keyData.dataPoints.map(dp => ({
+          x: new Date(dp.timestamp).getTime(),
+          y: mode === 'tokens' ? dp.outputTokens : dp.cacheCreationTokens
+        }))
       })
     }
   })
@@ -616,7 +606,7 @@ const buildTrafficTooltip = ({ seriesIndex, dataPointIndex, w }: any): string =>
   const hasFailure = grandFailure > 0
 
   // Build HTML
-  let html = `<div style="padding: 8px 12px; font-size: 12px;">`
+  let html = `<div style="padding: 8px 12px; font-size: 13px; line-height: 1.6;">`
   html += `<div style="font-weight: 600; margin-bottom: 6px; color: ${hasFailure ? '#ef4444' : 'inherit'};">${timeStr}</div>`
 
   // Details for each key
@@ -628,7 +618,7 @@ const buildTrafficTooltip = ({ seriesIndex, dataPointIndex, w }: any): string =>
     html += `<span style="flex: 1;">${stat.keyMask}</span>`
     html += `<span style="margin-left: 12px; font-weight: 500;">${stat.total}</span>`
     if (hasKeyFailure) {
-      html += `<span style="margin-left: 6px; color: #ef4444; font-size: 11px;">(${stat.failure} ${t('chart.failed')}, ${failureRate}%)</span>`
+      html += `<span style="margin-left: 6px; color: #ef4444; font-size: 12px;">(${stat.failure} ${t('chart.issueCount')}, ${failureRate}%)</span>`
     }
     html += `</div>`
   })
@@ -638,7 +628,7 @@ const buildTrafficTooltip = ({ seriesIndex, dataPointIndex, w }: any): string =>
     html += `<div style="border-top: 1px solid rgba(128,128,128,0.3); margin-top: 6px; padding-top: 6px; font-weight: 600;">`
     html += `<span>${t('chart.total')}: ${grandTotal} ${t('chart.requestUnit')}</span>`
     if (hasFailure) {
-      html += `<span style="color: #ef4444; margin-left: 8px;">${grandFailure} ${t('chart.failed')} (${grandFailureRate}%)</span>`
+      html += `<span style="color: #ef4444; margin-left: 8px;">${grandFailure} ${t('chart.issueCount')} (${grandFailureRate}%)</span>`
     }
     html += `</div>`
   }
@@ -817,6 +807,14 @@ defineExpose({
 .chart-header {
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.chart-control-toggle :deep(.v-btn.chart-control-btn) {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  padding-inline: 8px !important;
+  min-width: 36px !important;
 }
 
 .chart-area {

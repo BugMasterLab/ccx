@@ -297,17 +297,6 @@
               {{ t('app.actions.ping') }}
             </v-btn>
 
-            <v-btn
-              color="success"
-              size="large"
-              prepend-icon="mdi-flask-outline"
-              variant="tonal"
-              class="action-btn"
-              @click="showBatchChannelTestDialog = true"
-            >
-              {{ t('app.actions.batchTest') }}
-            </v-btn>
-
             <v-btn size="large" prepend-icon="mdi-refresh" variant="text" class="action-btn" @click="refreshChannels">
               {{ t('app.actions.refresh') }}
             </v-btn>
@@ -387,20 +376,11 @@
       ref="capabilityTestDialogRef"
       v-model="showCapabilityTestDialog"
       :channel-name="capabilityTestChannelName"
-      :channel-id="capabilityTestChannelId"
       :current-tab="channelStore.activeTab"
       :capability-job="capabilityTestJob"
       @copy-to-tab="handleCopyToTab"
       @cancel="handleCancelCapabilityTest"
       @retry-model="handleRetryCapabilityModel"
-      @start-test="handleStartCapabilityTest"
-    />
-
-    <BatchChannelTestDialog
-      v-model="showBatchChannelTestDialog"
-      :channels="channelStore.currentChannelsData.channels ?? []"
-      :channel-type="channelStore.activeTab"
-      @latency-updated="refreshChannels"
     />
 
     <!-- 添加API密钥对话框 -->
@@ -448,9 +428,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch, defineAsyncComponent } from 'vue'
 import { useTheme } from 'vuetify'
-import { api, fetchHealth, ApiError, type Channel, type CapabilityTestJob, type CapabilityTestJobStartResponse } from './services/api'
+import { api, fetchHealth, ApiError, type Channel, type CapabilityTestJob, type CapabilityTestJobStartResponse, type CapabilityProtocolJobResult, type CapabilityModelJobResult } from './services/api'
 import { versionService } from './services/version'
 import { useAuthStore } from './stores/auth'
 import { useChannelStore } from './stores/channel'
@@ -460,7 +440,6 @@ import { useSystemStore } from './stores/system'
 import { useI18n } from './i18n'
 import type { SupportedLocale } from './i18n'
 import AddChannelModal from './components/AddChannelModal.vue'
-import BatchChannelTestDialog from './components/BatchChannelTestDialog.vue'
 import CapabilityTestDialog from './components/CapabilityTestDialog.vue'
 // 异步加载图表组件，减少首屏 JS 体积
 const GlobalStatsChart = defineAsyncComponent(() => import('./components/GlobalStatsChart.vue'))
@@ -708,7 +687,6 @@ const pingChannel = async (channelId: number) => {
 // ============== 能力测试 ==============
 
 const showCapabilityTestDialog = ref(false)
-const showBatchChannelTestDialog = ref(false)
 const capabilityTestChannelName = ref('')
 const capabilityTestChannelId = ref(0)
 const capabilityTestDialogRef = ref<InstanceType<typeof CapabilityTestDialog> | null>(null)
@@ -716,10 +694,131 @@ const capabilityTestJobId = ref('')
 const capabilityTestPolling = ref<ReturnType<typeof setInterval> | null>(null)
 const capabilityTestJob = ref<CapabilityTestJob | null>(null)
 const capabilityTestPreviousJobId = ref('') // 记录上一次的 jobId，用于复用成功结果
+const capabilityRetryPendingUntil = ref<Record<string, number>>({})
+
+const capabilityPlaceholderModels: Record<string, string[]> = {
+  // 需与后端 capability_probe_models.go 保持一致，用于开始接口返回前的首屏占位
+  messages: ['claude-opus-4-6', 'claude-opus-4-5-20251101', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'],
+  chat: ['gpt-5.4', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.2-codex'],
+  responses: ['gpt-5.4', 'gpt-5.3-codex', 'gpt-5.2', 'gpt-5.2-codex'],
+  gemini: ['gemini-3.1-pro-preview', 'gemini-3.1-pro', 'gemini-3-pro-preview', 'gemini-3-pro', 'gemini-3-flash-preview', 'gemini-3-flash']
+}
+
+const capabilityProtocolOrder = ['messages', 'chat', 'responses', 'gemini'] as const
+
+const buildPendingCapabilityModels = (protocol: string): CapabilityModelJobResult[] => {
+  const now = new Date().toISOString()
+  return (capabilityPlaceholderModels[protocol] ?? []).map(model => ({
+    model,
+    status: 'queued',
+    lifecycle: 'pending',
+    outcome: 'unknown',
+    success: false,
+    latency: 0,
+    streamingSupported: false,
+    testedAt: now
+  }))
+}
+
+const toRetryingCapabilityModel = (modelResult: CapabilityModelJobResult): CapabilityModelJobResult => ({
+  ...modelResult,
+  status: 'running',
+  lifecycle: 'active',
+  outcome: 'unknown',
+  success: false,
+  error: undefined,
+  reason: undefined,
+})
+
+const markCapabilityModelRetrying = (job: CapabilityTestJob, protocol: string, model: string): CapabilityTestJob => ({
+  ...job,
+  tests: job.tests.map(test => {
+    if (test.protocol !== protocol) return test
+    return {
+      ...test,
+      modelResults: (test.modelResults ?? []).map(modelResult => {
+        if (modelResult.model !== model) return modelResult
+        return toRetryingCapabilityModel(modelResult)
+      })
+    }
+  })
+})
+
+const applyCapabilityRetryPending = (
+  job: CapabilityTestJob,
+  pendingMap: Record<string, number>,
+  now: number
+): CapabilityTestJob => ({
+  ...job,
+  tests: job.tests.map(test => ({
+    ...test,
+    modelResults: (test.modelResults ?? []).map(modelResult => {
+      const key = `${test.protocol}:${modelResult.model}`
+      const pendingUntil = pendingMap[key]
+      if (!pendingUntil || now >= pendingUntil) {
+        delete pendingMap[key]
+        return modelResult
+      }
+      if (modelResult.lifecycle === 'pending' || modelResult.lifecycle === 'active') {
+        return modelResult
+      }
+      return toRetryingCapabilityModel(modelResult)
+    })
+  }))
+})
+
+const buildCapabilityPlaceholderJob = (channelId: number, channelName: string): CapabilityTestJob => {
+  const now = new Date().toISOString()
+  const tests: CapabilityProtocolJobResult[] = capabilityProtocolOrder.map(protocol => {
+    const modelResults = buildPendingCapabilityModels(protocol)
+    return {
+      protocol,
+      status: 'queued',
+      lifecycle: 'pending',
+      outcome: 'unknown',
+      success: false,
+      latency: 0,
+      streamingSupported: false,
+      testedModel: '',
+      modelResults,
+      successCount: 0,
+      attemptedModels: modelResults.length,
+      testedAt: now
+    }
+  })
+
+  const totalModels = tests.reduce((sum, test) => sum + (test.modelResults?.length ?? 0), 0)
+
+  return {
+    jobId: '',
+    channelId,
+    channelName,
+    channelKind: channelStore.activeTab,
+    sourceType: '',
+    status: 'queued',
+    lifecycle: 'pending',
+    outcome: 'unknown',
+    runMode: 'fresh',
+    tests,
+    compatibleProtocols: [],
+    totalDuration: 0,
+    updatedAt: now,
+    progress: {
+      totalModels,
+      queuedModels: totalModels,
+      runningModels: 0,
+      successModels: 0,
+      failedModels: 0,
+      skippedModels: 0,
+      completedModels: 0
+    }
+  }
+}
 
 watch(showCapabilityTestDialog, (open) => {
   if (!open) {
     stopCapabilityTestPolling()
+    capabilityRetryPendingUntil.value = {}
   }
 })
 
@@ -730,9 +829,30 @@ const stopCapabilityTestPolling = () => {
   }
 }
 
+const isCapabilityJobTerminal = (job: CapabilityTestJob | null | undefined) => {
+  if (!job) return false
+  return job.lifecycle === 'done' || job.lifecycle === 'cancelled'
+}
+
+const startCapabilityPolling = (channelId: number, jobId: string) => {
+  stopCapabilityTestPolling()
+  capabilityTestPolling.value = setInterval(async () => {
+    if (!jobId) return
+    try {
+      const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, jobId)
+      updateCapabilityJob(latest)
+    } catch (error) {
+      console.error('Failed to poll capability test job:', error)
+    }
+  }, 1000)
+}
+
 const updateCapabilityJob = (job: CapabilityTestJob) => {
-  capabilityTestJob.value = job
-  if (job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled') {
+  const mergedJob = applyCapabilityRetryPending(job, capabilityRetryPendingUntil.value, Date.now())
+
+  capabilityTestJob.value = mergedJob
+  capabilityTestJobId.value = job.jobId
+  if (isCapabilityJobTerminal(mergedJob) && !(mergedJob.activeOperations && mergedJob.activeOperations > 0)) {
     stopCapabilityTestPolling()
   }
 }
@@ -744,25 +864,19 @@ const testChannelCapability = async (channelId: number) => {
 
   if (dialogStore.showAddChannelModal) {
     dialogStore.closeAddChannelModal()
-    await nextTick()
   }
 
-  // 打开对话框，进入模型选择阶段（不立即开始测试）
   showCapabilityTestDialog.value = true
   stopCapabilityTestPolling()
   capabilityTestPreviousJobId.value = capabilityTestJobId.value
   capabilityTestJobId.value = ''
-  capabilityTestJob.value = null
-}
-
-// 用户在对话框中选择模型后开始测试
-const handleStartCapabilityTest = async (models: string[]) => {
-  const channelId = capabilityTestChannelId.value
-  stopCapabilityTestPolling()
+  capabilityTestJob.value = buildCapabilityPlaceholderJob(channelId, capabilityTestChannelName.value)
 
   try {
     const startResp: CapabilityTestJobStartResponse = await api.startChannelCapabilityTest(
-      channelStore.activeTab, channelId, capabilityTestPreviousJobId.value || undefined, models.length > 0 ? models : undefined
+      channelStore.activeTab,
+      channelId,
+      capabilityTestPreviousJobId.value || undefined
     )
     capabilityTestJobId.value = startResp.jobId
 
@@ -770,32 +884,22 @@ const handleStartCapabilityTest = async (models: string[]) => {
       updateCapabilityJob(startResp.job)
     }
 
-    if (startResp.job?.status === 'completed' || startResp.job?.status === 'failed') {
+    if (isCapabilityJobTerminal(startResp.job) && !(startResp.job?.activeOperations && startResp.job.activeOperations > 0)) {
       return
     }
 
-    capabilityTestPolling.value = setInterval(async () => {
-      if (!capabilityTestJobId.value) return
-      try {
-        const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, channelId, capabilityTestJobId.value)
-        updateCapabilityJob(latest)
-      } catch (error) {
-        console.error('Failed to poll capability test job:', error)
-      }
-    }, 1000)
+    startCapabilityPolling(channelId, startResp.jobId)
   } catch (error) {
     const message = error instanceof Error ? error.message : t('system.unknown')
     capabilityTestDialogRef.value?.setError(t('toast.capabilityFailed', { message }))
   }
 }
 
-// 取消能力测试
 const handleCancelCapabilityTest = async () => {
   if (!capabilityTestJobId.value) return
   try {
     await api.cancelCapabilityTest(channelStore.activeTab, capabilityTestChannelId.value, capabilityTestJobId.value)
     stopCapabilityTestPolling()
-    // 获取最新状态以更新 UI
     const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, capabilityTestChannelId.value, capabilityTestJobId.value)
     updateCapabilityJob(latest)
   } catch (error) {
@@ -803,23 +907,23 @@ const handleCancelCapabilityTest = async () => {
   }
 }
 
-// 重测单个模型
 const handleRetryCapabilityModel = async (protocol: string, model: string) => {
-  if (!capabilityTestJobId.value) return
+  if (!capabilityTestJobId.value || !capabilityTestJob.value) return
+  if (
+    capabilityTestJob.value.lifecycle === 'pending' ||
+    capabilityTestJob.value.lifecycle === 'active' ||
+    (capabilityTestJob.value.activeOperations && capabilityTestJob.value.activeOperations > 0)
+  ) return
   try {
-    await api.retryCapabilityTestModel(channelStore.activeTab, capabilityTestChannelId.value, capabilityTestJobId.value, protocol, model)
-    // 启动轮询（如果未在运行中）
-    if (!capabilityTestPolling.value) {
-      capabilityTestPolling.value = setInterval(async () => {
-        if (!capabilityTestJobId.value) return
-        try {
-          const latest = await api.getChannelCapabilityTestStatus(channelStore.activeTab, capabilityTestChannelId.value, capabilityTestJobId.value)
-          updateCapabilityJob(latest)
-        } catch (error) {
-          console.error('Failed to poll capability test job:', error)
-        }
-      }, 1000)
+    const pendingKey = `${protocol}:${model}`
+    capabilityRetryPendingUntil.value[pendingKey] = Date.now() + 1000
+
+    if (capabilityTestJob.value) {
+      capabilityTestJob.value = markCapabilityModelRetrying(capabilityTestJob.value, protocol, model)
     }
+
+    await api.retryCapabilityTestModel(channelStore.activeTab, capabilityTestChannelId.value, capabilityTestJobId.value, protocol, model)
+    startCapabilityPolling(capabilityTestChannelId.value, capabilityTestJobId.value)
   } catch (error) {
     console.error('Failed to retry capability test model:', error)
   }
@@ -859,7 +963,6 @@ const handleCopyToTab = async (targetProtocol: string) => {
   }
 
   try {
-    // 根据目标协议调用对应的添加渠道 API
     switch (targetProtocol) {
       case 'messages':
         await api.addChannel(channelConfig)
@@ -1385,7 +1488,7 @@ a.api-type-text {
   min-width: 2ch;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
   line-height: 1;
 }
 
@@ -1539,7 +1642,7 @@ a.api-type-text {
   font-size: 1.75rem;
   font-weight: 700;
   line-height: 1.2;
-  letter-spacing: -0.5px;
+  letter-spacing: 0;
 }
 
 .stat-card-total {
@@ -1551,15 +1654,18 @@ a.api-type-text {
 .stat-card-label {
   font-size: 0.875rem;
   font-weight: 600;
-  margin-top: 2px;
-  opacity: 0.85;
+  margin-top: 4px;
+  line-height: 1.4;
+  opacity: 0.92;
   text-transform: uppercase;
+  letter-spacing: 0;
 }
 
 .stat-card-desc {
-  font-size: 0.75rem;
-  opacity: 0.6;
-  margin-top: 2px;
+  font-size: 0.8125rem;
+  opacity: 0.72;
+  margin-top: 4px;
+  line-height: 1.5;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1717,9 +1823,9 @@ a.api-type-text {
   left: -1px !important;
   background: rgb(var(--v-theme-surface)) !important;
   color: rgb(var(--v-theme-on-surface)) !important;
-  font-size: 10px !important;
+  font-size: 11px !important;
   font-weight: 700 !important;
-  padding: 2px 8px !important;
+  padding: 3px 8px !important;
   border: 1px solid rgb(var(--v-theme-on-surface)) !important;
   border-top: none !important;
   border-left: none !important;
@@ -1751,7 +1857,7 @@ a.api-type-text {
 .channel-name .text-caption.text-medium-emphasis {
   background: rgb(var(--v-theme-surface-variant));
   padding: 2px 6px;
-  font-size: 10px !important;
+  font-size: 11px !important;
   font-weight: 600;
   color: rgb(var(--v-theme-on-surface)) !important;
   border: 1px solid rgb(var(--v-theme-on-surface));
@@ -1837,7 +1943,7 @@ a.api-type-text {
 
 .action-btn {
   font-weight: 600;
-  letter-spacing: 0.3px;
+  letter-spacing: 0;
   text-transform: uppercase;
   transition: all 0.1s ease;
   border: 2px solid rgb(var(--v-theme-on-surface)) !important;
@@ -1954,7 +2060,7 @@ a.api-type-text {
     font-weight: 800 !important;
     line-height: 1.2;
     color: rgb(var(--v-theme-on-surface));
-    letter-spacing: -0.5px;
+    letter-spacing: 0;
   }
 
   .stat-card-label {
@@ -2157,11 +2263,22 @@ a.api-type-text {
   font-family: 'Courier New', Consolas, 'Liberation Mono', monospace !important;
 }
 
+.text-body-1,
+.text-body-2 {
+  line-height: 1.6 !important;
+}
+
+.text-caption {
+  font-size: 0.8125rem !important;
+  line-height: 1.5 !important;
+}
+
 /* 所有按钮复古像素风格 */
 .v-btn:not(.v-btn--icon) {
   border-radius: 0 !important;
   text-transform: uppercase !important;
-  font-weight: 600 !important;
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
 }
 
 /* 所有卡片复古像素风格 */

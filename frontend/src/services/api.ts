@@ -63,6 +63,8 @@ export interface TimeWindowStats {
   cacheHitRate?: number
 }
 
+export type CircuitState = 'closed' | 'open' | 'half_open'
+
 export interface ChannelMetrics {
   channelIndex: number
   requestCount: number
@@ -72,6 +74,11 @@ export interface ChannelMetrics {
   errorRate: number         // 0-100
   consecutiveFailures: number
   latency: number           // ms
+  circuitState?: CircuitState
+  circuitBrokenAt?: string
+  nextRetryAt?: string
+  halfOpenSuccesses?: number
+  breakerFailureRate?: number
   lastSuccessAt?: string
   lastFailureAt?: string
   // 分时段统计 (15m, 1h, 6h, 24h)
@@ -109,6 +116,7 @@ export interface Channel {
   proxyUrl?: string                        // HTTP/HTTPS/SOCKS5 代理 URL
   routePrefix?: string                     // 路由前缀（如 "kimi"，访问 /kimi/v1/messages）
   autoBlacklistBalance?: boolean           // 余额不足自动拉黑（默认 true）
+  normalizeMetadataUserId?: boolean        // 规范化 metadata.user_id（默认 true）
   latency?: number
   status?: ChannelStatus | 'healthy' | 'error' | 'unknown' | ''
   index: number
@@ -135,16 +143,22 @@ export interface ChannelsResponse {
 export interface ChannelDashboardResponse {
   channels: Channel[]
   metrics: ChannelMetrics[]
-  stats: {
-    multiChannelMode: boolean
-    activeChannelCount: number
-    traceAffinityCount: number
-    traceAffinityTTL: string
-    failureThreshold: number
-    windowSize: number
-    circuitRecoveryTime: string
-  }
+  stats: SchedulerStatsResponse
   recentActivity?: ChannelRecentActivity[]  // 最近 15 分钟分段活跃度
+}
+
+export interface SchedulerStatsResponse {
+  multiChannelMode: boolean
+  activeChannelCount: number
+  traceAffinityCount: number
+  traceAffinityTTL: string
+  failureThreshold: number
+  windowSize: number
+  circuitRecoveryTime?: string
+  consecutiveRetryableFailuresThreshold?: number
+  halfOpenSuccessTarget?: number
+  circuitBackoffBase?: string
+  circuitBackoffMax?: string
 }
 
 export interface PingResult {
@@ -154,6 +168,12 @@ export interface PingResult {
   error?: string
 }
 
+export interface ResumeChannelResponse {
+  success: boolean
+  message: string
+  restoredKeys?: number
+}
+
 // ============== 能力测试类型 ==============
 
 export interface CapabilityTestJobStartResponse {
@@ -161,6 +181,10 @@ export interface CapabilityTestJobStartResponse {
   resumed?: boolean
   job?: CapabilityTestJob
 }
+
+export type CapabilityLifecycle = 'pending' | 'active' | 'done' | 'cancelled'
+export type CapabilityOutcome = 'unknown' | 'success' | 'failed' | 'partial' | 'cancelled'
+export type CapabilityRunMode = 'fresh' | 'reused_running' | 'resumed_cancelled' | 'cache_hit' | 'reused_previous_results'
 
 export type CapabilityTestJobStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'
 export type CapabilityProtocolJobStatus = 'queued' | 'running' | 'completed' | 'failed'
@@ -179,6 +203,9 @@ export interface CapabilityJobProgress {
 export interface CapabilityModelJobResult {
   model: string
   status: CapabilityModelJobStatus
+  lifecycle: CapabilityLifecycle
+  outcome: CapabilityOutcome
+  reason?: string
   success: boolean
   latency: number
   streamingSupported: boolean
@@ -190,6 +217,9 @@ export interface CapabilityModelJobResult {
 export interface CapabilityProtocolJobResult {
   protocol: string
   status: CapabilityProtocolJobStatus
+  lifecycle: CapabilityLifecycle
+  outcome: CapabilityOutcome
+  reason?: string
   success: boolean
   latency: number
   streamingSupported: boolean
@@ -208,6 +238,14 @@ export interface CapabilityTestJob {
   channelKind: string
   sourceType: string
   status: CapabilityTestJobStatus
+  lifecycle: CapabilityLifecycle
+  outcome: CapabilityOutcome
+  reason?: string
+  runMode?: CapabilityRunMode
+  summaryReason?: string
+  activeOperations?: number
+  isResumed?: boolean
+  hasReusedResults?: boolean
   tests: CapabilityProtocolJobResult[]
   compatibleProtocols: string[]
   totalDuration: number
@@ -217,7 +255,6 @@ export interface CapabilityTestJob {
   progress: CapabilityJobProgress
   error?: string
   cacheHit?: boolean
-  targetProtocols?: string[]
   timeoutMilliseconds?: number
 }
 
@@ -362,6 +399,7 @@ export interface ChannelLogEntry {
   errorInfo: string
   isRetry: boolean
   interfaceType?: string  // 接口类型（Messages/Responses/Gemini）
+  requestSource?: string
 }
 
 export interface ChannelLogsResponse {
@@ -636,19 +674,14 @@ export class ApiService {
   async startChannelCapabilityTest(
     type: 'messages' | 'chat' | 'gemini' | 'responses',
     id: number,
-    previousJobId?: string,
-    models?: string[],
-    targetProtocols?: Array<'messages' | 'chat' | 'gemini' | 'responses'>
+    previousJobId?: string
   ): Promise<CapabilityTestJobStartResponse> {
-    const body: { targetProtocols: string[]; timeout: number; previousJobId?: string; models?: string[] } = {
-      targetProtocols: targetProtocols && targetProtocols.length > 0 ? targetProtocols : ['messages', 'chat', 'gemini', 'responses'],
+    const body: { targetProtocols: string[]; timeout: number; previousJobId?: string } = {
+      targetProtocols: ['messages', 'chat', 'gemini', 'responses'],
       timeout: 10000
     }
     if (previousJobId) {
       body.previousJobId = previousJobId
-    }
-    if (models && models.length > 0) {
-      body.models = models
     }
     return this.request(`/${type}/channels/${id}/capability-test`, {
       method: 'POST',
@@ -789,8 +822,8 @@ export class ApiService {
   }
 
   // 恢复熔断渠道（重置错误计数）
-  async resumeChannel(channelId: number): Promise<void> {
-    await this.request(`/messages/channels/${channelId}/resume`, {
+  async resumeChannel(channelId: number): Promise<ResumeChannelResponse> {
+    return this.request(`/messages/channels/${channelId}/resume`, {
       method: 'POST'
     })
   }
@@ -801,14 +834,7 @@ export class ApiService {
   }
 
   // 获取调度器统计信息
-  async getSchedulerStats(type?: 'messages' | 'responses' | 'gemini' | 'chat'): Promise<{
-    multiChannelMode: boolean
-    activeChannelCount: number
-    traceAffinityCount: number
-    traceAffinityTTL: string
-    failureThreshold: number
-    windowSize: number
-  }> {
+  async getSchedulerStats(type?: 'messages' | 'responses' | 'gemini' | 'chat'): Promise<SchedulerStatsResponse> {
     // Gemini 暂无调度器统计，返回默认值
     if (type === 'gemini') {
       return {
@@ -849,8 +875,8 @@ export class ApiService {
   }
 
   // 恢复 Responses 熔断渠道
-  async resumeResponsesChannel(channelId: number): Promise<void> {
-    await this.request(`/responses/channels/${channelId}/resume`, {
+  async resumeResponsesChannel(channelId: number): Promise<ResumeChannelResponse> {
+    return this.request(`/responses/channels/${channelId}/resume`, {
       method: 'POST'
     })
   }
@@ -1029,8 +1055,8 @@ export class ApiService {
     })
   }
 
-  async resumeChatChannel(channelId: number): Promise<void> {
-    await this.request(`/chat/channels/${channelId}/resume`, {
+  async resumeChatChannel(channelId: number): Promise<ResumeChannelResponse> {
+    return this.request(`/chat/channels/${channelId}/resume`, {
       method: 'POST'
     })
   }
@@ -1151,9 +1177,11 @@ export class ApiService {
     })
   }
 
-  // Gemini 恢复渠道（降级实现：后端未实现 resume 端点，直接设置状态为 active）
-  async resumeGeminiChannel(channelId: number): Promise<void> {
-    await this.setGeminiChannelStatus(channelId, 'active')
+  // Gemini 恢复渠道（重置熔断并恢复被拉黑的 Key）
+  async resumeGeminiChannel(channelId: number): Promise<ResumeChannelResponse> {
+    return this.request(`/gemini/channels/${channelId}/resume`, {
+      method: 'POST'
+    })
   }
 
   async getGeminiChannelMetrics(): Promise<ChannelMetrics[]> {

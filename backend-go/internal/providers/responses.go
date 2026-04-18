@@ -38,7 +38,7 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 		p.SessionManager = newDefaultSessionManager()
 	}
 
-	providerReq, reqBodyForURL, err := p.buildProviderRequestBody(c.Request.URL.Path, bodyBytes, upstream)
+	providerReq, reqBodyForURL, err := p.buildProviderRequestBody(c, c.Request.URL.Path, bodyBytes, upstream)
 	if err != nil {
 		return nil, bodyBytes, err
 	}
@@ -76,9 +76,9 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 	return req, bodyBytes, nil
 }
 
-func (p *ResponsesProvider) buildProviderRequestBody(requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
+func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath string, bodyBytes []byte, upstream *config.UpstreamConfig) (interface{}, []byte, error) {
 	if strings.HasSuffix(requestPath, "/v1/messages") {
-		responsesReq, err := p.buildResponsesRequestFromClaude(bodyBytes, upstream)
+		responsesReq, err := p.buildResponsesRequestFromClaude(c, bodyBytes, upstream)
 		if err != nil {
 			return nil, nil, fmt.Errorf("解析 Claude Messages 请求失败: %w", err)
 		}
@@ -137,7 +137,7 @@ func (p *ResponsesProvider) buildProviderRequestBody(requestPath string, bodyByt
 	return providerReq, bodyBytes, nil
 }
 
-func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
+func (p *ResponsesProvider) buildResponsesRequestFromClaude(c *gin.Context, bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {
 	var claudeReq types.ClaudeRequest
 	if err := json.Unmarshal(bodyBytes, &claudeReq); err != nil {
 		return nil, err
@@ -209,6 +209,9 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, up
 		"input":  input,
 		"stream": claudeReq.Stream,
 	}
+	if effort := config.ResolveReasoningEffort(claudeReq.Model, upstream); effort != "" {
+		responsesReq["reasoning"] = map[string]interface{}{"effort": effort}
+	}
 	if instructions := extractResponsesInstructions(claudeReq.System); instructions != "" {
 		responsesReq["instructions"] = instructions
 	}
@@ -217,6 +220,12 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, up
 	}
 	if claudeReq.Temperature > 0 {
 		responsesReq["temperature"] = claudeReq.Temperature
+	}
+	if claudeReq.TopP > 0 {
+		responsesReq["top_p"] = claudeReq.TopP
+	}
+	if claudeReq.ToolChoice != nil {
+		responsesReq["tool_choice"] = claudeReq.ToolChoice
 	}
 	if len(claudeReq.Tools) > 0 {
 		tools := make([]map[string]interface{}, 0, len(claudeReq.Tools))
@@ -232,6 +241,24 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(bodyBytes []byte, up
 			tools = append(tools, item)
 		}
 		responsesReq["tools"] = tools
+		if claudeReq.ParallelToolCalls != nil {
+			responsesReq["parallel_tool_calls"] = *claudeReq.ParallelToolCalls
+		} else {
+			responsesReq["parallel_tool_calls"] = true
+		}
+	}
+	if claudeReq.Metadata != nil {
+		if userID, ok := claudeReq.Metadata["user_id"].(string); ok && userID != "" {
+			responsesReq["user"] = userID
+		}
+	}
+	if _, exists := responsesReq["user"]; !exists {
+		if sessionID := utils.ExtractUnifiedSessionID(c, bodyBytes); sessionID != "" {
+			responsesReq["user"] = sessionID
+		}
+	}
+	if cacheKey := utils.ExtractUnifiedSessionID(c, bodyBytes); cacheKey != "" {
+		responsesReq["prompt_cache_key"] = cacheKey
 	}
 	return responsesReq, nil
 }
@@ -392,6 +419,7 @@ func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.Provider
 		claudeResp.Usage = &types.Usage{}
 		if v, ok := usageRaw["input_tokens"].(float64); ok {
 			claudeResp.Usage.InputTokens = int(v)
+			claudeResp.Usage.PromptTokensTotal = int(v)
 		}
 		if v, ok := usageRaw["output_tokens"].(float64); ok {
 			claudeResp.Usage.OutputTokens = int(v)
@@ -401,6 +429,8 @@ func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.Provider
 		}
 		if cacheRead, ok := usageRaw["cache_read_input_tokens"].(float64); ok {
 			claudeResp.Usage.CacheReadInputTokens = int(cacheRead)
+		} else {
+			claudeResp.Usage.CacheReadInputTokens = extractResponsesCacheReadTokens(usageRaw)
 		}
 		if cacheCreation5m, ok := usageRaw["cache_creation_5m_input_tokens"].(float64); ok {
 			claudeResp.Usage.CacheCreation5mInputTokens = int(cacheCreation5m)
@@ -594,6 +624,8 @@ func (p *ResponsesProvider) HandleStreamResponse(body io.ReadCloser) (<-chan str
 				}
 				if v, ok := usage["cache_read_input_tokens"].(float64); ok {
 					latestCacheReadTokens = int(v)
+				} else {
+					latestCacheReadTokens = extractResponsesCacheReadTokens(usage)
 				}
 				if v, ok := usage["cache_creation_5m_input_tokens"].(float64); ok {
 					latestCacheCreation5mTokens = int(v)
@@ -649,6 +681,20 @@ func (p *ResponsesProvider) HandleStreamResponse(body io.ReadCloser) (<-chan str
 	}()
 
 	return eventChan, errChan, nil
+}
+
+func extractResponsesCacheReadTokens(usage map[string]interface{}) int {
+	if cacheRead, ok := usage["cache_read_input_tokens"].(float64); ok {
+		return int(cacheRead)
+	}
+	inputDetails, ok := usage["input_tokens_details"].(map[string]interface{})
+	if !ok {
+		return 0
+	}
+	if cachedTokens, ok := inputDetails["cached_tokens"].(float64); ok {
+		return int(cachedTokens)
+	}
+	return 0
 }
 
 func toString(v interface{}) string {

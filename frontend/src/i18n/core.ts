@@ -35,8 +35,8 @@ export function getRuntimeLocale(): SupportedLocale {
     return normalizeLocale(window.__CCX_RUNTIME_CONFIG__.uiLanguage)
   }
 
-  if (typeof __APP_UI_LANGUAGE__ !== 'undefined') {
-    return normalizeLocale(__APP_UI_LANGUAGE__)
+  if (typeof globalThis.__APP_UI_LANGUAGE__ !== 'undefined') {
+    return normalizeLocale(globalThis.__APP_UI_LANGUAGE__)
   }
 
   return DEFAULT_LOCALE

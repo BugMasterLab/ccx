@@ -2,14 +2,17 @@ package types
 
 // ClaudeRequest Claude 请求结构
 type ClaudeRequest struct {
-	Model       string                 `json:"model"`
-	Messages    []ClaudeMessage        `json:"messages"`
-	System      interface{}            `json:"system,omitempty"` // string 或 content 数组
-	MaxTokens   int                    `json:"max_tokens,omitempty"`
-	Temperature float64                `json:"temperature,omitempty"`
-	Stream      bool                   `json:"stream,omitempty"`
-	Tools       []ClaudeTool           `json:"tools,omitempty"`
-	Metadata    map[string]interface{} `json:"metadata,omitempty"` // Claude Code CLI 等客户端发送的元数据
+	Model             string                 `json:"model"`
+	Messages          []ClaudeMessage        `json:"messages"`
+	System            interface{}            `json:"system,omitempty"` // string 或 content 数组
+	MaxTokens         int                    `json:"max_tokens,omitempty"`
+	Temperature       float64                `json:"temperature,omitempty"`
+	TopP              float64                `json:"top_p,omitempty"`
+	Stream            bool                   `json:"stream,omitempty"`
+	Tools             []ClaudeTool           `json:"tools,omitempty"`
+	ToolChoice        interface{}            `json:"tool_choice,omitempty"`
+	ParallelToolCalls *bool                  `json:"parallel_tool_calls,omitempty"`
+	Metadata          map[string]interface{} `json:"metadata,omitempty"` // Claude Code CLI 等客户端发送的元数据
 }
 
 // ClaudeMessage Claude 消息
@@ -119,6 +122,9 @@ type Usage struct {
 	OutputTokens             int `json:"output_tokens,omitempty"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	// PromptTokensTotal 仅供内部统计使用，用于保留上游返回的总 prompt tokens 口径。
+	// 例如 Responses/OpenAI 风格的 input_tokens 可能已包含 cached tokens，metrics 层会据此归一化未命中输入。
+	PromptTokensTotal int `json:"-"`
 	// 缓存 TTL 细分（参考 claude-code-hub）
 	CacheCreation5mInputTokens int    `json:"cache_creation_5m_input_tokens,omitempty"` // 5分钟 TTL
 	CacheCreation1hInputTokens int    `json:"cache_creation_1h_input_tokens,omitempty"` // 1小时 TTL

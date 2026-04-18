@@ -29,31 +29,32 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			priority := config.GetChannelPriority(&up, i)
 
 			upstreams[i] = gin.H{
-				"index":                i,
-				"name":                 up.Name,
-				"serviceType":          up.ServiceType,
-				"baseUrl":              up.BaseURL,
-				"baseUrls":             up.BaseURLs,
-				"apiKeys":              up.APIKeys,
-				"description":          up.Description,
-				"website":              up.Website,
-				"insecureSkipVerify":   up.InsecureSkipVerify,
-				"modelMapping":         up.ModelMapping,
-				"reasoningMapping":     up.ReasoningMapping,
-				"textVerbosity":        up.TextVerbosity,
-				"fastMode":             up.FastMode,
-				"latency":              nil,
-				"status":               status,
-				"priority":             priority,
-				"promotionUntil":       up.PromotionUntil,
-				"lowQuality":           up.LowQuality,
-				"rpm":                  up.RPM,
-				"customHeaders":        up.CustomHeaders,
-				"proxyUrl":             up.ProxyURL,
-				"supportedModels":      up.SupportedModels,
-				"routePrefix":          up.RoutePrefix,
-				"disabledApiKeys":      up.DisabledAPIKeys,
-				"autoBlacklistBalance": up.IsAutoBlacklistBalanceEnabled(),
+				"index":                   i,
+				"name":                    up.Name,
+				"serviceType":             up.ServiceType,
+				"baseUrl":                 up.BaseURL,
+				"baseUrls":                up.BaseURLs,
+				"apiKeys":                 up.APIKeys,
+				"description":             up.Description,
+				"website":                 up.Website,
+				"insecureSkipVerify":      up.InsecureSkipVerify,
+				"modelMapping":            up.ModelMapping,
+				"reasoningMapping":        up.ReasoningMapping,
+				"textVerbosity":           up.TextVerbosity,
+				"fastMode":                up.FastMode,
+				"latency":                 nil,
+				"status":                  status,
+				"priority":                priority,
+				"promotionUntil":          up.PromotionUntil,
+				"lowQuality":              up.LowQuality,
+				"rpm":                     up.RPM,
+				"customHeaders":           up.CustomHeaders,
+				"proxyUrl":                up.ProxyURL,
+				"supportedModels":         up.SupportedModels,
+				"routePrefix":             up.RoutePrefix,
+				"disabledApiKeys":         up.DisabledAPIKeys,
+				"autoBlacklistBalance":    up.IsAutoBlacklistBalanceEnabled(),
+				"normalizeMetadataUserId": up.IsNormalizeMetadataUserIDEnabled(),
 			}
 		}
 
@@ -122,7 +123,7 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 			return
 		}
 
-		_, err = cfgManager.RemoveChatUpstream(id)
+		removed, err := cfgManager.RemoveChatUpstream(id)
 		if err != nil {
 			if strings.Contains(err.Error(), "无效的") {
 				c.JSON(404, gin.H{"error": "Upstream not found"})
@@ -132,7 +133,8 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 			return
 		}
 
-		channelScheduler.GetChannelLogStore(scheduler.ChannelKindChat).ClearAll()
+		channelScheduler.GetChannelLogStore(scheduler.ChannelKindChat).RemoveAndShift(id)
+		channelScheduler.DeleteChannelMetrics(removed, scheduler.ChannelKindChat)
 
 		c.JSON(200, gin.H{"message": "Chat upstream deleted successfully"})
 	}
@@ -363,16 +365,16 @@ func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		switch upstream.ServiceType {
 		case "claude":
 			// Claude API 没有 /v1/models，使用 /v1/messages 的 OPTIONS 请求
-			testURL = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
-			req, _ = http.NewRequest("OPTIONS", testURL, nil)
+			testURL = buildMessagesURL(baseURL)
+			req, _ = http.NewRequest(http.MethodOptions, testURL, nil)
 			if len(upstream.APIKeys) > 0 {
 				utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 				req.Header.Set("anthropic-version", "2023-06-01")
 			}
 		default:
 			// OpenAI / Gemini / Responses 等使用 /v1/models
-			testURL = fmt.Sprintf("%s/v1/models", strings.TrimRight(baseURL, "/"))
-			req, _ = http.NewRequest("GET", testURL, nil)
+			testURL = buildModelsURL(baseURL)
+			req, _ = http.NewRequest(http.MethodGet, testURL, nil)
 			if len(upstream.APIKeys) > 0 {
 				utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 			}
@@ -425,15 +427,15 @@ func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			var req *http.Request
 			switch upstream.ServiceType {
 			case "claude":
-				testURL = fmt.Sprintf("%s/v1/messages", strings.TrimRight(baseURL, "/"))
-				req, _ = http.NewRequest("OPTIONS", testURL, nil)
+				testURL = buildMessagesURL(baseURL)
+				req, _ = http.NewRequest(http.MethodOptions, testURL, nil)
 				if len(upstream.APIKeys) > 0 {
 					utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 					req.Header.Set("anthropic-version", "2023-06-01")
 				}
 			default:
-				testURL = fmt.Sprintf("%s/v1/models", strings.TrimRight(baseURL, "/"))
-				req, _ = http.NewRequest("GET", testURL, nil)
+				testURL = buildModelsURL(baseURL)
+				req, _ = http.NewRequest(http.MethodGet, testURL, nil)
 				if len(upstream.APIKeys) > 0 {
 					utils.SetAuthenticationHeader(req.Header, upstream.APIKeys[0])
 				}
@@ -470,8 +472,8 @@ func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	}
 }
 
-// buildModelsURL 构建 models 端点的 URL
-func buildModelsURL(baseURL string) string {
+// buildEndpointURL 构建带版本前缀的端点 URL
+func buildEndpointURL(baseURL, versionPrefix, endpoint string) string {
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
 	if skipVersionPrefix {
 		baseURL = strings.TrimSuffix(baseURL, "#")
@@ -481,12 +483,20 @@ func buildModelsURL(baseURL string) string {
 	versionPattern := regexp.MustCompile(`/v\d+[a-z]*$`)
 	hasVersionSuffix := versionPattern.MatchString(baseURL)
 
-	endpoint := "/models"
 	if !hasVersionSuffix && !skipVersionPrefix {
-		endpoint = "/v1" + endpoint
+		baseURL += versionPrefix
 	}
 
 	return baseURL + endpoint
+}
+
+func buildMessagesURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/messages")
+}
+
+// buildModelsURL 构建 models 端点的 URL
+func buildModelsURL(baseURL string) string {
+	return buildEndpointURL(baseURL, "/v1", "/models")
 }
 
 // GetModelsRequest 获取模型列表的请求体

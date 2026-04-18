@@ -87,3 +87,21 @@ func TestConvertToProviderRequest_PropagatesContext(t *testing.T) {
 		}
 	})
 }
+
+func TestConvertToProviderRequest_UsesUpdatedRequestBodyBytesContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"claude-3","messages":[],"metadata":{"user_id":"{\"device_id\":\"abc\"}"}}`)
+	normalized := []byte(`{"model":"claude-3","messages":[],"metadata":{"user_id":"user_abc"}}`)
+	c := newGinContext(http.MethodPost, "/v1/messages", body, context.Background())
+	c.Set("requestBodyBytes", normalized)
+	upstream := &config.UpstreamConfig{BaseURL: "https://api.example.com", ServiceType: "claude"}
+
+	p := &ClaudeProvider{}
+	_, reqBody, err := p.ConvertToProviderRequest(c, upstream, "sk-ant-test")
+	if err != nil {
+		t.Fatalf("ConvertToProviderRequest() err = %v", err)
+	}
+	if string(reqBody) != string(normalized) {
+		t.Fatalf("request body = %s, want %s", string(reqBody), string(normalized))
+	}
+}

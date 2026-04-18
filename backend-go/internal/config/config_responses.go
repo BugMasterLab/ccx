@@ -199,6 +199,10 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 		v := *updates.AutoBlacklistBalance
 		upstream.AutoBlacklistBalance = &v
 	}
+	if updates.NormalizeMetadataUserID != nil {
+		v := *updates.NormalizeMetadataUserID
+		upstream.NormalizeMetadataUserID = &v
+	}
 	if updates.CustomHeaders != nil {
 		upstream.CustomHeaders = updates.CustomHeaders
 	}

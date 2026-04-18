@@ -57,3 +57,62 @@ func TestCapabilityJobStore_GetOrCreateByLookupKey_Concurrent(t *testing.T) {
 		t.Fatalf("reusedCount = %d, want %d", reusedCount, total-1)
 	}
 }
+
+func TestRecomputeCapabilityJob_PartialSuccess(t *testing.T) {
+	job := newCapabilityTestJob(1, "channel", "messages", "claude", []string{"messages"}, 10*time.Second)
+	job.Tests[0].ModelResults = []CapabilityModelJobResult{
+		{Model: "a", Status: CapabilityModelStatusSuccess, Lifecycle: CapabilityLifecycleDone, Outcome: CapabilityOutcomeSuccess, Success: true},
+		{Model: "b", Status: CapabilityModelStatusFailed, Lifecycle: CapabilityLifecycleDone, Outcome: CapabilityOutcomeFailed, Success: false},
+	}
+	job.Tests[0].AttemptedModels = 2
+
+	recomputeCapabilityJob(job)
+
+	if job.Outcome != CapabilityOutcomePartial {
+		t.Fatalf("job outcome = %s, want partial", job.Outcome)
+	}
+	if job.Lifecycle != CapabilityLifecycleDone {
+		t.Fatalf("job lifecycle = %s, want done", job.Lifecycle)
+	}
+	if job.Tests[0].Outcome != CapabilityOutcomePartial {
+		t.Fatalf("protocol outcome = %s, want partial", job.Tests[0].Outcome)
+	}
+}
+
+func TestUpdateCapabilityJobModelResult_SetsCancelledReason(t *testing.T) {
+	job := newCapabilityTestJob(1, "channel", "messages", "claude", []string{"messages"}, 10*time.Second)
+	job.Tests[0].ModelResults = []CapabilityModelJobResult{{Model: "a", Status: CapabilityModelStatusRunning, Lifecycle: CapabilityLifecycleActive, Outcome: CapabilityOutcomeUnknown}}
+
+	reason := "cancelled"
+	updateCapabilityJobModelResult(job, "messages", "a", CapabilityModelStatusSkipped, ModelTestResult{Model: "a", Error: &reason})
+
+	got := job.Tests[0].ModelResults[0]
+	if got.Lifecycle != CapabilityLifecycleCancelled {
+		t.Fatalf("lifecycle = %s, want cancelled", got.Lifecycle)
+	}
+	if got.Outcome != CapabilityOutcomeCancelled {
+		t.Fatalf("outcome = %s, want cancelled", got.Outcome)
+	}
+}
+
+func TestCancelCapabilityStateShape(t *testing.T) {
+	job := newCapabilityTestJob(1, "channel", "messages", "claude", []string{"messages"}, 10*time.Second)
+	job.Status = CapabilityJobStatusCancelled
+	job.Lifecycle = CapabilityLifecycleCancelled
+	job.Outcome = CapabilityOutcomeCancelled
+	job.Tests[0].Lifecycle = CapabilityLifecycleCancelled
+	job.Tests[0].Outcome = CapabilityOutcomeCancelled
+	job.Tests[0].ModelResults = []CapabilityModelJobResult{
+		{Model: "queued", Status: CapabilityModelStatusSkipped, Lifecycle: CapabilityLifecycleDone, Outcome: CapabilityOutcomeUnknown},
+		{Model: "running", Status: CapabilityModelStatusSkipped, Lifecycle: CapabilityLifecycleCancelled, Outcome: CapabilityOutcomeCancelled},
+	}
+
+	recomputeCapabilityJob(job)
+
+	if job.Outcome != CapabilityOutcomeCancelled {
+		t.Fatalf("job outcome = %s, want cancelled", job.Outcome)
+	}
+	if job.Tests[0].Outcome != CapabilityOutcomeCancelled {
+		t.Fatalf("protocol outcome = %s, want cancelled", job.Tests[0].Outcome)
+	}
+}

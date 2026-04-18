@@ -13,7 +13,6 @@
           <div class="text-caption">
             <div>{{ t('status.metrics.requests') }}: {{ metrics.requestCount }}</div>
             <div>{{ t('status.metrics.successRate') }}: {{ metrics.successRate?.toFixed(1) || 0 }}%</div>
-            <div>{{ t('status.metrics.consecutiveFailures') }}: {{ metrics.consecutiveFailures }}</div>
             <div v-if="metrics.lastSuccessAt">{{ t('status.metrics.lastSuccess') }}: {{ formatTime(metrics.lastSuccessAt) }}</div>
             <div v-if="metrics.lastFailureAt">{{ t('status.metrics.lastFailure') }}: {{ formatTime(metrics.lastFailureAt) }}</div>
           </div>
@@ -29,6 +28,8 @@ import { computed } from 'vue'
 import type { ChannelStatus, ChannelMetrics } from '../services/api'
 import { useI18n } from '../i18n'
 
+type DisplayStatus = 'normal' | 'tripped' | 'disabled' | 'error' | 'unknown'
+
 const props = withDefaults(defineProps<{
   status: ChannelStatus | 'healthy' | 'error' | 'unknown'
   metrics?: ChannelMetrics
@@ -41,25 +42,27 @@ const props = withDefaults(defineProps<{
 
 const { t } = useI18n()
 
+const effectiveStatus = computed<DisplayStatus>(() => {
+  if (props.status === 'disabled') return 'disabled'
+  if (props.status === 'suspended' || props.metrics?.circuitState === 'open') return 'tripped'
+  if (props.status === 'error') return 'error'
+  if (props.status === 'unknown') return 'unknown'
+  return 'normal'
+})
+
 // 状态配置映射
-const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string; class: string }> = {
-  active: {
+const STATUS_CONFIG: Record<DisplayStatus, { icon: string; color: string; label: string; class: string }> = {
+  normal: {
     icon: 'mdi-check-circle',
     color: 'success',
-    label: 'status.active',
-    class: 'status-active'
+    label: 'status.normal',
+    class: 'status-normal'
   },
-  healthy: {
-    icon: 'mdi-check-circle',
-    color: 'success',
-    label: 'status.healthy',
-    class: 'status-active'
-  },
-  suspended: {
-    icon: 'mdi-pause-circle',
-    color: 'warning',
-    label: 'status.suspended',
-    class: 'status-suspended'
+  tripped: {
+    icon: 'mdi-alert-octagon',
+    color: 'error',
+    label: 'status.tripped',
+    class: 'status-tripped'
   },
   disabled: {
     icon: 'mdi-close-circle',
@@ -83,7 +86,7 @@ const STATUS_CONFIG: Record<string, { icon: string; color: string; label: string
 
 // 计算属性
 const statusConfig = computed(() => {
-  return STATUS_CONFIG[props.status] || STATUS_CONFIG.unknown
+  return STATUS_CONFIG[effectiveStatus.value] || STATUS_CONFIG.unknown
 })
 
 const statusIcon = computed(() => statusConfig.value.icon)
@@ -135,7 +138,7 @@ const formatTime = (dateStr: string): string => {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 5px 9px;
   background: rgb(var(--v-theme-surface));
   border: 1px solid rgb(var(--v-theme-on-surface));
   cursor: help;
@@ -163,112 +166,62 @@ const formatTime = (dateStr: string): string => {
   display: inline-flex;
   align-items: center;
   line-height: 1;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 /* 状态样式 - 高对比度实心边框 */
-.status-active .badge-content {
-  background: #bbf7d0;
-  color: #166534;
-  border-color: #166534;
+.status-normal .badge-content {
+  background: var(--ccx-status-active-bg);
+  color: var(--ccx-status-active-fg);
+  border-color: var(--ccx-status-active-fg);
 }
 
-.status-active .badge-content .status-icon {
-  color: #166534 !important;
+.status-normal .badge-content .status-icon {
+  color: var(--ccx-status-active-fg) !important;
 }
 
-.v-theme--dark .status-active .badge-content {
-  background: #166534;
-  color: #bbf7d0;
-  border-color: #bbf7d0;
+.status-tripped .badge-content {
+  background: var(--ccx-status-suspended-bg);
+  color: var(--ccx-status-suspended-fg);
+  border-color: var(--ccx-status-suspended-fg);
+  animation: pixel-blink 1.2s step-end infinite;
 }
 
-.v-theme--dark .status-active .badge-content .status-icon {
-  color: #bbf7d0 !important;
-}
-
-.status-suspended .badge-content {
-  background: #fef3c7;
-  color: #92400e;
-  border-color: #92400e;
-  animation: pixel-blink 1.5s step-end infinite;
-}
-
-.status-suspended .badge-content .status-icon {
-  color: #92400e !important;
-}
-
-.v-theme--dark .status-suspended .badge-content {
-  background: #92400e;
-  color: #fef3c7;
-  border-color: #fef3c7;
-}
-
-.v-theme--dark .status-suspended .badge-content .status-icon {
-  color: #fef3c7 !important;
+.status-tripped .badge-content .status-icon {
+  color: var(--ccx-status-suspended-fg) !important;
 }
 
 .status-disabled .badge-content {
-  background: #e5e7eb;
-  color: #6b7280;
-  border-color: #6b7280;
+  background: var(--ccx-status-disabled-bg);
+  color: var(--ccx-status-disabled-fg);
+  border-color: var(--ccx-status-disabled-fg);
 }
 
 .status-disabled .badge-content .status-icon {
-  color: #6b7280 !important;
-}
-
-.v-theme--dark .status-disabled .badge-content {
-  background: #374151;
-  color: #9ca3af;
-  border-color: #9ca3af;
-}
-
-.v-theme--dark .status-disabled .badge-content .status-icon {
-  color: #9ca3af !important;
+  color: var(--ccx-status-disabled-fg) !important;
 }
 
 .status-error .badge-content {
-  background: #fecaca;
-  color: #991b1b;
-  border-color: #991b1b;
+  background: var(--ccx-status-error-bg);
+  color: var(--ccx-status-error-fg);
+  border-color: var(--ccx-status-error-fg);
 }
 
 .status-error .badge-content .status-icon {
-  color: #991b1b !important;
-}
-
-.v-theme--dark .status-error .badge-content {
-  background: #991b1b;
-  color: #fecaca;
-  border-color: #fecaca;
-}
-
-.v-theme--dark .status-error .badge-content .status-icon {
-  color: #fecaca !important;
+  color: var(--ccx-status-error-fg) !important;
 }
 
 .status-unknown .badge-content {
-  background: #e5e7eb;
-  color: #6b7280;
-  border-color: #6b7280;
+  background: var(--ccx-status-unknown-bg);
+  color: var(--ccx-status-unknown-fg);
+  border-color: var(--ccx-status-unknown-fg);
 }
 
 .status-unknown .badge-content .status-icon {
-  color: #6b7280 !important;
-}
-
-.v-theme--dark .status-unknown .badge-content {
-  background: #374151;
-  color: #9ca3af;
-  border-color: #9ca3af;
-}
-
-.v-theme--dark .status-unknown .badge-content .status-icon {
-  color: #9ca3af !important;
+  color: var(--ccx-status-unknown-fg) !important;
 }
 
 /* 手机端隐藏状态文字，改为像素点样式 */
@@ -291,45 +244,44 @@ const formatTime = (dateStr: string): string => {
     position: relative;
   }
 
-  /* 活跃状态 - 绿色像素点 */
-  .status-active .badge-content .v-icon {
-    background: #10b981;
-    border: 2px solid #065f46;
+  .status-normal .badge-content .v-icon {
+    background: var(--ccx-status-active-dot-bg);
+    border: 2px solid var(--ccx-status-active-dot-border);
   }
 
-  .status-active .badge-content .v-icon::after {
+  .status-normal .badge-content .v-icon::after {
     content: '';
     position: absolute;
     top: -3px;
     left: -3px;
     width: 14px;
     height: 14px;
-    background: rgba(16, 185, 129, 0.3);
+    background: var(--ccx-status-active-dot-glow);
     animation: pixel-pulse 1s step-end infinite;
   }
 
   /* 熔断状态 - 橙色像素点 */
-  .status-suspended .badge-content .v-icon {
-    background: #f59e0b;
-    border: 2px solid #92400e;
+  .status-tripped .badge-content .v-icon {
+    background: var(--ccx-status-suspended-dot-bg);
+    border: 2px solid var(--ccx-status-suspended-dot-border);
   }
 
-  .status-suspended .badge-content .v-icon::after {
+  .status-tripped .badge-content .v-icon::after {
     content: '';
     position: absolute;
     top: -3px;
     left: -3px;
     width: 14px;
     height: 14px;
-    background: rgba(245, 158, 11, 0.3);
+    background: var(--ccx-status-suspended-dot-glow);
     animation: pixel-pulse 0.75s step-end infinite;
   }
 
   /* 禁用状态 - 灰色像素点 */
   .status-disabled .badge-content .v-icon,
   .status-unknown .badge-content .v-icon {
-    background: #94a3b8;
-    border: 2px solid #475569;
+    background: var(--ccx-status-disabled-dot-bg);
+    border: 2px solid var(--ccx-status-disabled-dot-border);
   }
 
   @keyframes pixel-pulse {

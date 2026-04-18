@@ -16,11 +16,40 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type CapabilityLifecycle string
+
+type CapabilityOutcome string
+
+type CapabilityRunMode string
+
 type CapabilityJobStatus string
 
 type CapabilityProtocolStatus string
 
 type CapabilityModelStatus string
+
+const (
+	CapabilityLifecyclePending   CapabilityLifecycle = "pending"
+	CapabilityLifecycleActive    CapabilityLifecycle = "active"
+	CapabilityLifecycleDone      CapabilityLifecycle = "done"
+	CapabilityLifecycleCancelled CapabilityLifecycle = "cancelled"
+)
+
+const (
+	CapabilityOutcomeUnknown   CapabilityOutcome = "unknown"
+	CapabilityOutcomeSuccess   CapabilityOutcome = "success"
+	CapabilityOutcomeFailed    CapabilityOutcome = "failed"
+	CapabilityOutcomePartial   CapabilityOutcome = "partial"
+	CapabilityOutcomeCancelled CapabilityOutcome = "cancelled"
+)
+
+const (
+	CapabilityRunModeFresh                CapabilityRunMode = "fresh"
+	CapabilityRunModeReusedRunning        CapabilityRunMode = "reused_running"
+	CapabilityRunModeResumedCancelled     CapabilityRunMode = "resumed_cancelled"
+	CapabilityRunModeCacheHit             CapabilityRunMode = "cache_hit"
+	CapabilityRunModeReusedPreviousResult CapabilityRunMode = "reused_previous_results"
+)
 
 const (
 	CapabilityJobStatusQueued    CapabilityJobStatus = "queued"
@@ -58,6 +87,9 @@ type CapabilityTestJobProgress struct {
 type CapabilityModelJobResult struct {
 	Model              string                `json:"model"`
 	Status             CapabilityModelStatus `json:"status"`
+	Lifecycle          CapabilityLifecycle   `json:"lifecycle"`
+	Outcome            CapabilityOutcome     `json:"outcome"`
+	Reason             *string               `json:"reason,omitempty"`
 	Success            bool                  `json:"success"`
 	Latency            int64                 `json:"latency"`
 	StreamingSupported bool                  `json:"streamingSupported"`
@@ -69,6 +101,9 @@ type CapabilityModelJobResult struct {
 type CapabilityProtocolJobResult struct {
 	Protocol           string                     `json:"protocol"`
 	Status             CapabilityProtocolStatus   `json:"status"`
+	Lifecycle          CapabilityLifecycle        `json:"lifecycle"`
+	Outcome            CapabilityOutcome          `json:"outcome"`
+	Reason             *string                    `json:"reason,omitempty"`
 	Success            bool                       `json:"success"`
 	Latency            int64                      `json:"latency"`
 	StreamingSupported bool                       `json:"streamingSupported"`
@@ -87,6 +122,14 @@ type CapabilityTestJob struct {
 	ChannelKind         string                        `json:"channelKind"`
 	SourceType          string                        `json:"sourceType"`
 	Status              CapabilityJobStatus           `json:"status"`
+	Lifecycle           CapabilityLifecycle           `json:"lifecycle"`
+	Outcome             CapabilityOutcome             `json:"outcome"`
+	Reason              *string                       `json:"reason,omitempty"`
+	RunMode             CapabilityRunMode             `json:"runMode,omitempty"`
+	SummaryReason       string                        `json:"summaryReason,omitempty"`
+	ActiveOperations    int                           `json:"activeOperations,omitempty"`
+	IsResumed           bool                          `json:"isResumed,omitempty"`
+	HasReusedResults    bool                          `json:"hasReusedResults,omitempty"`
 	Tests               []CapabilityProtocolJobResult `json:"tests"`
 	CompatibleProtocols []string                      `json:"compatibleProtocols"`
 	TotalDuration       int64                         `json:"totalDuration"`
@@ -98,7 +141,7 @@ type CapabilityTestJob struct {
 	CacheHit            bool                          `json:"cacheHit,omitempty"`
 	TargetProtocols     []string                      `json:"targetProtocols,omitempty"`
 	TimeoutMilliseconds int                           `json:"timeoutMilliseconds,omitempty"`
-	CancelFunc          context.CancelFunc            `json:"-"` // 用于取消正在执行的测试 goroutine
+	CancelFunc          context.CancelFunc            `json:"-"`
 }
 
 type capabilityTestJobStore struct {
@@ -132,7 +175,7 @@ func (s *capabilityTestJobStore) gc() {
 	s.Lock()
 	defer s.Unlock()
 	for jobID, job := range s.jobs {
-		if job.Status != CapabilityJobStatusCompleted && job.Status != CapabilityJobStatusFailed && job.Status != CapabilityJobStatusCancelled {
+		if job.Lifecycle != CapabilityLifecycleDone && job.Lifecycle != CapabilityLifecycleCancelled {
 			continue
 		}
 		t, err := time.Parse(time.RFC3339Nano, job.UpdatedAt)
@@ -161,6 +204,9 @@ func newCapabilityTestJob(channelID int, channelName, channelKind, sourceType st
 		ChannelKind:         channelKind,
 		SourceType:          sourceType,
 		Status:              CapabilityJobStatusQueued,
+		Lifecycle:           CapabilityLifecyclePending,
+		Outcome:             CapabilityOutcomeUnknown,
+		RunMode:             CapabilityRunModeFresh,
 		CompatibleProtocols: make([]string, 0),
 		Tests:               make([]CapabilityProtocolJobResult, 0, len(protocols)),
 		UpdatedAt:           now,
@@ -169,20 +215,23 @@ func newCapabilityTestJob(channelID int, channelName, channelKind, sourceType st
 	}
 
 	for _, protocol := range protocols {
-		// 预填充各协议的模型列表（全部 queued），前端可立即展示
 		var modelResults []CapabilityModelJobResult
 		if models, err := getCapabilityProbeModels(protocol); err == nil {
 			modelResults = make([]CapabilityModelJobResult, len(models))
 			for i, model := range models {
 				modelResults[i] = CapabilityModelJobResult{
-					Model:  model,
-					Status: CapabilityModelStatusQueued,
+					Model:     model,
+					Status:    CapabilityModelStatusQueued,
+					Lifecycle: CapabilityLifecyclePending,
+					Outcome:   CapabilityOutcomeUnknown,
 				}
 			}
 		}
 		job.Tests = append(job.Tests, CapabilityProtocolJobResult{
 			Protocol:        protocol,
 			Status:          CapabilityProtocolStatusQueued,
+			Lifecycle:       CapabilityLifecyclePending,
+			Outcome:         CapabilityOutcomeUnknown,
 			AttemptedModels: len(modelResults),
 			ModelResults:    modelResults,
 			TestedAt:        now,
@@ -308,19 +357,39 @@ func cloneCapabilityTestJob(job *CapabilityTestJob) *CapabilityTestJob {
 func recomputeCapabilityJob(job *CapabilityTestJob) {
 	progress := CapabilityTestJobProgress{}
 	compatible := make([]string, 0)
-	allProtocolsFinished := true
+	allProtocolsTerminal := true
+	anyProtocolActive := false
+	allProtocolsCancelled := len(job.Tests) > 0
 	anyProtocolFailed := false
+	anyProtocolPartial := false
+	anyProtocolSucceeded := false
 
-	for _, test := range job.Tests {
-		if test.Success {
+	for i := range job.Tests {
+		test := &job.Tests[i]
+		recomputeCapabilityProtocol(test)
+
+		if test.Outcome == CapabilityOutcomeSuccess || test.Outcome == CapabilityOutcomePartial {
 			compatible = append(compatible, test.Protocol)
 		}
-		if test.Status != CapabilityProtocolStatusCompleted && test.Status != CapabilityProtocolStatusFailed {
-			allProtocolsFinished = false
+		if test.Lifecycle == CapabilityLifecycleActive || test.Lifecycle == CapabilityLifecyclePending {
+			allProtocolsTerminal = false
 		}
-		if test.Status == CapabilityProtocolStatusFailed {
+		if test.Lifecycle == CapabilityLifecycleActive {
+			anyProtocolActive = true
+		}
+		if test.Lifecycle != CapabilityLifecycleCancelled {
+			allProtocolsCancelled = false
+		}
+		if test.Outcome == CapabilityOutcomeFailed {
 			anyProtocolFailed = true
 		}
+		if test.Outcome == CapabilityOutcomePartial {
+			anyProtocolPartial = true
+		}
+		if test.Outcome == CapabilityOutcomeSuccess {
+			anyProtocolSucceeded = true
+		}
+
 		for _, modelResult := range test.ModelResults {
 			progress.TotalModels++
 			switch modelResult.Status {
@@ -344,27 +413,140 @@ func recomputeCapabilityJob(job *CapabilityTestJob) {
 	sort.Strings(compatible)
 	job.Progress = progress
 	job.CompatibleProtocols = compatible
+	job.ActiveOperations = progress.RunningModels
 
-	if job.StartedAt == "" && (job.Status == CapabilityJobStatusRunning || job.Status == CapabilityJobStatusCompleted || job.Status == CapabilityJobStatusFailed) {
+	if job.StartedAt == "" && (progress.RunningModels > 0 || progress.CompletedModels > 0 || job.Lifecycle == CapabilityLifecycleDone) {
 		job.StartedAt = job.UpdatedAt
 	}
 
-	if allProtocolsFinished && job.FinishedAt == "" {
-		job.FinishedAt = job.UpdatedAt
-	}
-
-	// cancelled 状态由取消逻辑显式设置，recompute 不覆盖
-	if job.Status == CapabilityJobStatusCancelled {
+	if job.Lifecycle == CapabilityLifecycleCancelled {
+		job.Outcome = CapabilityOutcomeCancelled
+		if job.FinishedAt == "" {
+			job.FinishedAt = job.UpdatedAt
+		}
+		job.Status = deriveCapabilityJobStatus(job.Lifecycle, job.Outcome)
 		return
 	}
 
-	if allProtocolsFinished {
-		if len(compatible) > 0 {
-			job.Status = CapabilityJobStatusCompleted
-		} else if anyProtocolFailed || progress.TotalModels > 0 {
-			job.Status = CapabilityJobStatusFailed
+	if anyProtocolActive || progress.RunningModels > 0 {
+		job.Lifecycle = CapabilityLifecycleActive
+		if anyProtocolSucceeded || anyProtocolPartial {
+			job.Outcome = CapabilityOutcomePartial
+		} else {
+			job.Outcome = CapabilityOutcomeUnknown
+		}
+		job.Status = deriveCapabilityJobStatus(job.Lifecycle, job.Outcome)
+		job.FinishedAt = ""
+		return
+	}
+
+	if !allProtocolsTerminal {
+		job.Lifecycle = CapabilityLifecyclePending
+		job.Outcome = CapabilityOutcomeUnknown
+		job.Status = deriveCapabilityJobStatus(job.Lifecycle, job.Outcome)
+		job.FinishedAt = ""
+		return
+	}
+
+	if allProtocolsCancelled && len(job.Tests) > 0 {
+		job.Lifecycle = CapabilityLifecycleCancelled
+		job.Outcome = CapabilityOutcomeCancelled
+	} else {
+		job.Lifecycle = CapabilityLifecycleDone
+		switch {
+		case anyProtocolPartial:
+			job.Outcome = CapabilityOutcomePartial
+		case anyProtocolSucceeded:
+			job.Outcome = CapabilityOutcomeSuccess
+		case anyProtocolFailed || progress.TotalModels > 0:
+			job.Outcome = CapabilityOutcomeFailed
+		default:
+			job.Outcome = CapabilityOutcomeUnknown
 		}
 	}
+
+	job.Status = deriveCapabilityJobStatus(job.Lifecycle, job.Outcome)
+	if job.FinishedAt == "" {
+		job.FinishedAt = job.UpdatedAt
+	}
+}
+
+func recomputeCapabilityProtocol(test *CapabilityProtocolJobResult) {
+	allTerminal := true
+	allCancelled := len(test.ModelResults) > 0
+	anyActive := false
+	anySuccess := false
+	anyFailed := false
+	anyCancelled := false
+	successCount := 0
+	var firstSuccessModel string
+	var firstSuccessStreaming bool
+
+	for _, modelResult := range test.ModelResults {
+		if modelResult.Lifecycle == CapabilityLifecyclePending || modelResult.Lifecycle == CapabilityLifecycleActive {
+			allTerminal = false
+		}
+		if modelResult.Lifecycle == CapabilityLifecycleActive {
+			anyActive = true
+		}
+		if modelResult.Lifecycle != CapabilityLifecycleCancelled {
+			allCancelled = false
+		}
+		switch modelResult.Outcome {
+		case CapabilityOutcomeSuccess:
+			anySuccess = true
+			successCount++
+			if firstSuccessModel == "" {
+				firstSuccessModel = modelResult.Model
+				firstSuccessStreaming = modelResult.StreamingSupported
+			}
+		case CapabilityOutcomeFailed:
+			anyFailed = true
+		case CapabilityOutcomeCancelled:
+			anyCancelled = true
+		}
+	}
+
+	test.SuccessCount = successCount
+	if firstSuccessModel != "" {
+		test.TestedModel = firstSuccessModel
+		test.StreamingSupported = firstSuccessStreaming
+	}
+	test.Success = anySuccess
+
+	switch {
+	case test.Lifecycle == CapabilityLifecycleCancelled || allCancelled:
+		test.Lifecycle = CapabilityLifecycleCancelled
+		test.Outcome = CapabilityOutcomeCancelled
+	case anyActive:
+		test.Lifecycle = CapabilityLifecycleActive
+		if anySuccess {
+			test.Outcome = CapabilityOutcomePartial
+		} else {
+			test.Outcome = CapabilityOutcomeUnknown
+		}
+	case !allTerminal:
+		test.Lifecycle = CapabilityLifecyclePending
+		test.Outcome = CapabilityOutcomeUnknown
+	case anySuccess && (anyFailed || anyCancelled):
+		test.Lifecycle = CapabilityLifecycleDone
+		test.Outcome = CapabilityOutcomePartial
+		test.Error = nil
+	case anySuccess:
+		test.Lifecycle = CapabilityLifecycleDone
+		test.Outcome = CapabilityOutcomeSuccess
+		test.Error = nil
+	case anyFailed:
+		test.Lifecycle = CapabilityLifecycleDone
+		test.Outcome = CapabilityOutcomeFailed
+	case anyCancelled:
+		test.Lifecycle = CapabilityLifecycleCancelled
+		test.Outcome = CapabilityOutcomeCancelled
+	default:
+		test.Lifecycle = CapabilityLifecyclePending
+		test.Outcome = CapabilityOutcomeUnknown
+	}
+	test.Status = deriveCapabilityProtocolStatus(test.Lifecycle, test.Outcome)
 }
 
 func capabilityProtocolResultsFromResponse(resp CapabilityTestResponse) []CapabilityProtocolJobResult {
@@ -385,10 +567,13 @@ func capabilityProtocolResultsFromResponse(resp CapabilityTestResponse) []Capabi
 			modelResults = append(modelResults, CapabilityModelJobResult{
 				Model:              modelResult.Model,
 				Status:             modelStatus,
+				Lifecycle:          capabilityModelLifecycleFromLegacy(modelStatus),
+				Outcome:            capabilityModelOutcomeFromLegacy(modelStatus, modelResult.Success),
 				Success:            modelResult.Success,
 				Latency:            modelResult.Latency,
 				StreamingSupported: modelResult.StreamingSupported,
 				Error:              modelResult.Error,
+				Reason:             modelResult.Error,
 				StartedAt:          modelResult.StartedAt,
 				TestedAt:           modelResult.TestedAt,
 			})
@@ -396,6 +581,9 @@ func capabilityProtocolResultsFromResponse(resp CapabilityTestResponse) []Capabi
 		results = append(results, CapabilityProtocolJobResult{
 			Protocol:           test.Protocol,
 			Status:             status,
+			Lifecycle:          capabilityProtocolLifecycleFromLegacy(status),
+			Outcome:            capabilityProtocolOutcomeFromLegacy(status, test.Success, test.SuccessCount, test.AttemptedModels),
+			Reason:             test.Error,
 			Success:            test.Success,
 			Latency:            test.Latency,
 			StreamingSupported: test.StreamingSupported,
@@ -419,6 +607,8 @@ func createCapabilityJobFromResponse(channelID int, channelName, channelKind, so
 		ChannelKind:         channelKind,
 		SourceType:          sourceType,
 		Status:              CapabilityJobStatusCompleted,
+		Lifecycle:           CapabilityLifecycleDone,
+		Outcome:             CapabilityOutcomeSuccess,
 		Tests:               capabilityProtocolResultsFromResponse(resp),
 		CompatibleProtocols: append([]string(nil), resp.CompatibleProtocols...),
 		TotalDuration:       resp.TotalDuration,
@@ -426,6 +616,7 @@ func createCapabilityJobFromResponse(channelID int, channelName, channelKind, so
 		UpdatedAt:           now,
 		FinishedAt:          now,
 		CacheHit:            cacheHit,
+		RunMode:             CapabilityRunModeCacheHit,
 		TargetProtocols:     append([]string(nil), protocols...),
 		TimeoutMilliseconds: int(timeout / time.Millisecond),
 	}
@@ -485,6 +676,135 @@ func GetCapabilityTestJobStatus(cfgManager *config.ConfigManager, channelKind st
 
 		c.JSON(http.StatusOK, job)
 	}
+}
+
+func capabilityModelLifecycleFromLegacy(status CapabilityModelStatus) CapabilityLifecycle {
+	switch status {
+	case CapabilityModelStatusQueued:
+		return CapabilityLifecyclePending
+	case CapabilityModelStatusRunning:
+		return CapabilityLifecycleActive
+	case CapabilityModelStatusSkipped:
+		return CapabilityLifecycleDone
+	default:
+		return CapabilityLifecycleDone
+	}
+}
+
+func capabilityModelOutcomeFromLegacy(status CapabilityModelStatus, success bool) CapabilityOutcome {
+	switch {
+	case success || status == CapabilityModelStatusSuccess:
+		return CapabilityOutcomeSuccess
+	case status == CapabilityModelStatusFailed:
+		return CapabilityOutcomeFailed
+	case status == CapabilityModelStatusSkipped:
+		return CapabilityOutcomeUnknown
+	case status == CapabilityModelStatusRunning || status == CapabilityModelStatusQueued:
+		return CapabilityOutcomeUnknown
+	default:
+		return CapabilityOutcomeUnknown
+	}
+}
+
+func capabilityProtocolLifecycleFromLegacy(status CapabilityProtocolStatus) CapabilityLifecycle {
+	switch status {
+	case CapabilityProtocolStatusQueued:
+		return CapabilityLifecyclePending
+	case CapabilityProtocolStatusRunning:
+		return CapabilityLifecycleActive
+	default:
+		return CapabilityLifecycleDone
+	}
+}
+
+func capabilityProtocolOutcomeFromLegacy(status CapabilityProtocolStatus, success bool, successCount, attemptedModels int) CapabilityOutcome {
+	if status == CapabilityProtocolStatusRunning || status == CapabilityProtocolStatusQueued {
+		return CapabilityOutcomeUnknown
+	}
+	if success {
+		if attemptedModels > 0 && successCount > 0 && successCount < attemptedModels {
+			return CapabilityOutcomePartial
+		}
+		return CapabilityOutcomeSuccess
+	}
+	return CapabilityOutcomeFailed
+}
+
+func getCapabilityDisplayMode(job *CapabilityTestJob) CapabilityRunMode {
+	if job == nil {
+		return CapabilityRunModeFresh
+	}
+	if job.CacheHit {
+		return CapabilityRunModeCacheHit
+	}
+	if job.IsResumed && job.RunMode != "" {
+		return job.RunMode
+	}
+	if job.RunMode != "" {
+		return job.RunMode
+	}
+	return CapabilityRunModeFresh
+}
+
+func deriveCapabilityJobStatus(lifecycle CapabilityLifecycle, outcome CapabilityOutcome) CapabilityJobStatus {
+	switch lifecycle {
+	case CapabilityLifecyclePending:
+		return CapabilityJobStatusQueued
+	case CapabilityLifecycleActive:
+		return CapabilityJobStatusRunning
+	case CapabilityLifecycleCancelled:
+		return CapabilityJobStatusCancelled
+	case CapabilityLifecycleDone:
+		switch outcome {
+		case CapabilityOutcomeSuccess, CapabilityOutcomePartial:
+			return CapabilityJobStatusCompleted
+		case CapabilityOutcomeFailed, CapabilityOutcomeUnknown:
+			return CapabilityJobStatusFailed
+		case CapabilityOutcomeCancelled:
+			return CapabilityJobStatusCancelled
+		}
+	}
+	return CapabilityJobStatusFailed
+}
+
+func deriveCapabilityProtocolStatus(lifecycle CapabilityLifecycle, outcome CapabilityOutcome) CapabilityProtocolStatus {
+	switch lifecycle {
+	case CapabilityLifecyclePending:
+		return CapabilityProtocolStatusQueued
+	case CapabilityLifecycleActive:
+		return CapabilityProtocolStatusRunning
+	case CapabilityLifecycleCancelled:
+		return CapabilityProtocolStatusFailed
+	case CapabilityLifecycleDone:
+		switch outcome {
+		case CapabilityOutcomeSuccess, CapabilityOutcomePartial:
+			return CapabilityProtocolStatusCompleted
+		default:
+			return CapabilityProtocolStatusFailed
+		}
+	}
+	return CapabilityProtocolStatusFailed
+}
+
+func deriveCapabilityModelStatus(lifecycle CapabilityLifecycle, outcome CapabilityOutcome) CapabilityModelStatus {
+	switch lifecycle {
+	case CapabilityLifecyclePending:
+		return CapabilityModelStatusQueued
+	case CapabilityLifecycleActive:
+		return CapabilityModelStatusRunning
+	case CapabilityLifecycleCancelled:
+		return CapabilityModelStatusSkipped
+	case CapabilityLifecycleDone:
+		switch outcome {
+		case CapabilityOutcomeSuccess:
+			return CapabilityModelStatusSuccess
+		case CapabilityOutcomeFailed:
+			return CapabilityModelStatusFailed
+		default:
+			return CapabilityModelStatusSkipped
+		}
+	}
+	return CapabilityModelStatusFailed
 }
 
 func parseCapabilityChannelID(c *gin.Context) (int, error) {

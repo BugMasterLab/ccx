@@ -26,7 +26,6 @@ export type MessageKey =
   | 'app.actions.addChannel'
   | 'app.actions.ping'
   | 'app.actions.refresh'
-  | 'app.actions.batchTest'
   | 'app.dialog.addApiKeyTitle'
   | 'app.dialog.apiKeyLabel'
   | 'app.dialog.apiKeyPlaceholder'
@@ -86,26 +85,17 @@ export type MessageKey =
   | 'capability.cancel'
   | 'capability.cancelling'
   | 'capability.cancelled'
+  | 'capability.partial'
+  | 'capability.runModeCacheHit'
+  | 'capability.runModeReusedRunning'
+  | 'capability.runModeResumedCancelled'
+  | 'capability.runModeReusedPreviousResults'
+  | 'capability.reasonNotRun'
+  | 'capability.reasonCancelled'
+  | 'capability.reasonTimeout'
   | 'capability.retryModel'
-  | 'batchTest.title'
-  | 'batchTest.selectChannels'
-  | 'batchTest.selectionSummary'
-  | 'batchTest.selectProtocols'
-  | 'batchTest.selectModels'
-  | 'batchTest.noModelsHint'
-  | 'batchTest.batchLatency'
-  | 'batchTest.batchCapability'
-  | 'batchTest.latencyLabel'
-  | 'batchTest.capabilityLabel'
-  | 'batchTest.results'
-  | 'batchTest.empty'
-  | 'batchTest.notTested'
-  | 'batchTest.idle'
-  | 'batchTest.noProtocolSelected'
-  | 'batchTest.creatingJob'
-  | 'batchTest.batchCapabilityFailed'
-  | 'batchTest.cancelAll'
-  | 'batchTest.cancelChannel'
+  | 'capability.noApiKeyError'
+  | 'capability.genericJobError'
   | 'orchestration.title'
   | 'orchestration.multiChannel'
   | 'orchestration.singleChannel'
@@ -148,6 +138,8 @@ export type MessageKey =
   | 'orchestration.copied'
   | 'orchestration.copyFailed'
   | 'orchestration.promotionSuccess'
+  | 'orchestration.resumeSuccess'
+  | 'orchestration.resumeSuccessWithKeys'
   | 'orchestration.deleteActiveGuard'
   | 'addChannel.editTitle'
   | 'addChannel.createTitle'
@@ -207,6 +199,8 @@ export type MessageKey =
   | 'addChannel.lowQualityHint'
   | 'addChannel.autoBlacklistBalanceLabel'
   | 'addChannel.autoBlacklistBalanceHint'
+  | 'addChannel.normalizeMetadataUserIdLabel'
+  | 'addChannel.normalizeMetadataUserIdHint'
   | 'addChannel.injectDummyThoughtSignatureLabel'
   | 'addChannel.injectDummyThoughtSignatureHint'
   | 'addChannel.stripThoughtSignatureLabel'
@@ -260,7 +254,10 @@ export type MessageKey =
   | 'channelCard.blacklistReason.authentication_error'
   | 'channelCard.blacklistReason.permission_error'
   | 'channelCard.blacklistReason.insufficient_balance'
-  | 'channelCard.blacklistReason.rate_limit'
+  | 'channelCard.blacklistReason.unavailable'
+  | 'channelCard.blacklistReason.rate_limited'
+  | 'channelCard.blacklistReason.invalid'
+  | 'channelCard.blacklistReason.unknown'
   | 'channelCard.notChecked'
   | 'channelCard.statusHealthy'
   | 'channelCard.statusError'
@@ -272,6 +269,7 @@ export type MessageKey =
   | 'channelLogs.autoRefreshing'
   | 'channelLogs.empty'
   | 'channelLogs.retry'
+  | 'channelLogs.sourceCapabilityTest'
   | 'store.channel.updated'
   | 'store.channel.added'
   | 'store.channel.deleted'
@@ -293,11 +291,10 @@ export type MessageKey =
   | 'chart.successRate'
   | 'chart.inputTokens'
   | 'chart.outputTokens'
-  | 'chart.success'
   | 'chart.input'
   | 'chart.output'
   | 'chart.requestUnit'
-  | 'chart.failed'
+  | 'chart.issueCount'
   | 'chart.total'
   | 'chart.collapse'
   | 'chart.noModelRequestsInRange'
@@ -307,15 +304,13 @@ export type MessageKey =
   | 'chart.keyHistoryLoadFailed'
   | 'chart.noRequestsInRange'
   | 'chart.noKeyUsageInRange'
-  | 'status.active'
-  | 'status.healthy'
-  | 'status.suspended'
+  | 'status.normal'
+  | 'status.tripped'
   | 'status.disabled'
   | 'status.error'
   | 'status.unknown'
   | 'status.metrics.requests'
   | 'status.metrics.successRate'
-  | 'status.metrics.consecutiveFailures'
   | 'status.metrics.lastSuccess'
   | 'status.metrics.lastFailure'
   | 'status.metrics.noData'
@@ -393,7 +388,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'app.actions.addChannel': 'Add channel',
     'app.actions.ping': 'Test latency',
     'app.actions.refresh': 'Refresh',
-    'app.actions.batchTest': 'Batch test',
     'app.dialog.addApiKeyTitle': 'Add API key',
     'app.dialog.apiKeyLabel': 'API key',
     'app.dialog.apiKeyPlaceholder': 'Enter API key',
@@ -453,26 +447,17 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancel': 'Cancel Test',
     'capability.cancelling': 'Cancelling...',
     'capability.cancelled': 'Cancelled',
+    'capability.partial': 'Partially available',
+    'capability.runModeCacheHit': 'Cached result',
+    'capability.runModeReusedRunning': 'Reused running task',
+    'capability.runModeResumedCancelled': 'Resumed cancelled task',
+    'capability.runModeReusedPreviousResults': 'Reused previous success',
+    'capability.reasonNotRun': 'Not executed in this round',
+    'capability.reasonCancelled': 'Cancelled before completion',
+    'capability.reasonTimeout': 'Timed out',
     'capability.retryModel': 'Retry this model',
-    'batchTest.title': 'Batch channel test',
-    'batchTest.selectChannels': 'Select channels',
-    'batchTest.selectionSummary': '{selected}/{total} selected',
-    'batchTest.selectProtocols': 'Select protocols',
-    'batchTest.selectModels': 'Select models',
-    'batchTest.noModelsHint': 'No models fetched yet. You can still type models manually.',
-    'batchTest.batchLatency': 'Batch latency',
-    'batchTest.batchCapability': 'Batch capability',
-    'batchTest.latencyLabel': 'Latency: ',
-    'batchTest.capabilityLabel': 'Capability: ',
-    'batchTest.results': 'Results',
-    'batchTest.empty': 'Select channels and run latency or capability tests in one click.',
-    'batchTest.notTested': 'Not tested',
-    'batchTest.idle': 'Idle',
-    'batchTest.noProtocolSelected': 'Select at least one protocol to test.',
-    'batchTest.creatingJob': 'Creating job...',
-    'batchTest.batchCapabilityFailed': 'Batch capability test failed: {message}',
-    'batchTest.cancelAll': 'Cancel all',
-    'batchTest.cancelChannel': 'Cancel',
+    'capability.noApiKeyError': 'This channel has no API key configured and cannot run capability tests.',
+    'capability.genericJobError': 'Capability test failed: {message}',
     'orchestration.title': 'Channel orchestration',
     'orchestration.multiChannel': 'Multi-channel mode',
     'orchestration.singleChannel': 'Single-channel mode',
@@ -515,6 +500,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.copied': 'Copied',
     'orchestration.copyFailed': 'Failed to copy channel config',
     'orchestration.promotionSuccess': 'Channel {name} is now top priority and will be preferred for the next 5 minutes',
+    'orchestration.resumeSuccess': 'Channel resumed and metrics reset',
+    'orchestration.resumeSuccessWithKeys': 'Channel resumed, metrics reset, and {count} blacklisted key(s) restored',
     'orchestration.deleteActiveGuard': 'Cannot delete: keep at least one active channel in the failover sequence',
     'addChannel.editTitle': 'Edit channel',
     'addChannel.createTitle': 'Add new channel',
@@ -574,6 +561,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': 'When enabled, token usage is force-estimated locally and the local value is used if the deviation exceeds 5%.',
     'addChannel.autoBlacklistBalanceLabel': 'Auto blacklist on insufficient balance',
     'addChannel.autoBlacklistBalanceHint': 'Automatically move the key to the blacklist when the upstream reports insufficient balance.',
+    'addChannel.normalizeMetadataUserIdLabel': 'Normalize metadata.user_id',
+    'addChannel.normalizeMetadataUserIdHint': 'Auto-convert JSON object user_id to a flat string for upstream compatibility.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Inject dummy thought signature',
     'addChannel.injectDummyThoughtSignatureHint': 'Injects a dummy signature into functionCall for third-party APIs that require this field. Disable it for the official API.',
     'addChannel.stripThoughtSignatureLabel': 'Strip thought signature',
@@ -627,7 +616,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': 'Auth error',
     'channelCard.blacklistReason.permission_error': 'Permission denied',
     'channelCard.blacklistReason.insufficient_balance': 'No balance',
-    'channelCard.blacklistReason.rate_limit': 'Rate limited',
+    'channelCard.blacklistReason.unavailable': 'Unavailable',
+    'channelCard.blacklistReason.rate_limited': 'Rate limited',
+    'channelCard.blacklistReason.invalid': 'Invalid key',
+    'channelCard.blacklistReason.unknown': 'Unknown',
     'channelCard.notChecked': 'Not checked',
     'channelCard.statusHealthy': 'Healthy',
     'channelCard.statusError': 'Error',
@@ -639,6 +631,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.autoRefreshing': 'Auto refreshing',
     'channelLogs.empty': 'No logs yet',
     'channelLogs.retry': 'Retry',
+    'channelLogs.sourceCapabilityTest': 'Capability Test',
     'store.channel.updated': 'Channel updated successfully',
     'store.channel.added': 'Channel added successfully',
     'store.channel.deleted': 'Channel deleted successfully',
@@ -657,14 +650,13 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.tokens': 'Tokens',
     'chart.cacheRw': 'Cache R/W',
     'chart.totalRequests': 'Total requests',
-    'chart.successRate': 'Success rate',
+    'chart.successRate': 'Availability',
     'chart.inputTokens': 'Input tokens',
     'chart.outputTokens': 'Output tokens',
-    'chart.success': 'success',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'requests',
-    'chart.failed': 'failed',
+    'chart.issueCount': 'issues',
     'chart.total': 'Total',
     'chart.collapse': 'Collapse',
     'chart.noModelRequestsInRange': 'No model request records in the selected time range',
@@ -674,17 +666,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.keyHistoryLoadFailed': 'Failed to load key history data',
     'chart.noRequestsInRange': 'No request records in the selected time range',
     'chart.noKeyUsageInRange': 'No key usage records in the selected time range',
-    'status.active': 'Active',
-    'status.healthy': 'Healthy',
-    'status.suspended': 'Suspended',
+    'status.normal': 'Normal',
+    'status.tripped': 'Tripped',
     'status.disabled': 'Disabled',
     'status.error': 'Error',
     'status.unknown': 'Unknown',
     'status.metrics.requests': 'Requests',
-    'status.metrics.successRate': 'Success rate',
-    'status.metrics.consecutiveFailures': 'Consecutive failures',
-    'status.metrics.lastSuccess': 'Last success',
-    'status.metrics.lastFailure': 'Last failure',
+    'status.metrics.successRate': 'Availability',
+    'status.metrics.lastSuccess': 'Recent success',
+    'status.metrics.lastFailure': 'Recent issue',
     'status.metrics.noData': 'No metrics yet',
     'status.metrics.justNow': 'just now',
     'status.metrics.minutesAgo': '{count} min ago',
@@ -759,7 +749,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'app.actions.addChannel': 'Tambah channel',
     'app.actions.ping': 'Tes latensi',
     'app.actions.refresh': 'Refresh',
-    'app.actions.batchTest': 'Tes massal',
     'app.dialog.addApiKeyTitle': 'Tambah API key',
     'app.dialog.apiKeyLabel': 'API key',
     'app.dialog.apiKeyPlaceholder': 'Masukkan API key',
@@ -819,26 +808,17 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancel': 'Batalkan Tes',
     'capability.cancelling': 'Membatalkan...',
     'capability.cancelled': 'Dibatalkan',
+    'capability.partial': 'Sebagian tersedia',
+    'capability.runModeCacheHit': 'Hasil cache',
+    'capability.runModeReusedRunning': 'Gunakan ulang tugas berjalan',
+    'capability.runModeResumedCancelled': 'Lanjutkan tugas yang dibatalkan',
+    'capability.runModeReusedPreviousResults': 'Gunakan hasil sukses sebelumnya',
+    'capability.reasonNotRun': 'Tidak dijalankan pada putaran ini',
+    'capability.reasonCancelled': 'Dibatalkan sebelum selesai',
+    'capability.reasonTimeout': 'Waktu habis',
     'capability.retryModel': 'Coba ulang model ini',
-    'batchTest.title': 'Tes channel massal',
-    'batchTest.selectChannels': 'Pilih channel',
-    'batchTest.selectionSummary': '{selected}/{total} dipilih',
-    'batchTest.selectProtocols': 'Pilih protokol',
-    'batchTest.selectModels': 'Pilih model',
-    'batchTest.noModelsHint': 'Belum ada model yang didapat. Anda tetap bisa mengetik model secara manual.',
-    'batchTest.batchLatency': 'Tes latensi massal',
-    'batchTest.batchCapability': 'Tes kemampuan massal',
-    'batchTest.latencyLabel': 'Latensi: ',
-    'batchTest.capabilityLabel': 'Kemampuan: ',
-    'batchTest.results': 'Hasil',
-    'batchTest.empty': 'Pilih channel lalu jalankan tes latensi atau kemampuan sekali klik.',
-    'batchTest.notTested': 'Belum diuji',
-    'batchTest.idle': 'Siap',
-    'batchTest.noProtocolSelected': 'Pilih minimal satu protokol untuk diuji.',
-    'batchTest.creatingJob': 'Membuat tugas...',
-    'batchTest.batchCapabilityFailed': 'Tes kemampuan massal gagal: {message}',
-    'batchTest.cancelAll': 'Batalkan semua',
-    'batchTest.cancelChannel': 'Batalkan',
+    'capability.noApiKeyError': 'Channel ini tidak memiliki API key dan tidak dapat menjalankan tes kemampuan.',
+    'capability.genericJobError': 'Tes kemampuan gagal: {message}',
     'orchestration.title': 'Orkestrasi channel',
     'orchestration.multiChannel': 'Mode multi-channel',
     'orchestration.singleChannel': 'Mode single-channel',
@@ -881,6 +861,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.copied': 'Tersalin',
     'orchestration.copyFailed': 'Gagal menyalin konfigurasi channel',
     'orchestration.promotionSuccess': 'Channel {name} menjadi prioritas tertinggi dan akan diprioritaskan selama 5 menit ke depan',
+    'orchestration.resumeSuccess': 'Channel dilanjutkan dan metrik direset',
+    'orchestration.resumeSuccessWithKeys': 'Channel dilanjutkan, metrik direset, dan {count} key blacklist dipulihkan',
     'orchestration.deleteActiveGuard': 'Tidak bisa dihapus: urutan failover harus menyisakan minimal satu channel aktif',
     'addChannel.editTitle': 'Edit channel',
     'addChannel.createTitle': 'Tambah channel baru',
@@ -940,6 +922,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': 'Jika aktif, token akan diperkirakan secara lokal dan nilai lokal dipakai bila selisihnya lebih dari 5%.',
     'addChannel.autoBlacklistBalanceLabel': 'Blacklist otomatis saat saldo habis',
     'addChannel.autoBlacklistBalanceHint': 'Pindahkan key ke daftar blokir otomatis saat upstream melaporkan saldo tidak cukup.',
+    'addChannel.normalizeMetadataUserIdLabel': 'Normalisasi metadata.user_id',
+    'addChannel.normalizeMetadataUserIdHint': 'Otomatis ubah user_id objek JSON menjadi string datar untuk kompatibilitas upstream.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Sisipkan dummy thought signature',
     'addChannel.injectDummyThoughtSignatureHint': 'Menyisipkan dummy signature ke functionCall agar kompatibel dengan API pihak ketiga yang membutuhkan field ini. Matikan untuk API resmi.',
     'addChannel.stripThoughtSignatureLabel': 'Hapus thought signature',
@@ -993,7 +977,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': 'Auth error',
     'channelCard.blacklistReason.permission_error': 'Izin ditolak',
     'channelCard.blacklistReason.insufficient_balance': 'Saldo habis',
-    'channelCard.blacklistReason.rate_limit': 'Rate limit',
+    'channelCard.blacklistReason.unavailable': 'Tidak tersedia',
+    'channelCard.blacklistReason.rate_limited': 'Batas rate',
+    'channelCard.blacklistReason.invalid': 'Key tidak valid',
+    'channelCard.blacklistReason.unknown': 'Tidak diketahui',
     'channelCard.notChecked': 'Belum dicek',
     'channelCard.statusHealthy': 'Sehat',
     'channelCard.statusError': 'Error',
@@ -1005,6 +992,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.autoRefreshing': 'Sedang auto refresh',
     'channelLogs.empty': 'Belum ada log',
     'channelLogs.retry': 'Retry',
+    'channelLogs.sourceCapabilityTest': 'Tes Kemampuan',
     'store.channel.updated': 'Channel berhasil diperbarui',
     'store.channel.added': 'Channel berhasil ditambahkan',
     'store.channel.deleted': 'Channel berhasil dihapus',
@@ -1023,14 +1011,13 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.tokens': 'Token',
     'chart.cacheRw': 'Cache R/W',
     'chart.totalRequests': 'Total request',
-    'chart.successRate': 'Tingkat sukses',
+    'chart.successRate': 'Ketersediaan',
     'chart.inputTokens': 'Input token',
     'chart.outputTokens': 'Output token',
-    'chart.success': 'sukses',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'request',
-    'chart.failed': 'gagal',
+    'chart.issueCount': 'masalah',
     'chart.total': 'Total',
     'chart.collapse': 'Ciutkan',
     'chart.noModelRequestsInRange': 'Tidak ada request model dalam rentang waktu yang dipilih',
@@ -1040,17 +1027,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.keyHistoryLoadFailed': 'Gagal memuat histori key',
     'chart.noRequestsInRange': 'Tidak ada request dalam rentang waktu yang dipilih',
     'chart.noKeyUsageInRange': 'Tidak ada penggunaan key dalam rentang waktu yang dipilih',
-    'status.active': 'Aktif',
-    'status.healthy': 'Sehat',
-    'status.suspended': 'Ditangguhkan',
+    'status.normal': 'Normal',
+    'status.tripped': 'Terputus',
     'status.disabled': 'Nonaktif',
     'status.error': 'Error',
     'status.unknown': 'Tidak diketahui',
     'status.metrics.requests': 'Request',
-    'status.metrics.successRate': 'Tingkat sukses',
-    'status.metrics.consecutiveFailures': 'Gagal beruntun',
+    'status.metrics.successRate': 'Ketersediaan',
     'status.metrics.lastSuccess': 'Sukses terakhir',
-    'status.metrics.lastFailure': 'Gagal terakhir',
+    'status.metrics.lastFailure': 'Masalah terakhir',
     'status.metrics.noData': 'Belum ada metrik',
     'status.metrics.justNow': 'baru saja',
     'status.metrics.minutesAgo': '{count} mnt lalu',
@@ -1125,7 +1110,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'app.actions.addChannel': '添加渠道',
     'app.actions.ping': '测试延迟',
     'app.actions.refresh': '刷新',
-    'app.actions.batchTest': '批量测试',
     'app.dialog.addApiKeyTitle': '添加API密钥',
     'app.dialog.apiKeyLabel': 'API密钥',
     'app.dialog.apiKeyPlaceholder': '输入API密钥',
@@ -1185,26 +1169,17 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.cancel': '取消测试',
     'capability.cancelling': '取消中...',
     'capability.cancelled': '已取消',
+    'capability.partial': '部分可用',
+    'capability.runModeCacheHit': '缓存结果',
+    'capability.runModeReusedRunning': '复用进行中任务',
+    'capability.runModeResumedCancelled': '恢复已取消任务',
+    'capability.runModeReusedPreviousResults': '复用上次成功结果',
+    'capability.reasonNotRun': '本轮未执行',
+    'capability.reasonCancelled': '完成前已取消',
+    'capability.reasonTimeout': '请求超时',
     'capability.retryModel': '重测此模型',
-    'batchTest.title': '批量渠道测试',
-    'batchTest.selectChannels': '选择渠道',
-    'batchTest.selectionSummary': '已选 {selected}/{total}',
-    'batchTest.selectProtocols': '选择协议',
-    'batchTest.selectModels': '选择模型',
-    'batchTest.noModelsHint': '暂未获取到模型，可手动输入',
-    'batchTest.batchLatency': '批量延迟测试',
-    'batchTest.batchCapability': '批量能力测试',
-    'batchTest.latencyLabel': '延迟：',
-    'batchTest.capabilityLabel': '能力：',
-    'batchTest.results': '测试结果',
-    'batchTest.empty': '选择渠道后一键批量测试延迟或能力',
-    'batchTest.notTested': '未测试',
-    'batchTest.idle': '空闲',
-    'batchTest.noProtocolSelected': '请至少选择一个协议',
-    'batchTest.creatingJob': '创建任务中...',
-    'batchTest.batchCapabilityFailed': '批量能力测试失败: {message}',
-    'batchTest.cancelAll': '取消全部',
-    'batchTest.cancelChannel': '取消',
+    'capability.noApiKeyError': '该渠道未配置 API Key，无法执行能力测试。',
+    'capability.genericJobError': '能力测试失败：{message}',
     'orchestration.title': '渠道编排',
     'orchestration.multiChannel': '多渠道模式',
     'orchestration.singleChannel': '单渠道模式',
@@ -1247,6 +1222,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.copied': '已复制',
     'orchestration.copyFailed': '复制渠道配置失败',
     'orchestration.promotionSuccess': '渠道 {name} 已设为最高优先级，5分钟内优先使用',
+    'orchestration.resumeSuccess': '渠道已恢复，熔断指标已重置',
+    'orchestration.resumeSuccessWithKeys': '渠道已恢复，熔断指标已重置，并恢复了 {count} 个拉黑密钥',
     'orchestration.deleteActiveGuard': '无法删除：故障转移序列中至少需要保留一个活跃渠道',
     'addChannel.editTitle': '编辑渠道',
     'addChannel.createTitle': '添加新渠道',
@@ -1306,6 +1283,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': '启用后强制本地估算 token 数量，偏差超过 5% 时使用本地值',
     'addChannel.autoBlacklistBalanceLabel': '余额不足时自动拉黑',
     'addChannel.autoBlacklistBalanceHint': '当上游返回余额不足时，自动将该 Key 移入拉黑列表。',
+    'addChannel.normalizeMetadataUserIdLabel': '规范化 metadata.user_id',
+    'addChannel.normalizeMetadataUserIdHint': '自动将 JSON 对象格式的 user_id 转换为扁平字符串，确保上游兼容性。',
     'addChannel.injectDummyThoughtSignatureLabel': '注入 Dummy Thought Signature',
     'addChannel.injectDummyThoughtSignatureHint': '为 functionCall 注入 dummy signature，兼容需要该字段的第三方 API（官方 API 请关闭）',
     'addChannel.stripThoughtSignatureLabel': '移除 Thought Signature',
@@ -1359,7 +1338,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelCard.blacklistReason.authentication_error': '认证失败',
     'channelCard.blacklistReason.permission_error': '权限不足',
     'channelCard.blacklistReason.insufficient_balance': '余额不足',
-    'channelCard.blacklistReason.rate_limit': '被限流',
+    'channelCard.blacklistReason.unavailable': '不可用',
+    'channelCard.blacklistReason.rate_limited': '频率限制',
+    'channelCard.blacklistReason.invalid': '密钥无效',
+    'channelCard.blacklistReason.unknown': '未知原因',
     'channelCard.notChecked': '未检测',
     'channelCard.statusHealthy': '健康',
     'channelCard.statusError': '错误',
@@ -1371,6 +1353,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.autoRefreshing': '自动刷新中',
     'channelLogs.empty': '暂无日志记录',
     'channelLogs.retry': '重试',
+    'channelLogs.sourceCapabilityTest': '能力测试',
     'store.channel.updated': '渠道更新成功',
     'store.channel.added': '渠道添加成功',
     'store.channel.deleted': '渠道删除成功',
@@ -1389,14 +1372,13 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.tokens': 'Token',
     'chart.cacheRw': '缓存 R/W',
     'chart.totalRequests': '总请求',
-    'chart.successRate': '成功率',
+    'chart.successRate': '可用率',
     'chart.inputTokens': '输入 Token',
     'chart.outputTokens': '输出 Token',
-    'chart.success': '成功',
     'chart.input': '输入',
     'chart.output': '输出',
     'chart.requestUnit': '请求',
-    'chart.failed': '失败',
+    'chart.issueCount': '异常',
     'chart.total': '合计',
     'chart.collapse': '收起',
     'chart.noModelRequestsInRange': '选定时间范围内没有模型请求记录',
@@ -1406,17 +1388,15 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.keyHistoryLoadFailed': '获取 Key 历史数据失败',
     'chart.noRequestsInRange': '选定时间范围内没有请求记录',
     'chart.noKeyUsageInRange': '选定时间范围内没有 Key 使用记录',
-    'status.active': '活跃',
-    'status.healthy': '健康',
-    'status.suspended': '熔断',
+    'status.normal': '正常',
+    'status.tripped': '熔断',
     'status.disabled': '禁用',
     'status.error': '错误',
     'status.unknown': '未知',
     'status.metrics.requests': '请求数',
-    'status.metrics.successRate': '成功率',
-    'status.metrics.consecutiveFailures': '连续失败',
-    'status.metrics.lastSuccess': '最后成功',
-    'status.metrics.lastFailure': '最后失败',
+    'status.metrics.successRate': '可用率',
+    'status.metrics.lastSuccess': '最近成功',
+    'status.metrics.lastFailure': '最近异常',
     'status.metrics.noData': '暂无指标数据',
     'status.metrics.justNow': '刚刚',
     'status.metrics.minutesAgo': '{count} 分钟前',

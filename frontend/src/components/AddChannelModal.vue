@@ -5,11 +5,11 @@
         <v-avatar :color="avatarColor" variant="flat" size="40">
           <v-icon :style="headerIconStyle" size="20">{{ isEditing ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
         </v-avatar>
-        <div class="flex-grow-1">
-          <div class="text-h5 font-weight-bold">
+        <div class="flex-grow-1 modal-header-text">
+          <div class="modal-title">
             {{ isEditing ? t('addChannel.editTitle') : t('addChannel.createTitle') }}
           </div>
-          <div class="text-body-2" :class="subtitleClasses">
+          <div class="modal-subtitle" :class="subtitleClasses">
             {{ isEditing ? t('addChannel.editSubtitle') : isQuickMode ? t('addChannel.quickSubtitle') : t('addChannel.fullSubtitle') }}
           </div>
         </div>
@@ -18,7 +18,9 @@
           v-if="isEditing"
           color="success"
           variant="flat"
+          size="small"
           prepend-icon="mdi-test-tube"
+          class="capability-test-btn"
           @click="handleTestCapability"
         >
           {{ t('addChannel.testCapability') }}
@@ -196,7 +198,7 @@
                 <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
                   <div class="d-flex align-center ga-2">
                     <v-icon color="primary">mdi-swap-horizontal</v-icon>
-                    <span class="text-body-1 font-weight-bold">{{ t('addChannel.modelRedirect') }}</span>
+                    <span class="section-title">{{ t('addChannel.modelRedirect') }}</span>
                   </div>
                   <v-chip size="small" color="secondary" variant="tonal"> {{ t('addChannel.autoConvertModelNames') }} </v-chip>
                 </v-card-title>
@@ -218,6 +220,15 @@
                       @click="applyModelMappingPreset('gpt-5.4')"
                     >
                       gpt-5.4
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      variant="tonal"
+                      color="secondary"
+                      prepend-icon="mdi-lightning-bolt"
+                      @click="applyModelMappingPreset('gpt-5.3-codex')"
+                    >
+                     gpt-5.3-codex
                     </v-btn>
                     <v-btn
                       size="small"
@@ -333,7 +344,7 @@
                   <v-row v-if="supportsOpenAIAdvancedOptions" class="mt-4">
                     <v-col cols="12" md="6">
                       <div class="d-flex align-center justify-space-between h-100 advanced-switch-row">
-                        <div class="channel-toggle-text">
+                        <div>
                           <div class="text-body-2 font-weight-medium">{{ t('addChannel.fastMode') }}</div>
                           <div class="text-caption text-medium-emphasis">{{ t('addChannel.fastModeHint') }}</div>
                         </div>
@@ -394,12 +405,12 @@
 
             <!-- API密钥管理 -->
             <v-col cols="12">
-              <v-card variant="outlined" rounded="lg" :color="form.apiKeys.length === 0 ? 'error' : undefined">
+              <v-card variant="outlined" rounded="lg" :color="hasConfigurableKeys ? undefined : 'error'">
                 <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
                   <div class="d-flex align-center ga-2">
-                    <v-icon :color="form.apiKeys.length > 0 ? 'primary' : 'error'">mdi-key</v-icon>
-                    <span class="text-body-1 font-weight-bold">{{ t('channelCard.apiKeyManagement') }} *</span>
-                    <v-chip v-if="form.apiKeys.length === 0" size="x-small" color="error" variant="tonal">
+                    <v-icon :color="hasConfigurableKeys ? 'primary' : 'error'">mdi-key</v-icon>
+                    <span class="section-title">{{ t('channelCard.apiKeyManagement') }} *</span>
+                    <v-chip v-if="!hasConfigurableKeys" size="x-small" color="error" variant="tonal">
                       {{ t('addChannel.apiKeyRequired') }}
                     </v-chip>
                   </div>
@@ -610,7 +621,7 @@
                         </v-list-item-title>
                         <v-list-item-subtitle class="d-flex align-center ga-1">
                           <v-chip size="x-small" :color="dk.reason === 'insufficient_balance' ? 'warning' : 'error'" variant="tonal">
-                            {{ t(getBlacklistReasonKey(dk.reason)) }}
+                            {{ t(getRestoreDisabledKeyLabel(dk.reason)) }}
                           </v-chip>
                           <span class="text-caption">{{ new Date(dk.disabledAt).toLocaleDateString() }}</span>
                         </v-list-item-subtitle>
@@ -644,11 +655,11 @@
 
             <!-- 跳过 TLS 证书验证 -->
             <v-col cols="12">
-              <div class="channel-toggle-row">
-                <div class="channel-toggle-content">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
                   <v-icon color="warning">mdi-shield-alert</v-icon>
-                  <div class="channel-toggle-text">
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.skipTlsLabel') }}</div>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.skipTlsLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.skipTlsHint') }}</div>
                   </div>
                 </div>
@@ -658,11 +669,11 @@
 
             <!-- 低质量渠道标记 -->
             <v-col cols="12">
-              <div class="channel-toggle-row">
-                <div class="channel-toggle-content">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
                   <v-icon color="info">mdi-speedometer-slow</v-icon>
-                  <div class="channel-toggle-text">
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.lowQualityLabel') }}</div>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.lowQualityLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.lowQualityHint') }}</div>
                   </div>
                 </div>
@@ -671,15 +682,28 @@
             </v-col>
 
             <v-col cols="12">
-              <div class="channel-toggle-row">
-                <div class="channel-toggle-content">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
                   <v-icon color="warning">mdi-cash-remove</v-icon>
-                  <div class="channel-toggle-text">
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.autoBlacklistBalanceLabel') }}</div>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.autoBlacklistBalanceLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.autoBlacklistBalanceHint') }}</div>
                   </div>
                 </div>
                 <v-switch v-model="form.autoBlacklistBalance" inset color="warning" hide-details />
+              </div>
+            </v-col>
+
+            <v-col v-if="props.channelType === 'messages' || props.channelType === 'responses'" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-identifier</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.normalizeMetadataUserIdLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.normalizeMetadataUserIdHint') }}</div>
+                  </div>
+                </div>
+                <v-switch v-model="form.normalizeMetadataUserId" inset color="primary" hide-details />
               </div>
             </v-col>
 
@@ -702,11 +726,11 @@
 
             <!-- 注入 Dummy Thought Signature（仅 Gemini 渠道显示） -->
             <v-col v-if="props.channelType === 'gemini'" cols="12">
-              <div class="channel-toggle-row">
-                <div class="channel-toggle-content">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
                   <v-icon color="secondary">mdi-signature</v-icon>
-                  <div class="channel-toggle-text">
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.injectDummyThoughtSignatureLabel') }}</div>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.injectDummyThoughtSignatureLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.injectDummyThoughtSignatureHint') }}</div>
                   </div>
                 </div>
@@ -716,11 +740,11 @@
 
             <!-- 移除 Thought Signature（仅 Gemini 渠道显示） -->
             <v-col v-if="props.channelType === 'gemini'" cols="12">
-              <div class="channel-toggle-row">
-                <div class="channel-toggle-content">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
                   <v-icon color="error">mdi-close-circle</v-icon>
-                  <div class="channel-toggle-text">
-                    <div class="text-body-1 font-weight-medium">{{ t('addChannel.stripThoughtSignatureLabel') }}</div>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.stripThoughtSignatureLabel') }}</div>
                     <div class="text-caption text-medium-emphasis">{{ t('addChannel.stripThoughtSignatureHint') }}</div>
                   </div>
                 </div>
@@ -731,7 +755,7 @@
             <!-- 自定义请求头 -->
             <v-col cols="12">
               <v-card variant="outlined">
-                <v-card-title class="text-body-1 d-flex align-center ga-2">
+                <v-card-title class="section-card-title d-flex align-center ga-2">
                   <v-icon size="small">mdi-web</v-icon>
                   {{ t('addChannel.customHeadersLabel') }}
                 </v-card-title>
@@ -864,7 +888,7 @@
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
 import type { Channel } from '../services/api'
-import { api, ApiService, ApiError } from '../services/api'
+import { ApiService, ApiError } from '../services/api'
 import {
   isValidApiKey as _isValidApiKey,
   isValidUrl as _isValidQuickInputUrl,
@@ -873,7 +897,8 @@ import {
 import { buildExpectedRequestUrls } from '../utils/expectedRequestUrls'
 import { supportsAdvancedChannelOptions } from '../utils/channelAdvancedOptions'
 import { buildChannelPayload } from '../utils/channelPayload'
-import { useI18n, type MessageKey } from '../i18n'
+import { resolveChannelWatcherAction } from '../utils/add-channel-modal-state'
+import { useI18n } from '../i18n'
 
 interface Props {
   show: boolean
@@ -891,20 +916,7 @@ const emit = defineEmits<{
   testCapability: [channelId: number]
 }>()
 const { t } = useI18n()
-
-const getBlacklistReasonKey = (reason: string): MessageKey => {
-  switch (reason) {
-    case 'insufficient_balance':
-      return 'channelCard.blacklistReason.insufficient_balance'
-    case 'permission_error':
-      return 'channelCard.blacklistReason.permission_error'
-    case 'rate_limit':
-      return 'channelCard.blacklistReason.rate_limit'
-    case 'authentication_error':
-    default:
-      return 'channelCard.blacklistReason.authentication_error'
-  }
-}
+const apiService = new ApiService()
 
 // 主题
 const theme = useTheme()
@@ -1069,26 +1081,18 @@ const _expectedRequestUrl = computed(() => {
 
   // 根据渠道类型和服务类型确定端点（与后端逻辑一致）
   const serviceType = detectedServiceType.value || getDefaultServiceTypeValue()
-  let endpoint = ''
-  if (props.channelType === 'responses') {
-    // responses 渠道根据 serviceType 决定端点
-    if (serviceType === 'responses') {
-      endpoint = '/responses'
-    } else if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  } else {
-    // messages 渠道：根据检测到的服务类型决定端点
-    if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else if (serviceType === 'gemini') {
-      endpoint = '/models/{model}:generateContent'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  }
+  const endpoint =
+    props.channelType === 'responses'
+      ? serviceType === 'responses'
+        ? '/responses'
+        : serviceType === 'claude'
+          ? '/messages'
+          : '/chat/completions'
+      : serviceType === 'claude'
+        ? '/messages'
+        : serviceType === 'gemini'
+          ? '/models/{model}:generateContent'
+          : '/chat/completions'
 
   if (hasVersion || skipVersion) {
     return baseUrl + endpoint
@@ -1111,24 +1115,18 @@ const getExpectedRequestUrl = (inputBaseUrl: string): string => {
   const hasVersion = /\/v\d+[a-z]*$/.test(baseUrl)
 
   const serviceType = detectedServiceType.value || getDefaultServiceTypeValue()
-  let endpoint = ''
-  if (props.channelType === 'responses') {
-    if (serviceType === 'responses') {
-      endpoint = '/responses'
-    } else if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  } else {
-    if (serviceType === 'claude') {
-      endpoint = '/messages'
-    } else if (serviceType === 'gemini') {
-      endpoint = '/models/{model}:generateContent'
-    } else {
-      endpoint = '/chat/completions'
-    }
-  }
+  const endpoint =
+    props.channelType === 'responses'
+      ? serviceType === 'responses'
+        ? '/responses'
+        : serviceType === 'claude'
+          ? '/messages'
+          : '/chat/completions'
+      : serviceType === 'claude'
+        ? '/messages'
+        : serviceType === 'gemini'
+          ? '/models/{model}:generateContent'
+          : '/chat/completions'
 
   if (hasVersion || skipVersion) {
     return baseUrl + endpoint
@@ -1310,7 +1308,7 @@ const showModelMappingPresets = computed(() => {
 const modelNameCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
 const modelMappingPresets: Record<
-  'gpt-5.4' | 'gpt-5.2-codex',
+  'gpt-5.4' | 'gpt-5.3-codex' | 'gpt-5.2-codex',
   {
     modelMapping: Record<string, string>
     reasoningMapping: Record<string, 'none' | 'low' | 'medium' | 'high' | 'xhigh'>
@@ -1323,6 +1321,20 @@ const modelMappingPresets: Record<
       opus: 'gpt-5.4',
       sonnet: 'gpt-5.4',
       haiku: 'gpt-5.4'
+    },
+    reasoningMapping: {
+      opus: 'xhigh',
+      sonnet: 'xhigh',
+      haiku: 'high'
+    },
+    fastMode: true,
+    textVerbosity: 'medium'
+  },
+  'gpt-5.3-codex': {
+    modelMapping: {
+      opus: 'gpt-5.3-codex',
+      sonnet: 'gpt-5.3-codex',
+      haiku: 'gpt-5.3-codex'
     },
     reasoningMapping: {
       opus: 'xhigh',
@@ -1423,6 +1435,7 @@ const form = reactive({
   routePrefix: '',
   supportedModels: [] as string[],
   autoBlacklistBalance: true,
+  normalizeMetadataUserId: true,
   rpm: 10
 })
 
@@ -1541,6 +1554,20 @@ interface KeyModelsStatus {
 }
 const keyModelsStatus = ref<Map<string, KeyModelsStatus>>(new Map())
 
+const restoreDisabledKeyLabelMap = {
+  insufficient_balance: 'channelCard.blacklistReason.insufficient_balance',
+  unavailable: 'channelCard.blacklistReason.unavailable',
+  rate_limited: 'channelCard.blacklistReason.rate_limited',
+  invalid: 'channelCard.blacklistReason.invalid',
+  authentication_error: 'channelCard.blacklistReason.authentication_error',
+  permission_error: 'channelCard.blacklistReason.permission_error',
+  unknown: 'channelCard.blacklistReason.unknown',
+} as const
+
+const getRestoreDisabledKeyLabel = (reason?: string) => {
+  return restoreDisabledKeyLabelMap[reason as keyof typeof restoreDisabledKeyLabelMap] || restoreDisabledKeyLabelMap.unknown
+}
+
 // 表单验证错误
 const errors = reactive({
   name: '',
@@ -1588,7 +1615,10 @@ const rules = {
 }
 
 // 计算属性
-const isEditing = computed(() => !!props.channel)
+const dialogMode = ref<'create' | 'edit'>('create')
+const isEditing = computed(() => dialogMode.value === 'edit')
+const hasDisabledKeysAvailable = computed(() => visibleDisabledKeys.value.length > 0)
+const hasConfigurableKeys = computed(() => form.apiKeys.length > 0 || (isEditing.value && hasDisabledKeysAvailable.value))
 
 const commonSupportedModelFilters = ['claude-*', 'gpt-5*', 'grok-4*', 'gemini-3*']
 
@@ -1616,7 +1646,7 @@ const subtitleClasses = computed(() => {
 
 const isFormValid = computed(() => {
   return (
-    form.name.trim() && form.serviceType && form.baseUrl.trim() && isValidUrl(form.baseUrl) && form.apiKeys.length > 0
+    form.name.trim() && form.serviceType && form.baseUrl.trim() && isValidUrl(form.baseUrl) && hasConfigurableKeys.value
   )
 })
 
@@ -1657,6 +1687,7 @@ const resetForm = () => {
   form.routePrefix = ''
   form.supportedModels = []
   form.autoBlacklistBalance = true
+  form.normalizeMetadataUserId = true
   form.rpm = 10
   newApiKey.value = ''
   newMapping.source = ''
@@ -1729,6 +1760,7 @@ const loadChannelData = (channel: Channel) => {
   form.routePrefix = channel.routePrefix || ''
   form.supportedModels = channel.supportedModels || []
   form.autoBlacklistBalance = channel.autoBlacklistBalance ?? true
+  form.normalizeMetadataUserId = channel.normalizeMetadataUserId ?? true
   form.rpm = channel.rpm ?? 10
 
   // 立即同步 baseUrl 到预览变量，避免等待 debounce
@@ -1820,13 +1852,13 @@ const restoreDisabledKey = async (apiKey: string) => {
   try {
     const channelId = props.channel.index
     if (props.channelType === 'chat') {
-      await api.restoreChatApiKey(channelId, apiKey)
+      await apiService.restoreChatApiKey(channelId, apiKey)
     } else if (props.channelType === 'gemini') {
-      await api.restoreGeminiApiKey(channelId, apiKey)
+      await apiService.restoreGeminiApiKey(channelId, apiKey)
     } else if (props.channelType === 'responses') {
-      await api.restoreResponsesApiKey(channelId, apiKey)
+      await apiService.restoreResponsesApiKey(channelId, apiKey)
     } else {
-      await api.restoreApiKey(channelId, apiKey)
+      await apiService.restoreApiKey(channelId, apiKey)
     }
     // 本地标记已恢复，加入活跃列表
     localRestoredKeys.value.add(apiKey)
@@ -1941,13 +1973,17 @@ const handleTargetModelClick = () => {
 }
 
 const fetchTargetModels = async () => {
-  if (!form.baseUrl || form.apiKeys.length === 0) {
+  const candidateKeys = form.apiKeys.length > 0
+    ? form.apiKeys
+    : (isEditing.value ? visibleDisabledKeys.value.map(dk => dk.key) : [])
+
+  if (!form.baseUrl || candidateKeys.length === 0) {
     fetchModelsError.value = t('addChannel.fillBaseUrlAndApiKey')
     return
   }
 
   // 仅为未检测过的 API Key 发起请求
-  const uncheckedKeys = form.apiKeys.filter(key => !keyModelsStatus.value.has(key))
+  const uncheckedKeys = candidateKeys.filter(key => !keyModelsStatus.value.has(key))
 
   if (uncheckedKeys.length === 0) {
     return
@@ -1956,7 +1992,6 @@ const fetchTargetModels = async () => {
   fetchingModels.value = true
   fetchModelsError.value = ''
 
-  const apiService = new ApiService()
   const channelId = props.channel?.index
 
   // modelsApiType 决定请求协议（Bearer/x-goog-api-key、/v1/models vs /v1beta/models）
@@ -2034,7 +2069,7 @@ const fetchTargetModels = async () => {
     targetModelOptions.value = sortModelNamesDesc(Array.from(allModels)).map(id => ({ title: id, value: id }))
 
     // 所有 key（含已有记录）都失败时才显示错误
-    const allFailed = form.apiKeys.every(key => {
+    const allFailed = candidateKeys.every(key => {
       const s = keyModelsStatus.value.get(key)
       return s && !s.success
     })
@@ -2052,23 +2087,19 @@ const handleSubmit = async () => {
   const { valid } = await formRef.value.validate()
   if (!valid) return
 
-  // 直接使用原始密钥，不需要转换
-  const processedApiKeys = form.apiKeys.filter(key => key.trim())
-
   // 处理 BaseURL：去重（忽略末尾 / 和 # 差异），并移除 UI 专用的尾部 #
   const seenUrls = new Set<string>()
-  const deduplicatedUrls =
-    form.baseUrls.length > 0
-      ? form.baseUrls
-          .map(url => url.trim().replace(/[#/]+$/, ''))
-          .filter(Boolean)
-          .filter(url => {
-            const normalized = url.replace(/[#/]+$/, '')
-            if (seenUrls.has(normalized)) return false
-            seenUrls.add(normalized)
-            return true
-          })
-      : [form.baseUrl.trim().replace(/[#/]+$/, '')].filter(Boolean)
+  if (form.baseUrls.length > 0) {
+    form.baseUrls
+      .map(url => url.trim().replace(/[#/]+$/, ''))
+      .filter(Boolean)
+      .forEach(url => {
+        const normalized = url.replace(/[#/]+$/, '')
+        if (!seenUrls.has(normalized)) {
+          seenUrls.add(normalized)
+        }
+      })
+  }
 
   const channelData = buildChannelPayload(form)
 
@@ -2091,12 +2122,14 @@ watch(
   () => props.show,
   newShow => {
     if (newShow) {
+      dialogMode.value = props.channel ? 'edit' : 'create'
+
       // 无论是编辑还是新增，都先清理密钥错误状态
       apiKeyError.value = ''
       duplicateKeyIndex.value = -1
       localRestoredKeys.value = new Set<string>()
 
-      if (props.channel) {
+      if (dialogMode.value === 'edit' && props.channel) {
         // 编辑模式：使用表单模式
         isQuickMode.value = false
         loadChannelData(props.channel)
@@ -2111,9 +2144,24 @@ watch(
 
 watch(
   () => props.channel,
-  newChannel => {
-    if (newChannel && props.show) {
+  (newChannel, oldChannel) => {
+    const action = resolveChannelWatcherAction({
+      show: props.show,
+      newChannel,
+      oldChannel,
+    })
+
+    if (action === 'load-edit-channel' && newChannel) {
+      dialogMode.value = 'edit'
+      isQuickMode.value = false
       loadChannelData(newChannel)
+      return
+    }
+
+    if (action === 'reset-new-form') {
+      dialogMode.value = 'create'
+      isQuickMode.value = true
+      resetForm()
     }
   }
 )
@@ -2156,7 +2204,43 @@ onUnmounted(() => {
 .base-url-hint {
   min-height: 20px;
   padding: 4px 12px 8px;
-  line-height: 1.25;
+  line-height: 1.5;
+}
+
+.modal-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-title {
+  font-size: 1.125rem;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.modal-subtitle {
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.section-title {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.section-title--soft {
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.section-card-title {
+  font-size: 0.875rem !important;
+  line-height: 1.4;
+  font-weight: 600;
 }
 
 /* 多个预期请求项样式 */
@@ -2166,7 +2250,7 @@ onUnmounted(() => {
 
 /* 浅色模式下副标题使用白色带透明度 */
 .text-white-subtitle {
-  color: rgba(255, 255, 255, 0.85) !important;
+  color: rgba(255, 255, 255, 0.78) !important;
 }
 
 .animate-pulse {
@@ -2188,7 +2272,7 @@ onUnmounted(() => {
   background-color: rgba(var(--v-theme-surface), 0.98);
   border: 1px solid rgba(var(--v-theme-primary), 0.45);
   font-weight: 600;
-  letter-spacing: 0.2px;
+  letter-spacing: 0;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.06);
 }
 
@@ -2217,6 +2301,28 @@ onUnmounted(() => {
 
 .mode-toggle-btn {
   text-transform: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  padding-inline: 12px;
+}
+
+.mode-toggle-btn :deep(.v-btn__content) {
+  gap: 4px;
+  line-height: 1.5;
+}
+
+.capability-test-btn {
+  text-transform: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  padding-inline: 12px;
+}
+
+.capability-test-btn :deep(.v-btn__content) {
+  gap: 4px;
+  line-height: 1.5;
 }
 
 /* 高级选项中的右侧开关行 */
@@ -2224,37 +2330,9 @@ onUnmounted(() => {
   min-height: 56px;
 }
 
-.channel-toggle-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.channel-toggle-content {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.channel-toggle-text {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 .advanced-switch-row :deep(.v-selection-control) {
   justify-content: flex-end;
   margin-inline-start: 16px;
-  flex: 0 0 auto;
-}
-
-.channel-toggle-row :deep(.v-selection-control) {
-  justify-content: flex-end;
-  flex: 0 0 auto;
-  margin-inline-start: 0;
 }
 
 </style>

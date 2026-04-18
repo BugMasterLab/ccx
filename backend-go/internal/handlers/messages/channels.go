@@ -29,31 +29,32 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			priority := config.GetChannelPriority(&up, i)
 
 			upstreams[i] = gin.H{
-				"index":                i,
-				"name":                 up.Name,
-				"serviceType":          up.ServiceType,
-				"baseUrl":              up.BaseURL,
-				"baseUrls":             up.BaseURLs,
-				"apiKeys":              up.APIKeys,
-				"description":          up.Description,
-				"website":              up.Website,
-				"insecureSkipVerify":   up.InsecureSkipVerify,
-				"modelMapping":         up.ModelMapping,
-				"reasoningMapping":     up.ReasoningMapping,
-				"textVerbosity":        up.TextVerbosity,
-				"fastMode":             up.FastMode,
-				"latency":              nil,
-				"status":               status,
-				"priority":             priority,
-				"promotionUntil":       up.PromotionUntil,
-				"lowQuality":           up.LowQuality,
-				"rpm":                  up.RPM,
-				"customHeaders":        up.CustomHeaders,
-				"proxyUrl":             up.ProxyURL,
-				"supportedModels":      up.SupportedModels,
-				"routePrefix":          up.RoutePrefix,
-				"disabledApiKeys":      up.DisabledAPIKeys,
-				"autoBlacklistBalance": up.IsAutoBlacklistBalanceEnabled(),
+				"index":                   i,
+				"name":                    up.Name,
+				"serviceType":             up.ServiceType,
+				"baseUrl":                 up.BaseURL,
+				"baseUrls":                up.BaseURLs,
+				"apiKeys":                 up.APIKeys,
+				"description":             up.Description,
+				"website":                 up.Website,
+				"insecureSkipVerify":      up.InsecureSkipVerify,
+				"modelMapping":            up.ModelMapping,
+				"reasoningMapping":        up.ReasoningMapping,
+				"textVerbosity":           up.TextVerbosity,
+				"fastMode":                up.FastMode,
+				"latency":                 nil,
+				"status":                  status,
+				"priority":                priority,
+				"promotionUntil":          up.PromotionUntil,
+				"lowQuality":              up.LowQuality,
+				"rpm":                     up.RPM,
+				"customHeaders":           up.CustomHeaders,
+				"proxyUrl":                up.ProxyURL,
+				"supportedModels":         up.SupportedModels,
+				"routePrefix":             up.RoutePrefix,
+				"disabledApiKeys":         up.DisabledAPIKeys,
+				"autoBlacklistBalance":    up.IsAutoBlacklistBalanceEnabled(),
+				"normalizeMetadataUserId": up.IsNormalizeMetadataUserIDEnabled(),
 			}
 		}
 
@@ -142,7 +143,8 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 			return
 		}
 
-		channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages).ClearAll()
+		channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages).RemoveAndShift(id)
+		channelScheduler.DeleteChannelMetrics(removed, scheduler.ChannelKindMessages)
 
 		c.JSON(200, gin.H{
 			"message": "上游已删除",

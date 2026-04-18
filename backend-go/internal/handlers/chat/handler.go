@@ -75,11 +75,8 @@ func Handler(
 		// 从请求体提取 stream（默认 false）
 		isStream, _ := reqMap["stream"].(bool)
 
-		// 提取 user 字段用于 Trace 亲和性
-		userID, _ := reqMap["user"].(string)
-		if userID == "" {
-			userID = common.ExtractConversationID(c, bodyBytes)
-		}
+		// 提取统一会话标识用于 Trace 亲和性
+		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
 
 		// 记录原始请求信息
 		common.LogOriginalRequest(c, bodyBytes, envCfg, "Chat")
@@ -154,7 +151,7 @@ func handleMultiChannel(
 				func(url string) {
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindChat, channelIndex, url)
 				},
-				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 					return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, model, isStream)
 				},
 				model,
@@ -228,7 +225,7 @@ func handleSingleChannel(
 		},
 		nil,
 		nil,
-		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string) (*types.Usage, error) {
+		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
 			return handleSuccess(c, resp, upstreamCopy.ServiceType, envCfg, startTime, model, isStream)
 		},
 		model,
@@ -596,6 +593,8 @@ func handleSuccess(
 		return usage, nil
 
 	default:
+		// body 已被 ReadAll 读入 bodyBytes，需要重置 resp.Body 以便 PassthroughJSONResponse 读取
+		resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 		var respMap map[string]interface{}
 		if err := common.PassthroughJSONResponse(c, resp, &respMap); err != nil {
 			return nil, nil

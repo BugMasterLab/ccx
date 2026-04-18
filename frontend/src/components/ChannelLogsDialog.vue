@@ -1,17 +1,10 @@
 <template>
   <v-dialog :model-value="modelValue" max-width="800" @update:model-value="$emit('update:modelValue', $event)">
     <v-card>
-      <v-card-title class="channel-logs-header">
-        <span class="channel-logs-title">{{ t('channelLogs.title', { channel: channelName }) }}</span>
-        <div class="channel-logs-actions">
-          <v-btn
-            size="small"
-            density="comfortable"
-            class="channel-logs-refresh-btn"
-            :variant="autoRefresh ? 'flat' : 'outlined'"
-            :color="autoRefresh ? 'primary' : undefined"
-            @click="autoRefresh = !autoRefresh"
-          >
+      <v-card-title class="d-flex align-center justify-space-between">
+        <span class="dialog-title">{{ t('channelLogs.title', { channel: channelName }) }}</span>
+        <div class="d-flex align-center ga-2">
+          <v-btn class="auto-refresh-btn" size="x-small" :variant="autoRefresh ? 'flat' : 'outlined'" :color="autoRefresh ? 'primary' : ''" @click="autoRefresh = !autoRefresh">
             {{ autoRefresh ? t('channelLogs.autoRefreshing') : t('channelLogs.autoRefresh') }}
           </v-btn>
           <v-btn icon size="small" variant="text" @click="$emit('update:modelValue', false)">
@@ -20,7 +13,7 @@
         </div>
       </v-card-title>
       <v-divider />
-      <v-card-text class="pa-0" style="max-height: 500px; overflow-y: auto">
+      <v-card-text class="pa-0 channel-logs-scroll">
         <!-- Loading -->
         <div v-if="isLoading && !logs.length" class="d-flex justify-center py-8">
           <v-progress-circular indeterminate color="primary" />
@@ -33,29 +26,32 @@
         </div>
 
         <!-- Log list -->
-        <v-list v-else density="compact" class="pa-0">
+        <v-list v-else density="comfortable" class="pa-0">
           <template v-for="(log, i) in logs" :key="i">
-            <v-list-item :class="{ 'bg-error-subtle': !log.success }" @click="toggleExpand(i)">
+            <v-list-item :class="['log-item', { 'bg-error-subtle': !log.success }]" @click="toggleExpand(i)">
               <template #prepend>
-                <v-chip :color="statusColor(log.statusCode)" size="x-small" variant="flat" class="mr-2 font-weight-bold" style="min-width: 36px; justify-content: center">
+                <v-chip :color="statusColor(log.statusCode)" size="small" variant="flat" class="mr-2 font-weight-bold log-status-chip">
                   {{ log.statusCode || 'ERR' }}
                 </v-chip>
               </template>
-              <v-list-item-title class="d-flex align-center ga-2 text-body-2 flex-wrap">
-                <span class="text-medium-emphasis text-caption">{{ formatTime(log.timestamp) }}</span>
-                <v-chip v-if="log.interfaceType" size="x-small" :color="interfaceTypeColor(log.interfaceType)" variant="tonal" class="text-uppercase">
+              <v-list-item-title class="d-flex align-center ga-2 flex-wrap log-summary">
+                <span class="text-medium-emphasis log-meta">{{ formatTime(log.timestamp) }}</span>
+                <v-chip v-if="log.interfaceType" size="small" :color="interfaceTypeColor(log.interfaceType)" variant="tonal" class="text-uppercase">
                   {{ log.interfaceType }}
                 </v-chip>
-                <span v-if="log.originalModel" class="text-caption text-medium-emphasis">{{ log.originalModel }} →</span>
-                <span class="font-weight-medium">{{ log.model }}</span>
-                <span class="text-caption text-medium-emphasis">{{ log.durationMs }}ms</span>
-                <span class="text-caption text-medium-emphasis">{{ log.keyMask }}</span>
-                <v-chip v-if="log.isRetry" size="x-small" color="warning" variant="tonal">{{ t('channelLogs.retry') }}</v-chip>
+                <v-chip v-if="log.requestSource === 'capability_test'" size="small" color="warning" variant="tonal">
+                  {{ t('channelLogs.sourceCapabilityTest') }}
+                </v-chip>
+                <span v-if="log.originalModel" class="text-medium-emphasis log-meta">{{ log.originalModel }} →</span>
+                <span class="font-weight-medium log-model">{{ log.model }}</span>
+                <span class="text-medium-emphasis log-meta">{{ log.durationMs }}ms</span>
+                <span class="text-medium-emphasis log-meta">{{ log.keyMask }}</span>
+                <v-chip v-if="log.isRetry" size="small" color="warning" variant="tonal">{{ t('channelLogs.retry') }}</v-chip>
               </v-list-item-title>
             </v-list-item>
             <!-- 展开的错误详情 -->
             <v-expand-transition>
-              <div v-if="expandedIndex === i && log.errorInfo" class="px-4 py-2 text-caption" style="background: rgba(var(--v-theme-surface-variant), 0.3); white-space: pre-wrap; word-break: break-all">
+              <div v-if="expandedIndex === i && log.errorInfo" class="px-4 py-2 log-error-info">
                 {{ log.errorInfo }}
               </div>
             </v-expand-transition>
@@ -163,46 +159,49 @@ onUnmounted(() => stopPolling())
 </script>
 
 <style scoped>
-.channel-logs-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 20px;
+.auto-refresh-btn :deep(.v-btn__content) {
+  font-size: 0.8125rem;
+  letter-spacing: 0;
+  line-height: 1.5;
 }
 
-.channel-logs-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow-wrap: anywhere;
+.channel-logs-scroll {
+  max-height: 500px;
+  overflow-y: auto;
 }
 
-.channel-logs-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 0 auto;
+.log-item {
+  padding-top: 10px;
+  padding-bottom: 10px;
 }
 
-.channel-logs-refresh-btn {
-  min-width: fit-content;
-  white-space: nowrap;
-  text-transform: none;
+.log-status-chip {
+  min-width: 44px;
+  justify-content: center;
+}
+
+.log-summary {
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.log-meta {
+  font-size: 0.875rem;
+}
+
+.log-model {
+  font-size: 0.875rem;
+}
+
+.log-error-info {
+  background: rgba(var(--v-theme-surface-variant), 0.3);
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.875rem;
+  line-height: 1.6;
 }
 
 .bg-error-subtle {
   background: rgba(var(--v-theme-error), 0.05);
-}
-
-@media (max-width: 600px) {
-  .channel-logs-header {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .channel-logs-actions {
-    width: 100%;
-    justify-content: flex-end;
-  }
 }
 </style>

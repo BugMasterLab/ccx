@@ -1599,6 +1599,28 @@ func DetectStreamBlacklistError(event string) (reason string, message string) {
 				strings.Contains(msgLower, "访问量过大") || strings.Contains(msgLower, "稍后再试") && strings.Contains(msgLower, "模型") {
 				return "rate_limit", truncateMsg(errMsg)
 			}
+			if errStr, ok := data["error"].(string); ok {
+				if isAuthenticationMessage(errStr) {
+					return "authentication_error", truncateMsg(errStr)
+				}
+				if isPermissionMessage(errStr) {
+					return "permission_error", truncateMsg(errStr)
+				}
+				if isInsufficientBalanceMessage(errStr) {
+					return "insufficient_balance", truncateMsg(errStr)
+				}
+			}
+			if msg, ok := data["message"].(string); ok {
+				if isAuthenticationMessage(msg) {
+					return "authentication_error", truncateMsg(msg)
+				}
+				if isPermissionMessage(msg) {
+					return "permission_error", truncateMsg(msg)
+				}
+				if isInsufficientBalanceMessage(msg) {
+					return "insufficient_balance", truncateMsg(msg)
+				}
+			}
 		}
 	}
 	return "", ""

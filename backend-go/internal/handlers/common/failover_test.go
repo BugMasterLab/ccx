@@ -508,6 +508,174 @@ func TestShouldRetryWithNextKey(t *testing.T) {
 	}
 }
 
+func TestIsInsufficientBalanceMessage_HighConfidenceVariants(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  string
+		want bool
+	}{
+		{name: "english insufficient credits", msg: "You have insufficient credits remaining", want: true},
+		{name: "english out of credits", msg: "This account is out of credits", want: true},
+		{name: "english no balance", msg: "no balance", want: true},
+		{name: "english insufficient funds", msg: "payment declined: insufficient funds", want: true},
+		{name: "english quota used up", msg: "quota used up for current billing period", want: true},
+		{name: "chinese balance exhausted", msg: "账户余额已用尽，请充值", want: true},
+		{name: "chinese quota used up", msg: "账户额度已用完", want: true},
+		{name: "chinese quota exhausted", msg: "当前额度耗尽", want: true},
+		{name: "negative billing setup", msg: "billing not enabled for this account", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isInsufficientBalanceMessage(tt.msg)
+			if got != tt.want {
+				t.Fatalf("isInsufficientBalanceMessage(%q) = %v, want %v", tt.msg, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		want       BlacklistResult
+	}{
+		{
+			name:       "403 top level code insufficient balance should blacklist",
+			statusCode: 403,
+			body:       `{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "Insufficient account balance",
+			},
+		},
+		{
+			name:       "403 nested error code insufficient balance should blacklist",
+			statusCode: 403,
+			body:       `{"error":{"code":"INSUFFICIENT_BALANCE","message":"Insufficient account balance"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "Insufficient account balance",
+			},
+		},
+		{
+			name:       "403 string error field with insufficient balance should blacklist",
+			statusCode: 403,
+			body:       `{"error":"API Key额度不足，请访问https://right.codes查看详情"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "API Key额度不足，请访问https://right.codes查看详情",
+			},
+		},
+		{
+			name:       "401 string error should still honor top level authentication type",
+			statusCode: 401,
+			body:       `{"error":"认证失败","type":"authentication_error"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "authentication_error",
+				Message:         "认证失败",
+			},
+		},
+		{
+			name:       "401 string error invalid api key without type should blacklist",
+			statusCode: 401,
+			body:       `{"error":"无效的API Key"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "authentication_error",
+				Message:         "无效的API Key",
+			},
+		},
+		{
+			name:       "403 top level insufficient account balance message should blacklist",
+			statusCode: 403,
+			body:       `{"message":"Insufficient account balance"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "Insufficient account balance",
+			},
+		},
+		{
+			name:       "403 prededuct quota message should blacklist as insufficient balance",
+			statusCode: 403,
+			body:       `{"error":{"type":"new_api_error","message":"预扣费额度失败, 用户剩余额度: ＄0.411202, 需要预扣费额度: ＄0.553368"},"type":"error"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "预扣费额度失败, 用户剩余额度: ＄0.411202, 需要预扣费额度: ＄0.553368",
+			},
+		},
+		{
+			name:       "429 insufficient quota message should blacklist as insufficient balance",
+			statusCode: 429,
+			body:       `{"error":{"message":"insufficient quota for current billing period"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "insufficient quota for current billing period",
+			},
+		},
+		{
+			name:       "401 token status exhausted message should blacklist as insufficient balance",
+			statusCode: 401,
+			body:       `{"error":{"code":"","message":"该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "该令牌额度已用尽 TokenStatusExhausted[sk-duK***qqX]",
+			},
+		},
+		{
+			name:       "401 out of credits message should blacklist as insufficient balance",
+			statusCode: 401,
+			body:       `{"error":{"message":"This account is out of credits"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "This account is out of credits",
+			},
+		},
+		{
+			name:       "403 billing not enabled should not be misclassified as balance",
+			statusCode: 403,
+			body:       `{"error":{"message":"billing not enabled for this account"}}`,
+			want:       BlacklistResult{},
+		},
+		{
+			name:       "403 permission denied should not be misclassified as balance",
+			statusCode: 403,
+			body:       `{"error":{"type":"forbidden","message":"permission denied for this resource"}}`,
+			want:       BlacklistResult{},
+		},
+		{
+			name:       "403 explicit permission error should still be permission blacklist",
+			statusCode: 403,
+			body:       `{"error":{"type":"permission_denied","message":"permission denied"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "permission_error",
+				Message:         "permission denied",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ShouldBlacklistKey(tt.statusCode, []byte(tt.body))
+			if got != tt.want {
+				t.Fatalf("ShouldBlacklistKey(%d, %s) = %+v, want %+v", tt.statusCode, tt.body, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShouldRetryWithNextKey_TopLevelDetailAndAuthMessages(t *testing.T) {
 	tests := []struct {
 		name         string

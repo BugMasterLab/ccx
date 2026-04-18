@@ -12,13 +12,13 @@
     <div class="chart-header d-flex align-center justify-space-between mb-3 flex-wrap ga-2">
       <div class="d-flex align-center ga-2">
         <!-- Duration selector -->
-        <v-btn-toggle v-model="selectedDuration" mandatory density="compact" variant="outlined" divided :disabled="isLoading">
-          <v-btn value="1h" size="x-small">{{ t('chart.1h') }}</v-btn>
-          <v-btn value="6h" size="x-small">{{ t('chart.6h') }}</v-btn>
-          <v-btn value="24h" size="x-small">{{ t('chart.24h') }}</v-btn>
-          <v-btn value="today" size="x-small">{{ t('chart.today') }}</v-btn>
-          <v-btn value="7d" size="x-small">{{ t('chart.7d') }}</v-btn>
-          <v-btn value="30d" size="x-small">{{ t('chart.30d') }}</v-btn>
+        <v-btn-toggle v-model="selectedDuration" mandatory density="compact" variant="outlined" divided :disabled="isLoading" class="chart-control-toggle">
+          <v-btn value="1h" size="x-small" class="chart-control-btn">{{ t('chart.1h') }}</v-btn>
+          <v-btn value="6h" size="x-small" class="chart-control-btn">{{ t('chart.6h') }}</v-btn>
+          <v-btn value="24h" size="x-small" class="chart-control-btn">{{ t('chart.24h') }}</v-btn>
+          <v-btn value="today" size="x-small" class="chart-control-btn">{{ t('chart.today') }}</v-btn>
+          <v-btn value="7d" size="x-small" class="chart-control-btn">{{ t('chart.7d') }}</v-btn>
+          <v-btn value="30d" size="x-small" class="chart-control-btn">{{ t('chart.30d') }}</v-btn>
         </v-btn-toggle>
 
         <v-btn icon size="x-small" variant="text" :loading="isLoading" :disabled="isLoading" @click="refreshData">
@@ -27,12 +27,12 @@
       </div>
 
       <!-- View switcher -->
-      <v-btn-toggle v-model="selectedView" mandatory density="compact" variant="outlined" divided :disabled="isLoading">
-        <v-btn value="traffic" size="x-small">
+      <v-btn-toggle v-model="selectedView" mandatory density="compact" variant="outlined" divided :disabled="isLoading" class="chart-control-toggle">
+        <v-btn value="traffic" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-chart-line</v-icon>
           {{ t('chart.traffic') }}
         </v-btn>
-        <v-btn value="tokens" size="x-small">
+        <v-btn value="tokens" size="x-small" class="chart-control-btn">
           <v-icon size="small" class="mr-1">mdi-chart-areaspline</v-icon>
           {{ t('chart.tokens') }}
         </v-btn>
@@ -65,7 +65,7 @@
     <div v-if="summary && compact" class="compact-summary d-flex align-center ga-3 mb-2 text-caption">
       <span><strong>{{ formatNumber(summary.totalRequests) }}</strong> {{ t('orchestration.requests') }}</span>
       <span :class="{ 'text-success': summary.avgSuccessRate >= 95, 'text-warning': summary.avgSuccessRate >= 80 && summary.avgSuccessRate < 95, 'text-error': summary.avgSuccessRate < 80 }">
-        <strong>{{ summary.avgSuccessRate.toFixed(1) }}%</strong> {{ t('chart.success') }}
+        <strong>{{ summary.avgSuccessRate.toFixed(1) }}%</strong> {{ t('chart.successRate') }}
       </span>
       <span><strong>{{ formatNumber(summary.totalInputTokens) }}</strong> {{ t('chart.input') }}</span>
       <span><strong>{{ formatNumber(summary.totalOutputTokens) }}</strong> {{ t('chart.output') }}</span>
@@ -352,7 +352,7 @@ const chartOptions = computed<ApexOptions>(() => {
       labels: {
         datetimeUTC: false,
         format: selectedDuration.value === '7d' || selectedDuration.value === '30d' ? 'MM-dd HH:mm' : 'HH:mm',
-        style: { fontSize: '10px' }
+        style: { fontSize: '11px', colors: theme.global.current.value.dark ? '#9ca3af' : '#6b7280' }
       },
       axisBorder: { show: false },
       axisTicks: { show: false }
@@ -421,7 +421,7 @@ const buildTrafficTooltip = ({ dataPointIndex }: any): string => {
     return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
   }
 
-  let html = `<div style="padding: 8px 12px; font-size: 12px;">`
+  let html = `<div style="padding: 8px 12px; font-size: 13px; line-height: 1.6;">`
   html += `<div style="font-weight: 600; margin-bottom: 6px; color: ${hasFailure ? '#ef4444' : 'inherit'};">${timeStr}</div>`
 
   const models = sortedModels.value
@@ -438,7 +438,7 @@ const buildTrafficTooltip = ({ dataPointIndex }: any): string => {
       html += `<span style="flex: 1;">${escapeHtml(model.name)}</span>`
       html += `<span style="margin-left: 12px; font-weight: 500;">${mdp.requestCount}</span>`
       if (hasModelFailure) {
-        html += `<span style="margin-left: 6px; color: #ef4444; font-size: 11px;">(${mdp.failureCount} ${t('chart.failed')}, ${failRate}%)</span>`
+        html += `<span style="margin-left: 6px; color: #ef4444; font-size: 12px;">(${mdp.failureCount} ${t('chart.issueCount')}, ${failRate}%)</span>`
       }
       html += `</div>`
     })
@@ -447,7 +447,7 @@ const buildTrafficTooltip = ({ dataPointIndex }: any): string => {
     html += `<div style="border-top: 1px solid rgba(128,128,128,0.3); margin-top: 6px; padding-top: 6px; font-weight: 600;">`
     html += `<span>${t('chart.total')}: ${dp.requestCount} ${t('chart.requestUnit')}</span>`
     if (hasFailure) {
-      html += `<span style="color: #ef4444; margin-left: 8px;">${dp.failureCount} ${t('chart.failed')} (${grandFailureRate}%)</span>`
+      html += `<span style="color: #ef4444; margin-left: 8px;">${dp.failureCount} ${t('chart.issueCount')} (${grandFailureRate}%)</span>`
     }
     html += `</div>`
   } else {
@@ -459,7 +459,7 @@ const buildTrafficTooltip = ({ dataPointIndex }: any): string => {
     html += `<span style="margin-left: 12px; font-weight: 500;">${dp.requestCount}</span>`
     html += `</div>`
     if (hasFailure) {
-      html += `<div style="color: #ef4444; font-size: 11px; margin-top: 4px;">${dp.failureCount} ${t('chart.failed')} (${failureRate}%)</div>`
+      html += `<div style="color: #ef4444; font-size: 12px; margin-top: 4px;">${dp.failureCount} ${t('chart.issueCount')} (${failureRate}%)</div>`
     }
   }
 
@@ -634,14 +634,17 @@ defineExpose({
 }
 
 .summary-label {
-  font-size: 11px;
-  color: rgba(var(--v-theme-on-surface), 0.6);
-  margin-bottom: 2px;
+  font-size: 13px;
+  color: rgba(var(--v-theme-on-surface), 0.72);
+  margin-bottom: 4px;
+  line-height: 1.4;
+  font-weight: 500;
 }
 
 .summary-value {
   font-size: 16px;
   font-weight: 600;
+  line-height: 1.3;
 }
 
 .compact-summary {
@@ -653,6 +656,14 @@ defineExpose({
 .chart-header {
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.chart-control-toggle :deep(.v-btn.chart-control-btn) {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  padding-inline: 8px !important;
+  min-width: 36px !important;
 }
 
 .chart-area {

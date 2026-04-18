@@ -1,6 +1,174 @@
-## [Unreleased]
+## [v2.6.64] - 2026-04-16
+
+### Fixed
+
+- **修正 Responses prompt total 保留逻辑避免缓存命中率误判** - 在非流式与直连 Responses 流式 handler 中改为仅基于 patch 前原始 usage 保留 `PromptTokensTotal`，避免把 patched `input_tokens` 误当总 prompt tokens 导致 dashboard 缓存命中率虚高到 100%，并补充 handlers/providers 回归测试
+- **统一 Responses 来源的缓存命中率统计口径** - 在内部 usage 统计中保留 Responses/OpenAI 风格的总 prompt token 数，并在 dashboard metrics 聚合前归一化为未命中输入 token，修复 messages→responses 以及 direct responses 渠道缓存率被重复计入分母、前端显示约减半的问题；同时兼容 `input_tokens_details.cached_tokens` 回退并补充 bridge、stream、metrics、handler 回归测试
+
+## [v2.6.63] - 2026-04-16
 
 ### Changed
+
+- **能力测试请求接入渠道日志并补充来源标识** - 将模型能力测试与单模型重试产生的真实上游请求写入现有渠道日志，新增 `requestSource` 字段区分正式代理流量与能力测试流量，并在前端日志弹窗中显示“能力测试”标识，便于统一排查失败状态、耗时和错误详情
+- **补充能力测试日志接入回归测试** - 新增能力测试成功/失败日志记录测试，以及渠道日志来源字段 helper 测试，覆盖后端日志来源默认值与显式写入路径
+
+### Fixed
+
+- **补齐 Responses 缓存命中 token 映射兼容** - 当上游 `usage` 未返回 `cache_read_input_tokens` 时，改为从 `input_tokens_details.cached_tokens` 回填 Claude Usage 的缓存读取 token，覆盖非流式与 SSE 流式响应，并补充对应回归测试
+
+## [v2.6.62] - 2026-04-16
+
+### Fixed
+
+- **放宽熔断恢复阈值并补充 failover 错误摘要日志** - 将 half-open 恢复成功门槛从两次探针下调为一次，同步在切换到下一个 API Key 前记录截断后的上游错误摘要，并更新 dashboard 回归测试与熔断相关指标行为以匹配新的恢复语义
+
+## [v2.6.61] - 2026-04-15
+
+### Fixed
+
+- **全黑名单 Key 场景下的模型列表与编辑态回退一致性** - 聚合 `/v1/models` 与编辑弹窗在活跃 API Key 全部被拉黑后，允许临时借用 `disabledApiKeys` 获取模型列表，并在回退时保留 routePrefix 隔离与运行时全黑名单渠道支持，同时保持正常调度不使用已拉黑 key
+- **补充黑名单借 key 管理场景回归测试** - 新增管理场景 key 选择与模型列表聚合 fallback 的后端回归测试，覆盖 active key 优先、disabled key 回退与无 key 失败路径
+
+## [v2.6.60] - 2026-04-15
+
+### Fixed
+
+- **能力测试全 Key 拉黑时回退逻辑不一致** - 修复当所有活跃 API Key 被拉黑后，能力测试入口直接报 no_api_key 而不尝试借用被拉黑 key 的问题，与 buildTestRequestWithModel 中已有的回退逻辑保持一致
+
+## [v2.6.59] - 2026-04-15
+
+### Fixed
+
+- **能力测试全 Key 拉黑时重试 panic** - 修复当渠道所有 API Key 均被拉黑时，能力测试重试逻辑触发 panic 的问题
+
+### Other
+
+- **前端补丁依赖升级** - 升级前端 patch 级别依赖包
+
+## [v2.6.58] - 2026-04-15
+
+### Added
+
+- **完整强化版熔断器** - 实现显式三态熔断状态机（closed/open/half_open），支持指数退避、单探针恢复和失败分类
+  - 引入失败分类机制（retryable/non_retryable/quota/client_cancel），只有可重试故障触发熔断
+  - 实现 half-open 单探针恢复机制，成功 1 次即完全恢复
+  - 实现指数退避机制（30s base, 10min max），避免频繁重试
+  - 新增 circuit_states 表持久化熔断状态，服务重启后保留
+  - 调度器禁止 open 渠道被 fallback 选回，解决连续 500 仍打到坏渠道的问题
+  - 升级 upstream_failover 和 responses/compact 使用新 breaker 状态机
+  - Dashboard API 返回完整 breaker 字段（circuitState/halfOpenSuccesses/breakerFailureRate/nextRetryAt）
+  - 前端状态徽章支持 breaker-open/half-open 显示，恢复按钮识别自动熔断
+  - 涉及文件：`internal/metrics/channel_metrics.go`, `internal/metrics/persistence.go`, `internal/metrics/sqlite_store.go`, `internal/scheduler/channel_scheduler.go`, `internal/handlers/common/upstream_failover.go`, `internal/handlers/responses/compact.go`, `internal/handlers/channel_metrics_handler.go`, `frontend/src/components/ChannelStatusBadge.vue`, `frontend/src/components/ChannelOrchestration.vue`
+- **新增跨接口一致性与桥接回归测试** - 增加统一会话标识提取测试、Messages→Responses 身份映射测试，以及 handlers 层跨 messages / responses / chat / gemini 的 affinity 一致性测试，覆盖缓存键与用户标识回退逻辑
+
+### Changed
+
+- **为 Messages/Responses 渠道增加 metadata.user_id 规范化开关** - 新增默认开启的 `normalizeMetadataUserId` 渠道配置与前端开关；请求入口保留原始 `metadata.user_id`，仅在发往上游前按渠道决定是否将 JSON 对象字符串扁平化，兼容需要透传原始对象和依赖旧扁平格式的不同上游；同步更新渠道列表/dashboard 返回与前后端回归测试
+- **统一四协议的会话亲和与缓存身份提取** - 为 Messages / Responses / Chat / Gemini 入口统一引入会话标识提取优先级，新增 `X-Claude-Code-Session-Id` 与 `X-Client-Request-Id` 支持，并保留旧提取函数兼容现有调用
+- **补全 Messages→Responses 桥接字段映射** - 在 Claude Messages 转 Responses 上游请求时补齐 `prompt_cache_key`、`user`、`top_p`、`tool_choice`、`parallel_tool_calls` 等字段，提升跨接口缓存复用与参数传递完整性
+
+### Fixed
+
+- **补齐 401 字符串认证错误的自动拉黑识别** - 当上游仅返回 `401` + 字符串 `error`/`message`（如 `{"error":"无效的API Key"}`）且缺少 `type`/`code` 时，非流式与 SSE 流式自动拉黑逻辑现在也会识别为 `authentication_error`，避免无效 key 仅触发 failover 而未被持久化拉黑；同步补充回归测试
+- **收敛 half-open 探针并发窗口、健康判定与指标口径** - 调整 `upstream_failover.go` 与 `responses/compact.go` 的探针释放时序为“先记账、后释放”，避免 half-open 状态下并发请求重复抢占探针；将空 API Key 列表渠道统一判定为不健康；将 `IsKeyHealthy()` 的到期状态推进收敛到写锁内，避免读锁下写状态；并修正渠道聚合 `successRate/errorRate` 使用总请求统计、仅让 `breakerFailureRate` 使用 breaker 窗口，保证看板指标与真实请求结果一致，同时去除 closed / 非 breaker 相关热路径上的同步熔断状态持久化写入，降低默认持久化模式下的请求开销
+
+### Removed
+
+- **清理已下架模型引用** - 移除代码中对官方已下架的 `gpt-5.1-codex-max` 模型的所有引用
+
+## [v2.6.57] - 2026-04-14
+
+### Fixed
+
+- **补齐字符串错误体的余额不足拉黑识别** - 非流式与 SSE 流式拉黑检测现在都支持从字符串 `error` / 顶层 `message` 中识别“额度不足”语义，能力测试链路同步复用该判定，避免此类上游错误漏判导致 key 未自动拉黑
+- **修复能力测试与渠道健康检查的版本化 BaseURL 拼接** - 统一能力测试与 Responses/Chat/Gemini 渠道 ping/health-check 的端点构建逻辑，正确识别已包含 `/v1` 或 `/v1beta` 的 baseURL（如 `.../codex/v1`），避免重复追加版本前缀导致 `/v1/v1/...` 404，并补充相关回归测试
+
+## [v2.6.56] - 2026-04-13
+
+### Fixed
+
+- **保留删除渠道后的历史日志** - 删除渠道时改为仅调整内存日志索引，避免清空其他渠道日志，并补充删除与仪表盘链路回归测试
+- **补充余额不足错误码识别** - 非流式拉黑检测支持从 `code` 字段识别 `INSUFFICIENT_BALANCE`，并让能力测试与自动余额拉黑语义保持一致，避免误禁用 key
+- **对齐紧凑 Responses 与活动日志记录** - 为 Responses compact 尝试和上游 failover 统一复用共享日志辅助逻辑，确保活动指标中出现的尝试也能在前端日志视图中看到
+
+## [v2.6.55] - 2026-04-12
+
+### Fixed
+
+- **拆分 Vue 类型声明为 ambient 文件** - 将 Vue shims 拆分为独立的 ambient 声明文件，兼容 TypeScript 6.0 的类型解析要求
+
+## [v2.6.54] - 2026-04-12
+
+### Fixed
+
+- **优化能力测试对话框模型列表排版** - 改善能力测试对话框中模型列表的排版布局和 tooltip 样式显示
+- **缩小能力测试对话框操作按钮尺寸** - 减小能力测试对话框底部操作按钮的尺寸，提升视觉一致性
+
+### Other
+
+- **添加 .planning/ 到 .gitignore** - 将 `.planning/` 目录加入 Git 忽略列表
+
+## [v2.6.53] - 2026-04-12
+
+### Added
+
+- **补充四协议互转矩阵测试** - 新增 Responses 请求矩阵、Messages 响应矩阵，以及 Messages/Chat/Gemini/Responses 入口的非流式 handler matrix 测试，覆盖四种上游协议的主要请求与响应路径
+
+### Fixed
+
+- **修复 Chat 非流式透传读空响应体** - `chat` handler 在非流式默认透传分支中重置已读取的 `resp.Body`，避免 `PassthroughJSONResponse` 二次读取时返回空响应体
+
+## [v2.6.52] - 2026-04-12
+
+### Changed
+
+- **抽取能力测试模型结果子组件** - 将 `CapabilityTestDialog` 中移动端与桌面端重复的模型 tooltip、badge、空状态与 retry 渲染提取为独立 `CapabilityModelResults` 组件，统一模型区交互与样式来源，降低后续状态改动的分叉风险
+- **恢复渠道时同步恢复被拉黑 Key** - `resume` 系列管理接口在重置渠道熔断状态时，同步恢复对应渠道 `DisabledAPIKeys` 中的全部 Key，并返回 `restoredKeys` 数量，避免仅清除熔断却遗漏渠道级 Key 恢复
+
+### Fixed
+
+- **对齐能力测试与代理空流判定** - 能力测试改为复用 provider 规范化后的流事件和代理侧 `PreflightStreamEvents` 预检逻辑，要求上游必须返回实际文本或语义内容才判定成功，并将流读取超时统一为 30 秒，避免空 SSE 流被误判为模型可用
+
+## [v2.6.51] - 2026-04-10
+
+### Changed
+
+- **优化亲和调度优先级让渡规则** - 当存在更高优先级且健康的可用渠道时，trace affinity 不再强制命中旧绑定渠道，优先回到当前最优可用渠道，减少低优先级历史绑定长期占用流量
+- **重构能力测试状态模型与前端展示** - 能力测试后端为 job/protocol/model 三层新增 lifecycle、outcome、reason、runMode 等状态语义字段，统一取消、重试、缓存命中与恢复任务的状态表达；前端同步切换到新状态模型，优化轮询控制、局部重测、协议/模型行级展示与错误提示文案，减少 completed/failed/cancelled 混淆
+- **补充能力测试状态聚合回归测试** - 为 capability job 聚合、取消语义与 reason 映射新增单测，验证 partial / cancelled / timeout / not_run 等关键状态形状
+
+### Fixed
+
+- **修复 403/429 余额语义误分类** - 后端拉黑逻辑对 403/429 仅在错误消息明确表达余额或额度不足时才标记为 `insufficient_balance`，避免将普通 permission denied 等授权错误误判为永久失效；同步补充中英文额度文案与权限错误回归测试
+- **修复新增渠道表单状态串扰** - 调整 AddChannelModal 对 `channel` 变更的监听逻辑，避免编辑态关闭或触发能力测试时错误切回快速添加，并确保重新新增渠道时 `baseURL` 等表单字段被正确重置
+- **补充弹窗状态回归测试** - 新增 watcher 级别测试覆盖新增重置、编辑回填与编辑态清空 channel 不误切模式等场景
+
+## [v2.6.50] - 2026-04-08
+
+### Fixed
+
+- **修复能力测试错误处理和状态映射** - 后端移除无 API Key 时返回的 `all` 伪协议，改为直接返回 `failed` 状态；前端增加已知协议白名单过滤，优化 `failed` 状态映射保留结果视图，补全印尼语 i18n 翻译
+
+### Changed
+
+- **规范化前端字号行高和按钮样式** - 统一字号规范（0.875rem、1.125rem）和行高规范（1.3、1.4、1.5、1.6），移除中间值；为按钮添加 `line-height: 1.5` 改善文字垂直居中；提取对话框标题样式到全局 CSS
+
+## [v2.6.49] - 2026-04-07
+
+### Fixed
+
+- **修复非正天数参数验证缺陷** - 修复 7d/30d 时间范围支持的 3 个关键问题
+
+### Changed
+
+- **调整指标数据保留期默认值和范围** - 扩展渠道指标历史查询支持 7d 和 30d，统一全局统计与渠道统计的时间范围选项
+
+## [v2.6.48] - 2026-04-07
+
+### Changed
+
+- **移除前端批量测试功能** - 删除批量测试入口按钮、对话框组件、相关多语言文案与专用图标，避免在管理界面触发大面积上游访问
+- **精简前端能力测试代码路径** - 清理仅供批量测试使用的前端 capability job 类型与 API 包装，保留单渠道能力测试与常规渠道延迟测试所需能力
 
 - **统一全局 Tooltip 样式** - 将分散在各组件中的 tooltip 样式（`fuzzy-tooltip`、`status-tooltip`）合并为全局 `ccx-tooltip` 类（复古像素主题），所有 `v-tooltip` 统一使用 `content-class="ccx-tooltip"` 避免 Vuetify 默认灰色；拉黑密钥 chip 颜色由 `error` 改为 `warning`
 
@@ -564,7 +732,7 @@
 
 - **渠道删除时保留历史指标数据** - 删除渠道时不再主动清理指标数据，让数据自然过期
   - 移除三个渠道删除处理器中的 `DeleteChannelMetrics()` 调用
-  - SQLite 数据将在配置的保留期后自动删除（`METRICS_RETENTION_DAYS`，默认 7 天）
+  - SQLite 数据将在配置的保留期后自动删除（`METRICS_RETENTION_DAYS`，默认 30 天）
   - 内存指标将在 48 小时无活动后自动清理
   - 保持全局历史统计数据完整性，不再因删除渠道而丢失
   - **注意**：若用相同 BaseURL + APIKey 重建渠道，可能继承近期健康状态/统计（受内存清理窗口与服务重启影响，熔断状态不持久化）
@@ -1699,7 +1867,7 @@
 
 - **快速添加渠道支持引号内容提取** - 支持从双引号/单引号中提取 URL 和 API Key，可直接粘贴 Claude Code 环境变量 JSON 配置格式
 - **SQLite 指标持久化存储** - 服务重启后不再丢失历史指标数据，启动时自动加载最近 24 小时数据
-  - 新增 `METRICS_PERSISTENCE_ENABLED`（默认 true）和 `METRICS_RETENTION_DAYS`（默认 7）配置
+  - 新增 `METRICS_PERSISTENCE_ENABLED`（默认 true）和 `METRICS_RETENTION_DAYS`（默认 30，范围 3-90）配置
   - 异步批量写入（100 条/批或每 30 秒），WAL 模式高并发，自动清理过期数据
 - **完整的 Responses API Token Usage 统计** - 支持多格式自动检测（Claude/Gemini/OpenAI）、缓存 TTL 细分统计（5m/1h）
 - **Messages API 缓存 TTL 细分统计** - 区分 5 分钟和 1 小时 TTL 的缓存创建统计

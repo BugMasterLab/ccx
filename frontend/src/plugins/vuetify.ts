@@ -26,7 +26,7 @@ import { VBtn } from 'vuetify/components/VBtn'
 import { VBtnToggle } from 'vuetify/components/VBtnToggle'
 
 // 列表组件
-import { VList, VListItem, VListItemTitle } from 'vuetify/components/VList'
+import { VList, VListItem, VListItemTitle, VListItemSubtitle } from 'vuetify/components/VList'
 import { VMenu } from 'vuetify/components/VMenu'
 
 // 反馈组件
@@ -54,10 +54,15 @@ import { Ripple, ClickOutside } from 'vuetify/directives'
 import 'vuetify/styles'
 
 // 从 @mdi/js 按需导入使用的图标 (SVG)
-// 📝 维护说明: 新增图标时需要:
-//    1. 从 @mdi/js 添加导入 (驼峰命名，如 mdiNewIcon)
-//    2. 在 iconMap 中添加映射 (如 'new-icon': mdiNewIcon)
-//    图标查找: https://pictogrammers.com/library/mdi/
+// ============================================================
+// ⚠️ 重要：模板里写 `<v-icon>mdi-xxx</v-icon>` 并不会自动生效。
+// 本项目使用自定义 iconMap，新增图标时必须同时完成下面两步：
+//   1. 从 `@mdi/js` 添加导入（驼峰命名，如 `mdiNewIcon`）
+//   2. 在下方 `iconMap` 中添加映射（kebab-case，如 `'new-icon': mdiNewIcon`）
+// 少任一步都会导致图标找不到：开发环境出现警告，界面可能显示占位文本。
+// 修改任何前端图标时，请顺手检查新增的 `mdi-xxx` 是否已完成这两处注册。
+// 图标查找: https://pictogrammers.com/library/mdi/
+// ============================================================
 import {
   mdiSwapVerticalBold,
   mdiPlayCircle,
@@ -72,6 +77,7 @@ import {
   mdiRocketLaunch,
   mdiPauseCircle,
   mdiStopCircle,
+  mdiStopCircleOutline,
   mdiDelete,
   mdiPlaylistRemove,
   mdiArchiveOutline,
@@ -95,6 +101,7 @@ import {
   mdiCheckBold,
   mdiContentCopy,
   mdiAlert,
+  mdiAlertOctagon,
   mdiWeatherNight,
   mdiWhiteBalanceSunny,
   mdiLogout,
@@ -119,6 +126,7 @@ import {
   mdiApi,
   mdiLightningBolt,
   mdiFormTextbox,
+  mdiIdentifier,
   mdiMenuDown,
   mdiMenuUp,
   mdiCheckboxMarked,
@@ -141,6 +149,7 @@ import {
   mdiShieldRefresh,
   mdiShieldOffOutline,
   mdiAlertCircleOutline,
+  mdiChartLineVariant,
   mdiChartTimelineVariant,
   mdiChartAreaspline,
   mdiChartLine,
@@ -165,7 +174,7 @@ import {
   mdiRestore,
   mdiKeyRemove,
   mdiKeyAlert,
-  mdiFlaskOutline,
+  mdiCashRemove,
 } from '@mdi/js'
 
 // 图标名称到 SVG path 的映射 (使用 kebab-case)
@@ -179,6 +188,7 @@ const iconMap: Record<string, string> = {
   'success': mdiCheckCircle,
   'info': mdiInformation,
   'warning': mdiAlert,
+  'alert-octagon': mdiAlertOctagon,
   'error': mdiAlertCircle,
   'prev': mdiChevronLeft,
   'next': mdiChevronRight,
@@ -241,6 +251,7 @@ const iconMap: Record<string, string> = {
   'play-circle': mdiPlayCircle,
   'pause-circle': mdiPauseCircle,
   'stop-circle': mdiStopCircle,
+  'stop-circle-outline': mdiStopCircleOutline,
   'check-circle': mdiCheckCircle,
   'alert-circle': mdiAlertCircle,
   'alert-circle-outline': mdiAlertCircleOutline,
@@ -275,6 +286,7 @@ const iconMap: Record<string, string> = {
   'pin-outline': mdiPinOutline,
   'lightning-bolt': mdiLightningBolt,
   'form-textbox': mdiFormTextbox,
+  'identifier': mdiIdentifier,
   'clock-outline': mdiClockOutline,
   'paperclip': mdiPaperclip,
   'eye-dropper': mdiEyedropper,
@@ -314,6 +326,7 @@ const iconMap: Record<string, string> = {
   'chart-timeline-variant': mdiChartTimelineVariant,
   'chart-areaspline': mdiChartAreaspline,
   'chart-line': mdiChartLine,
+  'chart-line-variant': mdiChartLineVariant,
   'code-braces': mdiCodeBraces,
   'database': mdiDatabase,
 
@@ -346,7 +359,7 @@ const iconMap: Record<string, string> = {
   'restore': mdiRestore,
   'key-remove': mdiKeyRemove,
   'key-alert': mdiKeyAlert,
-  'flask-outline': mdiFlaskOutline,
+  'cash-remove': mdiCashRemove,
 }
 
 // 自定义 SVG iconset - 处理 mdi-xxx 字符串格式
@@ -471,6 +484,7 @@ export default createVuetify({
     VList,
     VListItem,
     VListItemTitle,
+    VListItemSubtitle,
     VMenu,
     // 反馈
     VAlert,

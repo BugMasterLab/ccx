@@ -110,3 +110,61 @@ func TestBuildTestRequest_UsesCentralizedProbeModels(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildTestRequest_UsesExistingVersionSuffix(t *testing.T) {
+	cases := []struct {
+		name        string
+		protocol    string
+		baseURL     string
+		expectedURL string
+	}{
+		{
+			name:        "messages with v1 base url",
+			protocol:    "messages",
+			baseURL:     "https://api.example.com/codex/v1",
+			expectedURL: "https://api.example.com/codex/v1/messages",
+		},
+		{
+			name:        "chat with v1 base url",
+			protocol:    "chat",
+			baseURL:     "https://api.example.com/codex/v1",
+			expectedURL: "https://api.example.com/codex/v1/chat/completions",
+		},
+		{
+			name:        "responses with v1 base url",
+			protocol:    "responses",
+			baseURL:     "https://api.example.com/codex/v1",
+			expectedURL: "https://api.example.com/codex/v1/responses",
+		},
+		{
+			name:        "gemini with v1beta base url",
+			protocol:    "gemini",
+			baseURL:     "https://api.example.com/codex/v1beta",
+			expectedURL: "https://api.example.com/codex/v1beta/models/gemini-3.1-pro-preview:streamGenerateContent?alt=sse",
+		},
+		{
+			name:        "responses with explicit skip marker",
+			protocol:    "responses",
+			baseURL:     "https://api.example.com/codex/v1#",
+			expectedURL: "https://api.example.com/codex/v1/responses",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			channel := &config.UpstreamConfig{
+				BaseURL: tc.baseURL,
+				APIKeys: []string{"test-key"},
+			}
+
+			req, err := buildTestRequest(tc.protocol, channel)
+			if err != nil {
+				t.Fatalf("protocol=%s build request failed: %v", tc.protocol, err)
+			}
+
+			if got := req.URL.String(); got != tc.expectedURL {
+				t.Fatalf("protocol=%s url=%s want=%s", tc.protocol, got, tc.expectedURL)
+			}
+		})
+	}
+}

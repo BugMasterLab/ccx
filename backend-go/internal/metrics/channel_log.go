@@ -17,10 +17,15 @@ type ChannelLog struct {
 	BaseURL       string    `json:"baseUrl"`
 	ErrorInfo     string    `json:"errorInfo"`
 	IsRetry       bool      `json:"isRetry"`
-	InterfaceType string    `json:"interfaceType"` // 接口类型（Messages/Responses/Gemini）
+	InterfaceType string    `json:"interfaceType"`           // 接口类型（Messages/Responses/Gemini）
+	RequestSource string    `json:"requestSource,omitempty"` // 请求来源（proxy/capability_test）
 }
 
-const maxChannelLogs = 50
+const (
+	RequestSourceProxy          = "proxy"
+	RequestSourceCapabilityTest = "capability_test"
+	maxChannelLogs              = 50
+)
 
 // ChannelLogStore 渠道日志存储（内存环形缓冲区）
 type ChannelLogStore struct {
@@ -41,7 +46,31 @@ func (s *ChannelLogStore) Record(channelIndex int, log *ChannelLog) {
 	}
 }
 
-// ClearAll 清除所有渠道日志（渠道删除导致索引变化时调用）
+// RemoveAndShift 删除指定渠道日志，并将其后的渠道日志索引前移一位，保持与删除后的渠道切片索引一致。
+func (s *ChannelLogStore) RemoveAndShift(channelIndex int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.logs) == 0 {
+		return
+	}
+
+	shifted := make(map[int][]*ChannelLog, len(s.logs))
+	for idx, logs := range s.logs {
+		switch {
+		case idx == channelIndex:
+			continue
+		case idx > channelIndex:
+			shifted[idx-1] = logs
+		default:
+			shifted[idx] = logs
+		}
+	}
+
+	s.logs = shifted
+}
+
+// ClearAll 清除所有渠道日志，仅用于需要整体重置日志缓存的场景。
 func (s *ChannelLogStore) ClearAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
