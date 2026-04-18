@@ -711,7 +711,7 @@
               <v-card variant="outlined" rounded="lg">
                 <v-card-title class="section-card-title d-flex align-center justify-space-between ga-2">
                   <div class="d-flex align-center ga-2">
-                    <v-icon size="small" color="primary">mdi-waveform</v-icon>
+                    <v-icon size="small" color="primary">mdi-shield-outline</v-icon>
                     Claude 流式与故障拦截
                   </div>
                   <div class="d-flex align-center ga-2">
