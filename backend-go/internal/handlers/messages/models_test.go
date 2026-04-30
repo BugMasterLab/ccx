@@ -42,6 +42,7 @@ func newModelsTestScheduler(cfgManager *config.ConfigManager) *scheduler.Channel
 		metrics.NewMetricsManager(),
 		metrics.NewMetricsManager(),
 		metrics.NewMetricsManager(),
+		metrics.NewMetricsManager(),
 	}
 
 	schedulerInstance := scheduler.NewChannelScheduler(
@@ -50,6 +51,7 @@ func newModelsTestScheduler(cfgManager *config.ConfigManager) *scheduler.Channel
 		metricsManagers[1],
 		metricsManagers[2],
 		metricsManagers[3],
+		metricsManagers[4],
 		traceAffinity,
 		nil,
 	)

@@ -1,4 +1,4 @@
-package main
+package router
 
 import (
 	"encoding/json"
@@ -45,7 +45,7 @@ func TestRegisterImagesAdminRoutesIncludesMetricsEndpoints(t *testing.T) {
 	}
 
 	r := gin.New()
-	registerImagesAdminRoutes(r.Group("/api"), cfgManager, channelScheduler, imagesMetrics)
+	RegisterImagesAdminRoutes(r.Group("/api"), cfgManager, channelScheduler, imagesMetrics)
 
 	registered := make(map[string]bool)
 	for _, route := range r.Routes() {

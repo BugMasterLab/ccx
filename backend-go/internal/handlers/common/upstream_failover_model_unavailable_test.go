@@ -50,6 +50,7 @@ func TestTryUpstreamWithAllKeys_ModelRouteUnavailableSkipsBreakerAndCooldown(t *
 				metrics.NewMetricsManager(),
 				metrics.NewMetricsManager(),
 				metrics.NewMetricsManager(),
+				metrics.NewMetricsManager(),
 				session.NewTraceAffinityManager(),
 				nil,
 			)

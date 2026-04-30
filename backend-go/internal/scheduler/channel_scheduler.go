@@ -55,24 +55,10 @@ func NewChannelScheduler(
 	responsesMetrics *metrics.MetricsManager,
 	geminiMetrics *metrics.MetricsManager,
 	chatMetrics *metrics.MetricsManager,
-	optional ...interface{},
+	imagesMetrics *metrics.MetricsManager,
+	traceAffinity *session.TraceAffinityManager,
+	urlMgr *warmup.URLManager,
 ) *ChannelScheduler {
-	var imagesMetrics *metrics.MetricsManager
-	var traceAffinity *session.TraceAffinityManager
-	var urlMgr *warmup.URLManager
-
-	if len(optional) > 0 {
-		if m, ok := optional[0].(*metrics.MetricsManager); ok {
-			imagesMetrics = m
-			optional = optional[1:]
-		}
-	}
-	if len(optional) > 0 {
-		traceAffinity, _ = optional[0].(*session.TraceAffinityManager)
-	}
-	if len(optional) > 1 {
-		urlMgr, _ = optional[1].(*warmup.URLManager)
-	}
 	if imagesMetrics == nil {
 		imagesMetrics = metrics.NewMetricsManager()
 	}
