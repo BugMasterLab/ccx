@@ -24,6 +24,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: ['gpt-5'],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,
@@ -65,6 +66,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,
@@ -102,6 +104,7 @@ describe('buildChannelPayload', () => {
       routePrefix: 'images',
       supportedModels: ['gpt-image-1', 'dall-e-*'],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: false,
       sub2apiPassthroughEnabled: true,
@@ -142,6 +145,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: ['opus'],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,
@@ -177,6 +181,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: false,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,
@@ -185,6 +190,39 @@ describe('buildChannelPayload', () => {
     })
 
     expect(result.autoBlacklistBalance).toBe(false)
+  })
+
+  it('keeps autoBlacklistEmptyStream switch disabled', () => {
+    const result = buildChannelPayload({
+      name: 'empty-stream-guard',
+      serviceType: 'responses',
+      baseUrl: 'https://api.example.com/v1',
+      baseUrls: [],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: false,
+      normalizeMetadataUserId: true,
+      streamPassthroughEnabled: true,
+      sub2apiPassthroughEnabled: false,
+      strictRequestPassthroughEnabled: true,
+      failoverRules: []
+    })
+
+    expect(result.autoBlacklistEmptyStream).toBe(false)
   })
 
   it('keeps normalizeMetadataUserId switch', () => {
@@ -209,6 +247,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: false,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,
@@ -241,6 +280,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,
@@ -273,6 +313,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: true,
@@ -306,6 +347,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: false,
       sub2apiPassthroughEnabled: true,
@@ -350,6 +392,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,
@@ -407,6 +450,7 @@ describe('buildChannelPayload', () => {
       routePrefix: '',
       supportedModels: [],
       autoBlacklistBalance: true,
+      autoBlacklistEmptyStream: true,
       normalizeMetadataUserId: true,
       streamPassthroughEnabled: true,
       sub2apiPassthroughEnabled: false,

@@ -25,6 +25,7 @@ export interface ChannelFormLike {
   modelsResponseMode?: 'upstream' | 'manual'
   manualModels?: string[]
   autoBlacklistBalance: boolean
+  autoBlacklistEmptyStream: boolean
   normalizeMetadataUserId: boolean
   streamPassthroughEnabled: boolean
   sub2apiPassthroughEnabled: boolean
@@ -89,6 +90,7 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     modelsResponseMode,
     manualModels,
     autoBlacklistBalance: form.autoBlacklistBalance,
+    autoBlacklistEmptyStream: form.autoBlacklistEmptyStream,
     normalizeMetadataUserId: form.normalizeMetadataUserId,
     streamPassthroughEnabled,
     sub2apiPassthroughEnabled,

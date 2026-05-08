@@ -379,10 +379,10 @@
     <CapabilityTestDialog
       ref="capabilityTestDialogRef"
       v-model="showCapabilityTestDialog"
+      v-model:capability-rpm="capabilityRpm"
       :channel-name="capabilityTestChannelName"
       :current-tab="channelStore.activeTab"
       :capability-job="capabilityTestJob"
-      v-model:capability-rpm="capabilityRpm"
       @copy-to-tab="handleCopyToTab"
       @cancel="handleCancelCapabilityTest"
       @retry-model="handleRetryCapabilityModel"
