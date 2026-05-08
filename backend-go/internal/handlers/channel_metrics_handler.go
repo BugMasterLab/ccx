@@ -657,6 +657,7 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 		channels := make([]gin.H, len(upstreams))
 		for i, up := range upstreams {
 			channel := common.BuildChannelView(up, i)
+			channel["normalizeMetadataUserId"] = up.IsNormalizeMetadataUserIDEnabled()
 
 			if channelType == "gemini" {
 				channel["injectDummyThoughtSignature"] = up.InjectDummyThoughtSignature
