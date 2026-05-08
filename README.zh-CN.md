@@ -1,6 +1,6 @@
 # Claude / OpenAI Chat / Codex Responses / Gemini API Proxy - CCX
 
-[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/ccx)](https://github.com/BenedictKing/ccx/releases/latest)
+[![GitHub release](https://img.shields.io/github/v/release/BenedictKing/ccx)](https://github.com/BugMasterLab/ccx/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 CCX 是一个高性能的 AI API 代理与协议转换网关，支持 Claude、OpenAI Chat / Codex Responses、Gemini 等上游服务。它提供统一入口、内置 Web 管理界面、故障转移、多密钥管理、渠道编排和模型路由能力。
@@ -66,7 +66,7 @@ CCX 对外提供一个统一后端入口：
 
 ### 方式一：直接运行二进制
 
-1. 从 [Releases](https://github.com/BenedictKing/ccx/releases/latest) 下载最新可执行文件
+1. 从 [Releases](https://github.com/BugMasterLab/ccx/releases/latest) 下载最新可执行文件
 2. 在可执行文件同目录创建 `.env`：
 
 ```bash
@@ -93,7 +93,7 @@ docker run -d \
 ### 方式三：源码构建
 
 ```bash
-git clone https://github.com/BenedictKing/ccx
+git clone https://github.com/BugMasterLab/ccx
 cd ccx
 cp backend-go/.env.example backend-go/.env
 make run

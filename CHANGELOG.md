@@ -662,7 +662,7 @@
 
 ### 新增
 
-- **渠道自定义请求头支持** - 允许为每个渠道配置自定义 HTTP 请求头，在发送请求到上游时附加或覆盖（关闭 [#4](https://github.com/BenedictKing/ccx/issues/4)）
+- **渠道自定义请求头支持** - 允许为每个渠道配置自定义 HTTP 请求头，在发送请求到上游时附加或覆盖（关闭 [#4](https://github.com/BugMasterLab/ccx/issues/4)）
 
 ---
 

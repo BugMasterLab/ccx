@@ -2,7 +2,7 @@
 name: version-bump
 description: 升级项目版本号并提交git，支持patch/minor/major版本升级或指定具体版本号，自动从git log生成CHANGELOG
 version: 1.2.0
-author: https://github.com/BenedictKing/ccx/
+author: https://github.com/BugMasterLab/ccx/
 allowed-tools: Bash, Read, Write, Edit
 context: fork
 ---

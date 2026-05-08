@@ -179,7 +179,7 @@ git --version   # 应显示 git 版本
 
 ```powershell
 # 1. 克隆项目
-git clone https://github.com/BenedictKing/ccx
+git clone https://github.com/BugMasterLab/ccx
 cd ccx
 
 # 2. 安装前端依赖
@@ -495,7 +495,7 @@ telnet localhost 3000
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/BenedictKing/ccx
+git clone https://github.com/BugMasterLab/ccx
 cd ccx
 
 # 2. 配置环境变量

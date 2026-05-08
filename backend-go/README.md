@@ -27,7 +27,7 @@
 
 ### 方式1：下载预编译二进制文件（推荐）
 
-1. 从 [Releases](https://github.com/BenedictKing/ccx/releases) 下载对应平台的二进制文件
+1. 从 [Releases](https://github.com/BugMasterLab/ccx/releases) 下载对应平台的二进制文件
 2. 创建 `.env` 文件：
 
 ```bash
@@ -59,7 +59,7 @@ ccx-windows-amd64.exe
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/BenedictKing/ccx.git
+git clone https://github.com/BugMasterLab/ccx.git
 cd ccx
 
 # 2. 构建前端
