@@ -315,6 +315,10 @@ export type MessageKey =
   | 'chart.total'
   | 'chart.collapse'
   | 'chart.noModelRequestsInRange'
+  | 'chart.totalTokens'
+  | 'chart.totalTokensTooltip'
+  | 'chart.cacheReadTokens'
+  | 'chart.cacheWriteTokens'
   | 'chart.historyLoadFailed'
   | 'chart.modelStatsLoadFailed'
   | 'chart.globalStatsLoadFailed'
@@ -694,6 +698,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.total': 'Total',
     'chart.collapse': 'Collapse',
     'chart.noModelRequestsInRange': 'No model request records in the selected time range',
+    'chart.totalTokens': 'Total Tokens',
+    'chart.totalTokensTooltip': 'Total tokens consumed (input + output)',
+    'chart.cacheReadTokens': 'Cache Read Tokens',
+    'chart.cacheWriteTokens': 'Cache Write Tokens',
     'chart.historyLoadFailed': 'Failed to load history data',
     'chart.modelStatsLoadFailed': 'Failed to load model statistics',
     'chart.globalStatsLoadFailed': 'Failed to load global statistics',
@@ -1072,6 +1080,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.total': 'Total',
     'chart.collapse': 'Ciutkan',
     'chart.noModelRequestsInRange': 'Tidak ada request model dalam rentang waktu yang dipilih',
+    'chart.totalTokens': 'Total Token',
+    'chart.totalTokensTooltip': 'Total token yang dikonsumsi (input + output)',
+    'chart.cacheReadTokens': 'Token Cache Dibaca',
+    'chart.cacheWriteTokens': 'Token Cache Ditulis',
     'chart.historyLoadFailed': 'Gagal memuat data histori',
     'chart.modelStatsLoadFailed': 'Gagal memuat statistik model',
     'chart.globalStatsLoadFailed': 'Gagal memuat statistik global',
@@ -1450,6 +1462,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.total': '合计',
     'chart.collapse': '收起',
     'chart.noModelRequestsInRange': '选定时间范围内没有模型请求记录',
+    'chart.totalTokens': '总 Token',
+    'chart.totalTokensTooltip': '累计消耗 Token 数（输入 + 输出）',
+    'chart.cacheReadTokens': '缓存读取 Token',
+    'chart.cacheWriteTokens': '缓存写入 Token',
     'chart.historyLoadFailed': '获取历史数据失败',
     'chart.modelStatsLoadFailed': '获取模型统计数据失败',
     'chart.globalStatsLoadFailed': '获取全局统计数据失败',

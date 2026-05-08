@@ -3,6 +3,8 @@ import { normalizeLocale, translate } from '@/i18n/core'
 import { useAuthStore } from '@/stores/auth'
 import { usePreferencesStore } from '@/stores/preferences'
 
+export const API_REQUEST_TIMEOUT_MS = 30000
+
 export class ApiError extends Error {
   readonly status: number
   readonly details?: unknown
@@ -140,6 +142,13 @@ export interface Channel {
   stripThoughtSignature?: boolean        // Gemini 特定：移除 thought_signature 字段（兼容旧版 Gemini API）
   supportedModels?: string[]  // 支持的模型白名单（空=全部），支持通配符如 gpt-4*
   rpm?: number                // 能力测试发送速率（仅影响能力测试）
+  modelsResponseMode?: 'manual' | 'upstream'  // 模型列表来源：手工配置 or 上游拉取
+  cooldownApiKeys?: Array<{
+    key: string
+    remainingSeconds: number
+    failureCount: number
+    cooldownUntil: string
+  }>  // 当前处于冷却状态的 API Keys
 }
 
 export interface ChannelsResponse {
