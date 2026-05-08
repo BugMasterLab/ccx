@@ -409,8 +409,8 @@ func buildOperationRequest(
 		req.URL.RawQuery = c.Request.URL.RawQuery
 	}
 	req.Header = prepareImagesUpstreamHeaders(c, req.URL.Host, requestContentType)
-	utils.SetAuthenticationHeader(req.Header, apiKey)
 	utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
+	utils.SetAuthenticationHeader(req.Header, apiKey)
 	return req, nil
 }
 
@@ -456,6 +456,14 @@ func prepareImagesUpstreamHeaders(c *gin.Context, targetHost string, contentType
 	headers.Del("Via")
 	headers.Del("Forwarded")
 	headers.Del("Accept-Encoding")
+	// Strip sensitive inbound headers (AxonHub-half.md contract)
+	headers.Del("Authorization")
+	headers.Del("authorization")
+	headers.Del("x-api-key")
+	headers.Del("x-goog-api-key")
+	headers.Del("Cookie")
+	headers.Del("Set-Cookie")
+	headers.Del("Proxy-Authorization")
 	if strings.TrimSpace(contentType) == "" {
 		headers.Del("Content-Type")
 	} else {

@@ -417,6 +417,13 @@ func failedKeyCacheKey(apiType, apiKey string) string {
 
 // backoffDuration 根据失败次数返回对应冷却时间（指数退避，超出档位取最后一档）
 func (cm *ConfigManager) backoffDuration(failureCount int) time.Duration {
+	if len(cm.keyBackoffDurations) == 0 {
+		// fallback to legacy keyRecoveryTime field (used by test-only ConfigManager instances)
+		if cm.keyRecoveryTime > 0 {
+			return cm.keyRecoveryTime
+		}
+		return 5 * time.Minute
+	}
 	idx := failureCount - 1
 	if idx < 0 {
 		idx = 0
