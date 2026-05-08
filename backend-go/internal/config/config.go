@@ -63,6 +63,10 @@ type UpstreamConfig struct {
 	ModelsHealthCheckIntervalMinutes *int  `json:"modelsHealthCheckIntervalMinutes,omitempty"`
 	// 渠道级故障规则：按状态码/错误码/关键词命中后执行冷却或拉黑
 	FailoverRules []FailoverRule `json:"failoverRules,omitempty"`
+	// 非标准角色规范化（主要用于 OpenAI/Gemini 渠道）
+	NormalizeNonstandardChatRoles bool  `json:"normalizeNonstandardChatRoles,omitempty"`
+	// metadata.user_id 规范化（默认 true）
+	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"`
 }
 
 // DisabledKeyInfo 被拉黑的 API Key 信息
@@ -113,6 +117,14 @@ func (u *UpstreamConfig) IsModelsHealthCheckEnabled() bool {
 		return false
 	}
 	return *u.ModelsHealthCheckEnabled
+}
+
+// IsNormalizeMetadataUserIDEnabled 检查 metadata.user_id 规范化是否启用（默认 true）
+func (u *UpstreamConfig) IsNormalizeMetadataUserIDEnabled() bool {
+	if u.NormalizeMetadataUserID == nil {
+		return true
+	}
+	return *u.NormalizeMetadataUserID
 }
 
 func (u *UpstreamConfig) GetModelsHealthCheckIntervalMinutes() int {
@@ -322,6 +334,8 @@ type UpstreamUpdate struct {
 	ModelsHealthCheckEnabled         *bool          `json:"modelsHealthCheckEnabled"`
 	ModelsHealthCheckIntervalMinutes *int           `json:"modelsHealthCheckIntervalMinutes"`
 	FailoverRules                    []FailoverRule `json:"failoverRules"`
+	NormalizeNonstandardChatRoles    *bool          `json:"normalizeNonstandardChatRoles"`
+	NormalizeMetadataUserID          *bool          `json:"normalizeMetadataUserId"`
 	// Gemini 特定配置
 	InjectDummyThoughtSignature *bool `json:"injectDummyThoughtSignature"`
 	StripThoughtSignature       *bool `json:"stripThoughtSignature"`
@@ -389,6 +403,8 @@ type ConfigManager struct {
 	watcher             *fsnotify.Watcher
 	failedKeysCache     map[string]*FailedKey
 	keyBackoffDurations []time.Duration    // 各档冷却时间
+	keyRecoveryTime     time.Duration      // 兼容旧初始化字段
+	maxFailureCount     int                // 兼容旧初始化字段
 	roundRobinCounters  map[string]*uint64 // upstream.Name → 轮询计数器
 	stopChan            chan struct{}      // 用于通知 goroutine 停止
 	closeOnce           sync.Once          // 确保 Close 只执行一次

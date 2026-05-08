@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
-	"github.com/BenedictKing/ccx/internal/handlers/common"
 	"github.com/BenedictKing/ccx/internal/httpclient"
 	"github.com/BenedictKing/ccx/internal/middleware"
 	"github.com/BenedictKing/ccx/internal/scheduler"
@@ -23,12 +22,23 @@ import (
 
 const modelsRequestTimeout = 30 * time.Second
 
-var errNoManualModelsChannel = errors.New("no manual models channel")
+var errNoChannelWithDisabledKeys = errors.New("no channel with disabled keys")
 
-type ModelsResponse = common.ModelsResponse
-type ModelEntry = common.ModelEntry
+// ModelsResponse OpenAI 兼容的 models 响应格式
+type ModelsResponse struct {
+	Object string       `json:"object"`
+	Data   []ModelEntry `json:"data"`
+}
 
-// ModelsHandler 处理 /v1/models 请求，从 Messages 和 Responses 渠道获取并合并模型列表
+// ModelEntry 单个模型条目
+type ModelEntry struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}
+
+// ModelsHandler 处理 /v1/models 请求，从 Messages、Responses 和 Chat 渠道获取并合并模型列表
 func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		middleware.ProxyAuthMiddleware(envCfg)(c)
@@ -36,12 +46,11 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 			return
 		}
 
-		// 并行从两种渠道获取模型列表
-		messagesModels := fetchModelsFromChannels(c, cfgManager, channelScheduler, false)
-		responsesModels := fetchModelsFromChannels(c, cfgManager, channelScheduler, true)
+		messagesModels := fetchModelsFromChannels(c, cfgManager, channelScheduler, scheduler.ChannelKindMessages)
+		responsesModels := fetchModelsFromChannels(c, cfgManager, channelScheduler, scheduler.ChannelKindResponses)
+		chatModels := fetchModelsFromChannels(c, cfgManager, channelScheduler, scheduler.ChannelKindChat)
 
-		// 合并去重
-		mergedModels := mergeModels(messagesModels, responsesModels)
+		mergedModels := mergeModels(messagesModels, responsesModels, chatModels)
 
 		if len(mergedModels) == 0 {
 			c.JSON(http.StatusNotFound, gin.H{
@@ -58,8 +67,8 @@ func ModelsHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigManager, c
 			Data:   mergedModels,
 		}
 
-		log.Printf("[Models] 合并完成: messages=%d, responses=%d, merged=%d",
-			len(messagesModels), len(responsesModels), len(mergedModels))
+		log.Printf("[Models] 合并完成: messages=%d, responses=%d, chat=%d, merged=%d",
+			len(messagesModels), len(responsesModels), len(chatModels), len(mergedModels))
 
 		c.JSON(http.StatusOK, response)
 	}
@@ -84,16 +93,15 @@ func ModelsDetailHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigMana
 			return
 		}
 
-		// 先尝试 Messages 渠道
-		if body, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "/"+modelID, false); ok {
-			c.Data(http.StatusOK, "application/json", body)
-			return
-		}
-
-		// 再尝试 Responses 渠道
-		if body, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "/"+modelID, true); ok {
-			c.Data(http.StatusOK, "application/json", body)
-			return
+		for _, kind := range []scheduler.ChannelKind{
+			scheduler.ChannelKindMessages,
+			scheduler.ChannelKindResponses,
+			scheduler.ChannelKindChat,
+		} {
+			if body, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "/"+modelID, kind); ok {
+				c.Data(http.StatusOK, "application/json", body)
+				return
+			}
 		}
 
 		c.JSON(http.StatusNotFound, gin.H{
@@ -106,43 +114,32 @@ func ModelsDetailHandler(envCfg *config.EnvConfig, cfgManager *config.ConfigMana
 }
 
 // fetchModelsFromChannels 从指定类型的渠道获取模型列表
-func fetchModelsFromChannels(c *gin.Context, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, isResponses bool) []ModelEntry {
-	body, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "", isResponses)
+func fetchModelsFromChannels(c *gin.Context, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, kind scheduler.ChannelKind) []ModelEntry {
+	body, ok := tryModelsRequest(c, cfgManager, channelScheduler, "GET", "", kind)
 	if !ok {
 		return nil
 	}
 
 	var resp ModelsResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		channelType := "Messages"
-		if isResponses {
-			channelType = "Responses"
-		}
-		log.Printf("[%s-Models] 解析渠道响应失败: %v", channelType, err)
+		log.Printf("[%s-Models] 解析渠道响应失败: %v", channelKindLabel(kind), err)
 		return nil
 	}
 
 	return resp.Data
 }
 
-// mergeModels 合并两个模型列表并去重（按 ID）
-func mergeModels(models1, models2 []ModelEntry) []ModelEntry {
+// mergeModels 合并多个模型列表并去重（按 ID）
+func mergeModels(modelLists ...[]ModelEntry) []ModelEntry {
 	seen := make(map[string]bool)
 	var result []ModelEntry
 
-	// 先添加第一个列表的模型
-	for _, m := range models1 {
-		if !seen[m.ID] {
-			seen[m.ID] = true
-			result = append(result, m)
-		}
-	}
-
-	// 再添加第二个列表中不重复的模型
-	for _, m := range models2 {
-		if !seen[m.ID] {
-			seen[m.ID] = true
-			result = append(result, m)
+	for _, models := range modelLists {
+		for _, m := range models {
+			if !seen[m.ID] {
+				seen[m.ID] = true
+				result = append(result, m)
+			}
 		}
 	}
 
@@ -150,72 +147,36 @@ func mergeModels(models1, models2 []ModelEntry) []ModelEntry {
 }
 
 // tryModelsRequest 使用调度器选择渠道，按故障转移顺序尝试请求 models 端点
-func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, method, suffix string, isResponses bool) ([]byte, bool) {
+func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, method, suffix string, kind scheduler.ChannelKind) ([]byte, bool) {
 	failedChannels := make(map[int]bool)
 	maxChannelRetries := 10 // 最多尝试 10 个渠道
-
-	channelType := "Messages"
-	if isResponses {
-		channelType = "Responses"
-	}
+	channelType := channelKindLabel(kind)
 
 	for attempt := 0; attempt < maxChannelRetries; attempt++ {
-		kind := scheduler.ChannelKindMessages
-		if isResponses {
-			kind = scheduler.ChannelKindResponses
-		}
-
 		selection, err := channelScheduler.SelectChannel(c.Request.Context(), "", failedChannels, kind, "", c.Param("routePrefix"))
 		if err != nil {
-			manualSelection, manualErr := selectManualModelsChannel(cfgManager, failedChannels, kind, c.Param("routePrefix"))
-			if manualErr == nil {
-				selection = manualSelection
-				log.Printf("[%s-Models] 回退到手工模型列表渠道: channel=%s, reason=%s", channelType, selection.Upstream.Name, selection.Reason)
-			} else {
+			fallbackSelection, fallbackErr := selectChannelWithDisabledKeys(cfgManager, failedChannels, kind, c.Param("routePrefix"))
+			if fallbackErr != nil {
 				log.Printf("[%s-Models] 渠道无可用: %v", channelType, err)
 				break
 			}
+			selection = fallbackSelection
+			log.Printf("[%s-Models] 活跃渠道不可用，回退到挂起渠道查询模型: channel=%s, reason=%s", channelType, selection.Upstream.Name, selection.Reason)
 		}
 
 		upstream := selection.Upstream
-		if upstream.UsesManualModels() {
-			if suffix == "" {
-				body, err := common.MarshalManualModelsResponse(upstream.ManualModels)
-				if err != nil {
-					log.Printf("[%s-Models] 构造手工模型列表失败: channel=%s, error=%v", channelType, upstream.Name, err)
-					failedChannels[selection.ChannelIndex] = true
-					continue
-				}
-				log.Printf("[%s-Models] 返回手工模型列表: channel=%s, count=%d, reason=%s", channelType, upstream.Name, len(upstream.ManualModels), selection.Reason)
-				return body, true
-			}
-
-			modelID := strings.TrimPrefix(suffix, "/")
-			entry, ok := common.FindManualModelEntry(upstream.ManualModels, modelID)
-			if !ok {
-				log.Printf("[%s-Models] 手工模型列表未命中模型: channel=%s, model=%s", channelType, upstream.Name, modelID)
-				failedChannels[selection.ChannelIndex] = true
-				continue
-			}
-
-			body, err := json.Marshal(entry)
-			if err != nil {
-				log.Printf("[%s-Models] 构造手工模型详情失败: channel=%s, model=%s, error=%v", channelType, upstream.Name, modelID, err)
-				failedChannels[selection.ChannelIndex] = true
-				continue
-			}
-			log.Printf("[%s-Models] 返回手工模型详情: channel=%s, model=%s, reason=%s", channelType, upstream.Name, modelID, selection.Reason)
-			return body, true
-		}
 
 		url := buildModelsURL(upstream.BaseURL) + suffix
-		client := httpclient.GetManager().GetStandardClient(modelsRequestTimeout, upstream.InsecureSkipVerify)
+		client := httpclient.GetManager().GetStandardClient(modelsRequestTimeout, upstream.InsecureSkipVerify, upstream.ProxyURL)
 
-		apiKey, _, err := cfgManager.GetAdminAPIKey(upstream, nil, channelType)
+		apiKey, usedDisabledFallback, err := cfgManager.GetAdminAPIKey(upstream, nil, channelType)
 		if err != nil {
 			log.Printf("[%s-Models] 获取 API Key 失败: channel=%s, error=%v", channelType, upstream.Name, err)
 			failedChannels[selection.ChannelIndex] = true
 			continue
+		}
+		if usedDisabledFallback {
+			log.Printf("[%s-Models] 使用已拉黑密钥查询模型列表: channel=%s, key=%s", channelType, upstream.Name, utils.MaskAPIKey(apiKey))
 		}
 
 		req, err := http.NewRequestWithContext(c.Request.Context(), method, url, nil)
@@ -226,6 +187,7 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 		}
 		req.Header.Set("Authorization", "Bearer "+apiKey)
 		req.Header.Set("Content-Type", "application/json")
+		utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -237,7 +199,7 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 
 		if resp.StatusCode == http.StatusOK {
 			body, err := io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
+			resp.Body.Close()
 			if err != nil {
 				log.Printf("[%s-Models] 读取响应失败: channel=%s, error=%v", channelType, upstream.Name, err)
 				failedChannels[selection.ChannelIndex] = true
@@ -250,7 +212,7 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 
 		log.Printf("[%s-Models] 上游返回非 200: channel=%s, key=%s, status=%d, url=%s",
 			channelType, upstream.Name, utils.MaskAPIKey(apiKey), resp.StatusCode, url)
-		_ = resp.Body.Close()
+		resp.Body.Close()
 		failedChannels[selection.ChannelIndex] = true
 	}
 
@@ -258,7 +220,18 @@ func tryModelsRequest(c *gin.Context, cfgManager *config.ConfigManager, channelS
 	return nil, false
 }
 
-func selectManualModelsChannel(cfgManager *config.ConfigManager, failedChannels map[int]bool, kind scheduler.ChannelKind, routePrefix string) (*scheduler.SelectionResult, error) {
+func channelKindLabel(kind scheduler.ChannelKind) string {
+	switch kind {
+	case scheduler.ChannelKindResponses:
+		return "Responses"
+	case scheduler.ChannelKindChat:
+		return "Chat"
+	default:
+		return "Messages"
+	}
+}
+
+func selectChannelWithDisabledKeys(cfgManager *config.ConfigManager, failedChannels map[int]bool, kind scheduler.ChannelKind, routePrefix string) (*scheduler.SelectionResult, error) {
 	cfg := cfgManager.GetConfig()
 
 	var upstreams []config.UpstreamConfig
@@ -269,6 +242,8 @@ func selectManualModelsChannel(cfgManager *config.ConfigManager, failedChannels 
 		upstreams = cfg.GeminiUpstream
 	case scheduler.ChannelKindChat:
 		upstreams = cfg.ChatUpstream
+	case scheduler.ChannelKindImages:
+		upstreams = cfg.ImagesUpstream
 	default:
 		upstreams = cfg.Upstream
 	}
@@ -281,10 +256,13 @@ func selectManualModelsChannel(cfgManager *config.ConfigManager, failedChannels 
 
 	candidates := make([]candidate, 0)
 	for i, upstream := range upstreams {
-		if failedChannels[i] || !upstream.UsesManualModels() {
+		if failedChannels[i] {
 			continue
 		}
 		if config.GetChannelStatus(&upstream) == "disabled" {
+			continue
+		}
+		if len(upstream.APIKeys) > 0 || len(upstream.DisabledAPIKeys) == 0 {
 			continue
 		}
 		if routePrefix != "" {
@@ -302,7 +280,7 @@ func selectManualModelsChannel(cfgManager *config.ConfigManager, failedChannels 
 	}
 
 	if len(candidates) == 0 {
-		return nil, errNoManualModelsChannel
+		return nil, errNoChannelWithDisabledKeys
 	}
 
 	sort.Slice(candidates, func(i, j int) bool {
@@ -314,7 +292,7 @@ func selectManualModelsChannel(cfgManager *config.ConfigManager, failedChannels 
 	return &scheduler.SelectionResult{
 		Upstream:     &upstreamCopy,
 		ChannelIndex: selected.index,
-		Reason:       "manual_models_fallback",
+		Reason:       "disabled_key_fallback",
 	}, nil
 }
 

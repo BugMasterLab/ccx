@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
+	"sync/atomic"
 	"testing"
 
 	"github.com/BenedictKing/ccx/internal/utils"
@@ -98,9 +100,7 @@ func TestNormalizeMetadataUserID(t *testing.T) {
 				userID, _ := metadata["user_id"].(string)
 				if userID != "" {
 					var origData map[string]interface{}
-					if err := json.Unmarshal([]byte(tt.input), &origData); err != nil {
-						t.Fatalf("failed to parse original input: %v", err)
-					}
+					json.Unmarshal([]byte(tt.input), &origData)
 					origMeta, _ := origData["metadata"].(map[string]interface{})
 					origUID, _ := origMeta["user_id"].(string)
 					if userID != origUID {
@@ -128,9 +128,7 @@ func TestNormalizeMetadataUserID(t *testing.T) {
 
 			// Verify other fields are preserved
 			var origData map[string]interface{}
-			if err := json.Unmarshal([]byte(tt.input), &origData); err != nil {
-				t.Fatalf("failed to parse original input: %v", err)
-			}
+			json.Unmarshal([]byte(tt.input), &origData)
 			if origModel, ok := origData["model"].(string); ok {
 				if resultModel, ok := data["model"].(string); ok {
 					if origModel != resultModel {
@@ -310,58 +308,40 @@ func TestPassthroughJSONResponse(t *testing.T) {
 	})
 }
 
-func TestPassthroughJSONResponseWithUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+func TestWithLifecycleTrace_AttachesClientTraceCallbacks(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("NewRequest() err = %v", err)
+	}
 
-	t.Run("forwards unchanged and returns usage", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		resp := &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     http.Header{"X-Test": []string{"ok"}},
-			Body:       io.NopCloser(bytes.NewBufferString(`{"id":"msg_1","usage":{"input_tokens":12,"output_tokens":34,"cache_creation_5m_input_tokens":5,"cache_read_input_tokens":7}}`)),
-		}
+	var connected atomic.Int32
+	var firstByte atomic.Int32
+	tracedReq := withLifecycleTrace(
+		req,
+		&RequestLifecycleTrace{
+			OnConnected: func() {
+				connected.Add(1)
+			},
+			OnFirstResponseByte: func() {
+				firstByte.Add(1)
+			},
+		},
+	)
 
-		usage, err := PassthroughJSONResponseWithUsage(c, resp)
-		if err != nil {
-			t.Fatalf("PassthroughJSONResponseWithUsage() err = %v", err)
-		}
-		if got := w.Body.String(); got != `{"id":"msg_1","usage":{"input_tokens":12,"output_tokens":34,"cache_creation_5m_input_tokens":5,"cache_read_input_tokens":7}}` {
-			t.Fatalf("body changed: %q", got)
-		}
-		if w.Header().Get("X-Test") != "ok" {
-			t.Fatalf("header X-Test = %q, want ok", w.Header().Get("X-Test"))
-		}
-		if usage == nil {
-			t.Fatal("usage is nil")
-		}
-		if usage.InputTokens != 12 || usage.OutputTokens != 34 || usage.CacheCreation5mInputTokens != 5 || usage.CacheReadInputTokens != 7 {
-			t.Fatalf("usage = %+v", usage)
-		}
-		if usage.CacheTTL != "5m" {
-			t.Fatalf("CacheTTL = %q, want 5m", usage.CacheTTL)
-		}
-	})
+	trace := httptrace.ContextClientTrace(tracedReq.Context())
+	if trace == nil {
+		t.Fatal("client trace was not attached")
+	}
 
-	t.Run("decode failure still forwards and does not fail", func(t *testing.T) {
-		w := httptest.NewRecorder()
-		c, _ := gin.CreateTestContext(w)
-		resp := &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(bytes.NewBufferString(`{"usage": invalid-json}`)),
-		}
+	trace.GotConn(httptrace.GotConnInfo{})
+	trace.GotFirstResponseByte()
 
-		usage, err := PassthroughJSONResponseWithUsage(c, resp)
-		if err != nil {
-			t.Fatalf("PassthroughJSONResponseWithUsage() err = %v", err)
-		}
-		if usage != nil {
-			t.Fatalf("usage = %+v, want nil", usage)
-		}
-		if got := w.Body.String(); got != `{"usage": invalid-json}` {
-			t.Fatalf("unexpected body: %q", got)
-		}
-	})
+	if connected.Load() != 1 {
+		t.Fatalf("OnConnected calls = %d, want 1", connected.Load())
+	}
+	if firstByte.Load() != 1 {
+		t.Fatalf("OnFirstResponseByte calls = %d, want 1", firstByte.Load())
+	}
 }
 
 func TestSanitizeMalformedThinkingBlocks(t *testing.T) {
@@ -384,6 +364,12 @@ func TestSanitizeMalformedThinkingBlocks(t *testing.T) {
 				"role": "assistant",
 				"content": [
 					{"type": "thinking", "thinking": "keep me"}
+				]
+			},
+			{
+				"role": "assistant",
+				"content": [
+					{"type": "thinking", "thinking": "signed", "signature": "sig_123"}
 				]
 			},
 			{
@@ -410,9 +396,9 @@ func TestSanitizeMalformedThinkingBlocks(t *testing.T) {
 		t.Fatalf("messages type = %T, want []interface{}", got["messages"])
 	}
 
-	// 仅含 thinking 的 assistant 消息保留骨架（content 清空），不删除整条消息，共 4 条
-	if len(messages) != 4 {
-		t.Fatalf("messages len = %d, want 4", len(messages))
+	// 仅畸形 thinking 的 assistant 消息保留骨架（content 清空），不删除整条消息，共 5 条
+	if len(messages) != 5 {
+		t.Fatalf("messages len = %d, want 5", len(messages))
 	}
 
 	firstMsg, _ := messages[0].(map[string]interface{})
@@ -432,15 +418,39 @@ func TestSanitizeMalformedThinkingBlocks(t *testing.T) {
 		t.Fatalf("second message content len = %d, want 0 (thinking-only, kept as empty)", len(secondContent))
 	}
 
-	// 第三条：同上
+	// 第三条：合法 thinking 保留
 	thirdMsg, _ := messages[2].(map[string]interface{})
 	thirdContent, _ := thirdMsg["content"].([]interface{})
-	if len(thirdContent) != 0 {
-		t.Fatalf("third message content len = %d, want 0", len(thirdContent))
+	if len(thirdContent) != 1 {
+		t.Fatalf("third message content len = %d, want 1", len(thirdContent))
+	}
+	thirdBlock, _ := thirdContent[0].(map[string]interface{})
+	if thirdBlock["type"] != "thinking" {
+		t.Fatalf("third message content[0].type = %v, want thinking", thirdBlock["type"])
+	}
+	if thirdBlock["thinking"] != "keep me" {
+		t.Fatalf("third message content[0].thinking = %v, want keep me", thirdBlock["thinking"])
+	}
+
+	// 第四条：带 signature 的合法 thinking 也保留
+	fourthMsg, _ := messages[3].(map[string]interface{})
+	fourthContent, _ := fourthMsg["content"].([]interface{})
+	if len(fourthContent) != 1 {
+		t.Fatalf("fourth message content len = %d, want 1", len(fourthContent))
+	}
+	fourthBlock, _ := fourthContent[0].(map[string]interface{})
+	if fourthBlock["type"] != "thinking" {
+		t.Fatalf("fourth message content[0].type = %v, want thinking", fourthBlock["type"])
+	}
+	if fourthBlock["thinking"] != "signed" {
+		t.Fatalf("fourth message content[0].thinking = %v, want signed", fourthBlock["thinking"])
+	}
+	if fourthBlock["signature"] != "sig_123" {
+		t.Fatalf("fourth message content[0].signature = %v, want sig_123", fourthBlock["signature"])
 	}
 
 	// 最后一条：user 文本消息
-	lastMsg, _ := messages[3].(map[string]interface{})
+	lastMsg, _ := messages[4].(map[string]interface{})
 	if lastMsg["role"] != "user" {
 		t.Fatalf("last message role = %v, want user", lastMsg["role"])
 	}

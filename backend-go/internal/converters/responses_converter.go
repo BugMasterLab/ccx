@@ -18,14 +18,10 @@ func ResponsesToClaudeMessages(sess *session.Session, newInput interface{}, inst
 	messages := []types.ClaudeMessage{}
 
 	// 1. 处理历史消息
-	for _, item := range sess.Messages {
-		msg, err := responsesItemToClaudeMessage(item)
-		if err != nil {
-			return nil, "", fmt.Errorf("转换历史消息失败: %w", err)
-		}
-		if msg != nil {
-			messages = append(messages, *msg)
-		}
+	var err error
+	messages, err = appendResponsesItemsToClaudeMessages(messages, sess.Messages)
+	if err != nil {
+		return nil, "", fmt.Errorf("转换历史消息失败: %w", err)
 	}
 
 	// 2. 处理新输入（统一在解析阶段完成 legacy tool_* → function_* 归一化）
@@ -49,21 +45,80 @@ func ResponsesToClaudeMessages(sess *session.Session, newInput interface{}, inst
 	}
 
 	// 4. 转换新输入，跳过与被跳过 tool_call 对应的结果项。
+	filteredNewItems := make([]types.ResponsesItem, 0, len(newItems))
 	for _, item := range newItems {
 		if item.Type == "function_call_output" && item.CallID != "" && skippedCallIDs[item.CallID] {
+			continue
+		}
+		filteredNewItems = append(filteredNewItems, item)
+	}
+
+	messages, err = appendResponsesItemsToClaudeMessages(messages, filteredNewItems)
+	if err != nil {
+		return nil, "", fmt.Errorf("转换新消息失败: %w", err)
+	}
+
+	return messages, instructions, nil
+}
+
+func appendResponsesItemsToClaudeMessages(messages []types.ClaudeMessage, items []types.ResponsesItem) ([]types.ClaudeMessage, error) {
+	pendingThinking := []types.ClaudeContent{}
+
+	flushThinking := func() {
+		if len(pendingThinking) == 0 {
+			return
+		}
+		content := append([]types.ClaudeContent(nil), pendingThinking...)
+		messages = append(messages, types.ClaudeMessage{Role: "assistant", Content: content})
+		pendingThinking = nil
+	}
+
+	for _, item := range items {
+		item = types.NormalizeResponsesItem(item)
+		if item.Type == "reasoning" {
+			thinking := extractResponsesReasoningText(item)
+			if thinking != "" {
+				pendingThinking = append(pendingThinking, types.ClaudeContent{Type: "thinking", Thinking: thinking})
+			}
 			continue
 		}
 
 		msg, err := responsesItemToClaudeMessage(item)
 		if err != nil {
-			return nil, "", fmt.Errorf("转换新消息失败: %w", err)
+			return nil, err
 		}
-		if msg != nil {
-			messages = append(messages, *msg)
+		if msg == nil {
+			continue
 		}
+
+		if len(pendingThinking) > 0 {
+			if msg.Role == "assistant" {
+				switch content := msg.Content.(type) {
+				case []types.ClaudeContent:
+					merged := append([]types.ClaudeContent(nil), pendingThinking...)
+					merged = append(merged, content...)
+					msg.Content = merged
+					pendingThinking = nil
+				case string:
+					merged := append([]types.ClaudeContent(nil), pendingThinking...)
+					if content != "" {
+						merged = append(merged, types.ClaudeContent{Type: "text", Text: content})
+					}
+					msg.Content = merged
+					pendingThinking = nil
+				default:
+					flushThinking()
+				}
+			} else {
+				flushThinking()
+			}
+		}
+
+		messages = append(messages, *msg)
 	}
 
-	return messages, instructions, nil
+	flushThinking()
+	return messages, nil
 }
 
 // responsesItemToClaudeMessage 单个 ResponsesItem 转换为 Claude Message
@@ -78,6 +133,19 @@ func responsesItemToClaudeMessage(item types.ResponsesItem) (*types.ClaudeMessag
 	}
 
 	switch item.Type {
+	case "reasoning":
+		thinking := extractResponsesReasoningText(item)
+		if thinking == "" {
+			return nil, nil
+		}
+		return &types.ClaudeMessage{
+			Role: "assistant",
+			Content: []types.ClaudeContent{{
+				Type:     "thinking",
+				Thinking: thinking,
+			}},
+		}, nil
+
 	case "message":
 		// 新格式：嵌套结构（type=message, role=user/assistant, content=[]ContentBlock）
 		role, contentText := resolveResponsesTextItem(item)
@@ -166,6 +234,15 @@ func ClaudeResponseToResponses(claudeResp map[string]interface{}, sessionID stri
 
 		blockType, _ := contentBlock["type"].(string)
 		switch blockType {
+		case "thinking":
+			thinking, _ := contentBlock["thinking"].(string)
+			if thinking != "" {
+				output = append(output, types.ResponsesItem{
+					Type:    "reasoning",
+					Status:  "completed",
+					Summary: []interface{}{map[string]interface{}{"type": "summary_text", "text": thinking}},
+				})
+			}
 		case "text":
 			text, _ := contentBlock["text"].(string)
 			output = append(output, types.ResponsesItem{
@@ -228,12 +305,7 @@ func ResponsesToOpenAIChatMessages(sess *session.Session, newInput interface{}, 
 	}
 
 	// 2. 处理历史消息
-	for _, item := range sess.Messages {
-		msg := responsesItemToOpenAIMessage(item)
-		if msg != nil {
-			messages = append(messages, msg)
-		}
-	}
+	messages = appendResponsesItemsToOpenAIMessages(messages, sess.Messages)
 
 	// 3. 处理新输入
 	newItems, err := parseResponsesInput(newInput)
@@ -241,14 +313,212 @@ func ResponsesToOpenAIChatMessages(sess *session.Session, newInput interface{}, 
 		return nil, err
 	}
 
-	for _, item := range newItems {
-		msg := responsesItemToOpenAIMessage(item)
-		if msg != nil {
-			messages = append(messages, msg)
+	messages = appendResponsesItemsToOpenAIMessages(messages, newItems)
+
+	return normalizeOpenAIToolCallMessageOrder(messages), nil
+}
+
+func normalizeOpenAIToolCallMessageOrder(messages []map[string]interface{}) []map[string]interface{} {
+	normalized := append([]map[string]interface{}(nil), messages...)
+
+	for i := 0; i < len(normalized); i++ {
+		pendingIDs := openAIToolCallIDs(normalized[i])
+		if len(pendingIDs) == 0 {
+			continue
+		}
+
+		toolMessages := make([]map[string]interface{}, 0, len(pendingIDs))
+		deferredMessages := make([]map[string]interface{}, 0)
+		end := i
+		for j := i + 1; j < len(normalized) && len(pendingIDs) > 0; j++ {
+			msg := normalized[j]
+			if id := openAIToolMessageID(msg); id != "" {
+				if _, ok := pendingIDs[id]; ok {
+					toolMessages = append(toolMessages, msg)
+					delete(pendingIDs, id)
+				} else {
+					deferredMessages = append(deferredMessages, msg)
+				}
+			} else {
+				deferredMessages = append(deferredMessages, msg)
+			}
+			end = j
+		}
+
+		if len(pendingIDs) > 0 || len(deferredMessages) == 0 {
+			continue
+		}
+
+		reordered := make([]map[string]interface{}, 0, len(normalized))
+		reordered = append(reordered, normalized[:i+1]...)
+		reordered = append(reordered, toolMessages...)
+		reordered = append(reordered, deferredMessages...)
+		reordered = append(reordered, normalized[end+1:]...)
+		normalized = reordered
+		i += len(toolMessages)
+	}
+
+	return normalized
+}
+
+func openAIToolCallIDs(msg map[string]interface{}) map[string]struct{} {
+	if role, _ := msg["role"].(string); role != "assistant" {
+		return nil
+	}
+
+	ids := map[string]struct{}{}
+	switch toolCalls := msg["tool_calls"].(type) {
+	case []map[string]interface{}:
+		for _, toolCall := range toolCalls {
+			if id, _ := toolCall["id"].(string); id != "" {
+				ids[id] = struct{}{}
+			}
+		}
+	case []interface{}:
+		for _, rawToolCall := range toolCalls {
+			toolCall, ok := rawToolCall.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if id, _ := toolCall["id"].(string); id != "" {
+				ids[id] = struct{}{}
+			}
+		}
+	case []types.OpenAIToolCall:
+		for _, toolCall := range toolCalls {
+			if toolCall.ID != "" {
+				ids[toolCall.ID] = struct{}{}
+			}
 		}
 	}
 
-	return messages, nil
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
+func openAIToolMessageID(msg map[string]interface{}) string {
+	if role, _ := msg["role"].(string); role != "tool" {
+		return ""
+	}
+	id, _ := msg["tool_call_id"].(string)
+	return id
+}
+
+func appendResponsesItemsToOpenAIMessages(messages []map[string]interface{}, items []types.ResponsesItem) []map[string]interface{} {
+	var pendingReasoning []string
+	var pendingToolCalls []map[string]interface{}
+
+	flushReasoning := func() {
+		if len(pendingReasoning) == 0 {
+			return
+		}
+		messages = append(messages, map[string]interface{}{
+			"role":              "assistant",
+			"content":           nil,
+			"reasoning_content": strings.Join(pendingReasoning, "\n"),
+		})
+		pendingReasoning = nil
+	}
+
+	flushToolCalls := func() {
+		if len(pendingToolCalls) == 0 {
+			return
+		}
+		// 若最后一条消息是 assistant，将 tool_calls 合并进去（去重）
+		// 避免产生连续 assistant 消息（DeepSeek 等上游不允许）
+		if len(messages) > 0 {
+			last := messages[len(messages)-1]
+			if role, _ := last["role"].(string); role == "assistant" {
+				if existing, hasTC := last["tool_calls"].([]map[string]interface{}); hasTC {
+					// 已有 tool_calls，合并新 tool_calls（按 id 去重）
+					last["tool_calls"] = mergeToolCalls(existing, pendingToolCalls)
+				} else {
+					last["tool_calls"] = pendingToolCalls
+				}
+				pendingToolCalls = nil
+				return
+			}
+		}
+		msg := map[string]interface{}{
+			"role":       "assistant",
+			"tool_calls": pendingToolCalls,
+		}
+		if len(pendingReasoning) > 0 {
+			msg["reasoning_content"] = strings.Join(pendingReasoning, "\n")
+			msg["content"] = nil
+			pendingReasoning = nil
+		}
+		messages = append(messages, msg)
+		pendingToolCalls = nil
+	}
+
+	for _, item := range items {
+		item = types.NormalizeResponsesItem(item)
+		if item.Type == "reasoning" {
+			reasoning := extractResponsesReasoningText(item)
+			if reasoning != "" {
+				pendingReasoning = append(pendingReasoning, reasoning)
+			}
+			continue
+		}
+
+		msg := responsesItemToOpenAIMessage(item)
+		if msg == nil {
+			continue
+		}
+
+		// function_call 产生的 assistant+tool_calls 消息需要合并
+		if role, _ := msg["role"].(string); role == "assistant" {
+			if tc, ok := msg["tool_calls"].([]map[string]interface{}); ok && len(tc) > 0 {
+				pendingToolCalls = append(pendingToolCalls, tc...)
+				continue
+			}
+		}
+
+		// 非 function_call 消息：先刷出待处理的 reasoning 和 tool_calls
+		if len(pendingReasoning) > 0 {
+			role, _ := msg["role"].(string)
+			if role == "assistant" && len(pendingToolCalls) == 0 {
+				msg["reasoning_content"] = strings.Join(pendingReasoning, "\n")
+				if _, ok := msg["content"]; !ok {
+					msg["content"] = nil
+				}
+				pendingReasoning = nil
+			} else {
+				flushToolCalls()
+				flushReasoning()
+			}
+		} else {
+			flushToolCalls()
+		}
+
+		messages = append(messages, msg)
+	}
+
+	flushToolCalls()
+	flushReasoning()
+	return messages
+}
+
+// mergeToolCalls 合并两组 tool_calls，按 id 去重（保留 existing 优先）
+func mergeToolCalls(existing, incoming []map[string]interface{}) []map[string]interface{} {
+	seen := make(map[string]bool, len(existing))
+	for _, tc := range existing {
+		if id, _ := tc["id"].(string); id != "" {
+			seen[id] = true
+		}
+	}
+	for _, tc := range incoming {
+		id, _ := tc["id"].(string)
+		if id == "" || seen[id] {
+			continue
+		}
+		existing = append(existing, tc)
+		seen[id] = true
+	}
+	return existing
 }
 
 // responsesItemToOpenAIMessage 单个 ResponsesItem 转换为 OpenAI Message
@@ -260,6 +530,17 @@ func responsesItemToOpenAIMessage(item types.ResponsesItem) map[string]interface
 	}
 
 	switch item.Type {
+	case "reasoning":
+		reasoning := extractResponsesReasoningText(item)
+		if reasoning == "" {
+			return nil
+		}
+		return map[string]interface{}{
+			"role":              "assistant",
+			"content":           nil,
+			"reasoning_content": reasoning,
+		}
+
 	case "message":
 		// 新格式：嵌套结构
 		role, contentText := resolveResponsesTextItem(item)
@@ -345,6 +626,16 @@ func OpenAIChatResponseToResponses(openaiResp map[string]interface{}, sessionID 
 		choice, ok := choices[0].(map[string]interface{})
 		if ok {
 			message, _ := choice["message"].(map[string]interface{})
+			if reasoning, _ := message["reasoning_content"].(string); reasoning != "" {
+				output = append(output, types.ResponsesItem{
+					Type:   "reasoning",
+					Status: "completed",
+					Summary: []interface{}{map[string]interface{}{
+						"type": "summary_text",
+						"text": reasoning,
+					}},
+				})
+			}
 			content, _ := message["content"].(string)
 			if content != "" {
 				output = append(output, types.ResponsesItem{
@@ -380,6 +671,9 @@ func OpenAIChatResponseToResponses(openaiResp map[string]interface{}, sessionID 
 
 	// 提取 usage（使用统一入口自动检测格式）
 	usage := ExtractUsageMetrics(openaiResp["usage"])
+	if shouldNormalizeOpenAICachedUsageForResponses(openaiResp["usage"]) {
+		normalizeOpenAICachedUsageForResponses(&usage)
+	}
 
 	// 生成 response ID
 	responseID := generateResponseID()
@@ -553,6 +847,56 @@ func calculateClaudeTotalTokensInt(inputTokens, outputTokens, cacheRead, cacheCr
 	return inputTokens + outputTokens + cacheRead + effectiveCacheCreationTokensInt(cacheCreation, cacheCreation5m, cacheCreation1h)
 }
 
+func normalizeInputTokensWithCacheInt(inputTokens, cacheRead, cacheCreation, cacheCreation5m, cacheCreation1h int) int {
+	cacheTokens := cacheRead + effectiveCacheCreationTokensInt(cacheCreation, cacheCreation5m, cacheCreation1h)
+	if cacheTokens <= 0 {
+		return inputTokens
+	}
+	normalized := inputTokens - cacheTokens
+	if normalized < 0 {
+		return 0
+	}
+	return normalized
+}
+
+func normalizeOpenAICachedUsageForResponses(usage *types.ResponsesUsage) {
+	if usage == nil || usage.InputTokensDetails == nil || usage.InputTokensDetails.CachedTokens <= 0 {
+		return
+	}
+	usage.InputTokens = normalizeInputTokensWithCacheInt(usage.InputTokens, usage.InputTokensDetails.CachedTokens, 0, 0, 0)
+	usage.TotalTokens = calculateClaudeTotalTokensInt(usage.InputTokens, usage.OutputTokens, usage.InputTokensDetails.CachedTokens, 0, 0, 0)
+}
+
+func shouldNormalizeOpenAICachedUsageForResponses(usageRaw interface{}) bool {
+	usageMap, ok := usageRaw.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	if details, ok := usageMap["prompt_tokens_details"].(map[string]interface{}); ok {
+		if cached, ok := getIntFromMap(details, "cached_tokens"); ok && cached > 0 {
+			return true
+		}
+	}
+	if _, hasCacheRead := usageMap["cache_read_input_tokens"]; hasCacheRead {
+		return false
+	}
+	if _, hasCacheCreation := usageMap["cache_creation_input_tokens"]; hasCacheCreation {
+		return false
+	}
+	if _, hasCacheCreation5m := usageMap["cache_creation_5m_input_tokens"]; hasCacheCreation5m {
+		return false
+	}
+	if _, hasCacheCreation1h := usageMap["cache_creation_1h_input_tokens"]; hasCacheCreation1h {
+		return false
+	}
+	if details, ok := usageMap["input_tokens_details"].(map[string]interface{}); ok {
+		if cached, ok := getIntFromMap(details, "cached_tokens"); ok && cached > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // parseResponsesUsage 解析 Responses API 的 usage 字段
 // 完整支持 OpenAI Responses API 的详细 usage 结构
 func parseResponsesUsage(usageRaw interface{}) types.ResponsesUsage {
@@ -578,12 +922,6 @@ func parseResponsesUsage(usageRaw interface{}) types.ResponsesUsage {
 		usage.OutputTokens = v
 	}
 
-	if v, ok := getIntFromMap(usageMap, "total_tokens"); ok {
-		usage.TotalTokens = v
-	} else {
-		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
-	}
-
 	// 解析 input_tokens_details（兼容 prompt_tokens_details）
 	inputDetailsRaw := usageMap["input_tokens_details"]
 	if inputDetailsRaw == nil {
@@ -594,6 +932,12 @@ func parseResponsesUsage(usageRaw interface{}) types.ResponsesUsage {
 		if v, ok := getIntFromMap(detailsMap, "cached_tokens"); ok {
 			usage.InputTokensDetails.CachedTokens = v
 		}
+	}
+
+	if v, ok := getIntFromMap(usageMap, "total_tokens"); ok {
+		usage.TotalTokens = v
+	} else {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
 
 	// 解析 output_tokens_details（兼容 completion_tokens_details）
@@ -746,12 +1090,19 @@ func ExtractUsageMetrics(usageRaw interface{}) types.ResponsesUsage {
 		return types.ResponsesUsage{}
 	}
 
-	// 1. 检测 Claude 格式：有 cache_creation_input_tokens 或 cache_read_input_tokens
+	_, hasInputDetails := usageMap["input_tokens_details"]
+	if !hasInputDetails {
+		_, hasInputDetails = usageMap["prompt_tokens_details"]
+	}
+
+	// 1. 检测 Claude 格式：有 cache_creation_input_tokens 或没有 OpenAI details 的 cache_read_input_tokens
 	if _, hasCacheCreation := usageMap["cache_creation_input_tokens"]; hasCacheCreation {
 		return parseClaudeUsage(usageRaw)
 	}
 	if _, hasCacheRead := usageMap["cache_read_input_tokens"]; hasCacheRead {
-		return parseClaudeUsage(usageRaw)
+		if !hasInputDetails {
+			return parseClaudeUsage(usageRaw)
+		}
 	}
 	if _, hasCacheCreation5m := usageMap["cache_creation_5m_input_tokens"]; hasCacheCreation5m {
 		return parseClaudeUsage(usageRaw)

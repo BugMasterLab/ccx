@@ -12,7 +12,7 @@ import (
 // ============== Responses 渠道方法 ==============
 
 // GetCurrentResponsesUpstream 获取当前 Responses 上游配置
-// 优先选择第一个 active 状态的渠道，若无则返回显式错误
+// 优先选择第一个 active 状态的渠道，若无则回退到第一个渠道
 func (cm *ConfigManager) GetCurrentResponsesUpstream() (*UpstreamConfig, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
@@ -21,12 +21,16 @@ func (cm *ConfigManager) GetCurrentResponsesUpstream() (*UpstreamConfig, error) 
 		return nil, fmt.Errorf("未配置任何 Responses 渠道")
 	}
 
-	activeIndex := firstActiveUpstreamIndex(cm.config.ResponsesUpstream)
-	if activeIndex < 0 {
-		return nil, fmt.Errorf("没有可用的 active Responses 渠道")
+	// 优先选择第一个 active 状态的渠道
+	for i := range cm.config.ResponsesUpstream {
+		status := cm.config.ResponsesUpstream[i].Status
+		if status == "" || status == "active" {
+			return &cm.config.ResponsesUpstream[i], nil
+		}
 	}
 
-	return &cm.config.ResponsesUpstream[activeIndex], nil
+	// 没有 active 渠道，回退到第一个渠道
+	return &cm.config.ResponsesUpstream[0], nil
 }
 
 // GetCurrentResponsesUpstreamWithIndex 获取当前 Responses 上游配置及其索引
@@ -38,12 +42,14 @@ func (cm *ConfigManager) GetCurrentResponsesUpstreamWithIndex() (*UpstreamConfig
 		return nil, 0, fmt.Errorf("未配置任何 Responses 渠道")
 	}
 
-	activeIndex := firstActiveUpstreamIndex(cm.config.ResponsesUpstream)
-	if activeIndex < 0 {
-		return nil, -1, fmt.Errorf("没有可用的 active Responses 渠道")
+	for i := range cm.config.ResponsesUpstream {
+		status := cm.config.ResponsesUpstream[i].Status
+		if status == "" || status == "active" {
+			return &cm.config.ResponsesUpstream[i], i, nil
+		}
 	}
 
-	return &cm.config.ResponsesUpstream[activeIndex], activeIndex, nil
+	return &cm.config.ResponsesUpstream[0], 0, nil
 }
 
 // AddResponsesUpstream 添加 Responses 上游
@@ -63,12 +69,12 @@ func (cm *ConfigManager) AddResponsesUpstream(upstream UpstreamConfig) error {
 		upstream.Status = "active"
 	}
 
+	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, "responses")
+
 	// 去重 API Keys 和 Base URLs
 	upstream.APIKeys = deduplicateStrings(upstream.APIKeys)
 	upstream.BaseURL = utils.CanonicalBaseURL(upstream.BaseURL, upstream.ServiceType)
 	upstream.BaseURLs = deduplicateBaseURLs(upstream.BaseURLs, upstream.ServiceType)
-	upstream.NormalizeModelsHealthCheckOptions()
-	upstream.NormalizeModelsResponseMode()
 
 	cm.config.ResponsesUpstream = append(cm.config.ResponsesUpstream, upstream)
 
@@ -91,21 +97,17 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 	}
 
 	upstream := &cm.config.ResponsesUpstream[index]
+	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, "responses")
 	serviceType := upstream.ServiceType
 	if updates.ServiceType != nil {
-		serviceType = *updates.ServiceType
+		serviceType = normalizeUpstreamServiceType(*updates.ServiceType, "responses")
 	}
 
 	if updates.Name != nil {
-		if err := validateUniqueUpstreamName(cm.config.ResponsesUpstream, index, *updates.Name); err != nil {
-			return false, err
-		}
 		upstream.Name = *updates.Name
 	}
 	if updates.BaseURL != nil {
 		upstream.BaseURL = utils.CanonicalBaseURL(*updates.BaseURL, serviceType)
-		// 当 BaseURL 被更新且 BaseURLs 未被显式设置时，清空 BaseURLs 保持一致性
-		// 避免出现 baseUrl 和 baseUrls[0] 不一致的情况
 		if updates.BaseURLs == nil {
 			upstream.BaseURLs = nil
 		}
@@ -123,16 +125,13 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 		upstream.Website = *updates.Website
 	}
 	if updates.APIKeys != nil {
-		// 记录被移除的 Key 到历史列表（用于统计聚合）
 		newKeys := make(map[string]bool)
 		for _, key := range updates.APIKeys {
 			newKeys[key] = true
 		}
 
-		// 找出被移除的 Key（在旧列表中但不在新列表中）
 		for _, key := range upstream.APIKeys {
 			if !newKeys[key] {
-				// 检查是否已在历史列表中
 				alreadyInHistory := false
 				for _, hk := range upstream.HistoricalAPIKeys {
 					if hk == key {
@@ -147,7 +146,6 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 			}
 		}
 
-		// 如果新 Key 在历史列表中，从历史列表移除（换回来了）
 		var newHistoricalKeys []string
 		for _, hk := range upstream.HistoricalAPIKeys {
 			if !newKeys[hk] {
@@ -158,12 +156,10 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 		}
 		upstream.HistoricalAPIKeys = newHistoricalKeys
 
-		// 只有单 key 场景且 key 被更换时，才自动激活并重置熔断
-		if len(upstream.APIKeys) == 1 && len(updates.APIKeys) == 1 &&
-			upstream.APIKeys[0] != updates.APIKeys[0] {
+		wasSuspended := upstream.Status == "suspended"
+		if applySingleKeyReplacementTransition(upstream, updates.APIKeys) {
 			shouldResetMetrics = true
-			if upstream.Status == "suspended" {
-				upstream.Status = "active"
+			if wasSuspended {
 				log.Printf("[Config-Upstream] Responses 渠道 [%d] %s 已从暂停状态自动激活（单 key 更换）", index, upstream.Name)
 			}
 		}
@@ -180,6 +176,9 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 	}
 	if updates.FastMode != nil {
 		upstream.FastMode = *updates.FastMode
+	}
+	if updates.NormalizeNonstandardChatRoles != nil {
+		upstream.NormalizeNonstandardChatRoles = *updates.NormalizeNonstandardChatRoles
 	}
 	if updates.InsecureSkipVerify != nil {
 		upstream.InsecureSkipVerify = *updates.InsecureSkipVerify
@@ -200,23 +199,9 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 		v := *updates.AutoBlacklistBalance
 		upstream.AutoBlacklistBalance = &v
 	}
-	if updates.KeyAffinityEnabled != nil {
-		v := *updates.KeyAffinityEnabled
-		upstream.KeyAffinityEnabled = &v
-	}
-	if updates.ModelsHealthCheckEnabled != nil {
-		v := *updates.ModelsHealthCheckEnabled
-		upstream.ModelsHealthCheckEnabled = &v
-	}
-	if updates.ModelsHealthCheckIntervalMinutes != nil {
-		v := *updates.ModelsHealthCheckIntervalMinutes
-		if v <= 0 {
-			v = 60
-		}
-		upstream.ModelsHealthCheckIntervalMinutes = &v
-	}
-	if updates.FailoverRules != nil {
-		upstream.FailoverRules = CloneFailoverRules(updates.FailoverRules)
+	if updates.NormalizeMetadataUserID != nil {
+		v := *updates.NormalizeMetadataUserID
+		upstream.NormalizeMetadataUserID = &v
 	}
 	if updates.CustomHeaders != nil {
 		upstream.CustomHeaders = updates.CustomHeaders
@@ -227,17 +212,9 @@ func (cm *ConfigManager) UpdateResponsesUpstream(index int, updates UpstreamUpda
 	if updates.SupportedModels != nil {
 		upstream.SupportedModels = updates.SupportedModels
 	}
-	if updates.ModelsResponseMode != nil {
-		upstream.ModelsResponseMode = *updates.ModelsResponseMode
-	}
-	if updates.ManualModels != nil {
-		upstream.ManualModels = updates.ManualModels
-	}
 	if updates.RoutePrefix != nil {
 		upstream.RoutePrefix = *updates.RoutePrefix
 	}
-	upstream.NormalizeModelsHealthCheckOptions()
-	upstream.NormalizeModelsResponseMode()
 
 	if err := cm.saveConfigLocked(cm.config); err != nil {
 		return false, err
@@ -259,7 +236,6 @@ func (cm *ConfigManager) RemoveResponsesUpstream(index int) (*UpstreamConfig, er
 	removed := cm.config.ResponsesUpstream[index]
 	cm.config.ResponsesUpstream = append(cm.config.ResponsesUpstream[:index], cm.config.ResponsesUpstream[index+1:]...)
 
-	// 清理被删除渠道的失败 key 冷却记录
 	cm.clearFailedKeysForUpstream(&removed, "Responses")
 
 	if err := cm.saveConfigLocked(cm.config); err != nil {

@@ -260,7 +260,7 @@
                 <v-icon start size="x-small">mdi-key</v-icon>
                 {{ element.apiKeys?.length || 0 }}
               </v-chip>
-              <v-tooltip v-if="element.disabledApiKeys?.length" :text="`${element.disabledApiKeys.length} 个密钥已拉黑`" location="top" color="warning" content-class="ccx-tooltip">
+              <v-tooltip v-if="element.disabledApiKeys?.length" :text="t('orchestration.blacklistedKeys', { count: element.disabledApiKeys.length })" location="top" color="warning" content-class="ccx-tooltip">
                 <template #activator="{ props: tip }">
                   <v-chip v-bind="tip" size="x-small" color="warning" variant="tonal" @click="$emit('edit', element)">
                     {{ element.disabledApiKeys.length }}
@@ -465,7 +465,7 @@
               <v-icon start size="x-small">mdi-key</v-icon>
               {{ channel.apiKeys?.length || 0 }}
             </v-chip>
-            <v-tooltip v-if="channel.disabledApiKeys?.length" :text="`${channel.disabledApiKeys.length} 个密钥已拉黑`" location="top" color="warning" content-class="ccx-tooltip">
+            <v-tooltip v-if="channel.disabledApiKeys?.length" :text="t('orchestration.blacklistedKeys', { count: channel.disabledApiKeys.length })" location="top" color="warning" content-class="ccx-tooltip">
               <template #activator="{ props: tip }">
                 <v-chip v-bind="tip" size="x-small" color="warning" variant="tonal" @click="$emit('edit', channel)">
                   {{ channel.disabledApiKeys.length }}
@@ -1354,7 +1354,7 @@ const isTrippedChannel = (channel: Channel): boolean => {
 
 const isBreakerManagedChannel = (channel: Channel): boolean => {
   const channelMetrics = getChannelMetrics(channel.index)
-  return channel.status === 'suspended' || channelMetrics?.circuitState === 'open' || channelMetrics?.circuitState === 'half_open'
+  return channel.status === 'suspended' || channelMetrics?.circuitState === 'open'
 }
 
 const getChannelRowClass = (channel: Channel) => {

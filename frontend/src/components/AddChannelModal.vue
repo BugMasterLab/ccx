@@ -13,18 +13,18 @@
             {{ isEditing ? t('addChannel.editSubtitle') : isQuickMode ? t('addChannel.quickSubtitle') : t('addChannel.fullSubtitle') }}
           </div>
         </div>
-        <!-- 能力测试按钮（仅在编辑模式显示） -->
-        <v-btn
-          v-if="isEditing && props.channelType !== 'images'"
-          color="success"
-          variant="flat"
-          size="small"
-          prepend-icon="mdi-test-tube"
-          class="capability-test-btn"
-          @click="handleTestCapability"
-        >
-          {{ t('addChannel.testCapability') }}
-        </v-btn>
+        <div v-if="isEditing && props.channelType !== 'images'" class="header-capability-actions">
+          <v-btn
+            color="success"
+            variant="flat"
+            size="small"
+            prepend-icon="mdi-test-tube"
+            class="capability-test-btn"
+            @click="handleTestCapability"
+          >
+            {{ t('addChannel.testCapability') }}
+          </v-btn>
+        </div>
         <!-- 模式切换按钮（仅在添加模式显示） -->
         <v-btn v-if="!isEditing" variant="outlined" size="small" class="mode-toggle-btn" @click="toggleMode">
           <v-icon start size="16">{{ isQuickMode ? 'mdi-form-textbox' : 'mdi-lightning-bolt' }}</v-icon>
@@ -217,6 +217,15 @@
                       variant="tonal"
                       color="primary"
                       prepend-icon="mdi-lightning-bolt"
+                      @click="applyModelMappingPreset('gpt-5.5')"
+                    >
+                      gpt-5.5
+                    </v-btn>
+                    <v-btn
+                      size="small"
+                      variant="tonal"
+                      color="secondary"
+                      prepend-icon="mdi-lightning-bolt"
                       @click="applyModelMappingPreset('gpt-5.4')"
                     >
                       gpt-5.4
@@ -405,48 +414,6 @@
               </div>
             </v-col>
 
-            <v-col cols="12">
-              <v-card variant="outlined" rounded="lg">
-                <v-card-title class="section-card-title d-flex align-center ga-2">
-                  <v-icon size="small" color="primary" icon="mdi-format-list-bulleted" />
-                  模型列表返回
-                </v-card-title>
-                <v-card-text>
-                  <div class="text-caption text-medium-emphasis mb-3">
-                    仅控制 <code>/v1/models</code> 与管理页模型列表查询，不影响 Claude 的消息透传开关。
-                  </div>
-                  <v-select
-                    v-model="form.modelsResponseMode"
-                    class="mb-4"
-                    label="返回方式"
-                    :items="[
-                      { title: '上游拉取', value: 'upstream' },
-                      { title: '手工返回', value: 'manual' }
-                    ]"
-                    variant="outlined"
-                    density="comfortable"
-                    hide-details
-                  />
-                  <v-combobox
-                    v-model="form.manualModels"
-                    label="手工模型列表"
-                    placeholder="输入模型名称后按回车添加，如 glm-4.5、claude-sonnet-4-6"
-                    prepend-inner-icon="mdi-format-list-bulleted"
-                    :hint="form.modelsResponseMode === 'manual'
-                      ? '当前为手工返回模式；这里的列表会直接作为该渠道的 /v1/models 返回值。'
-                      : '当前为上游拉取模式；你也可以先维护列表，切换到手工返回后立即生效。'"
-                    persistent-hint
-                    clearable
-                    multiple
-                    chips
-                    closable-chips
-                    variant="outlined"
-                    density="comfortable"
-                  />
-                </v-card-text>
-              </v-card>
-            </v-col>
-
             <!-- API密钥管理 -->
             <v-col cols="12">
               <v-card variant="outlined" rounded="lg" :color="hasConfigurableKeys ? undefined : 'error'">
@@ -615,14 +582,7 @@
                   </div>
 
                   <!-- 添加新密钥 -->
-                  <div class="d-flex align-center justify-space-between mb-2">
-                    <div class="text-caption text-medium-emphasis">支持单条添加或批量粘贴</div>
-                    <v-btn size="small" variant="text" color="primary" @click="toggleBatchApiKeyMode">
-                      {{ batchApiKeyMode ? '单条添加' : '批量添加' }}
-                    </v-btn>
-                  </div>
-
-                  <div v-if="!batchApiKeyMode" class="d-flex align-start ga-3">
+                  <div class="d-flex align-start ga-3">
                     <v-text-field
                       v-model="newApiKey"
                       :label="t('addChannel.addNewApiKey')"
@@ -648,37 +608,6 @@
                     >
                       {{ t('app.actions.add') }}
                     </v-btn>
-                  </div>
-
-                  <div v-else class="d-flex flex-column ga-2">
-                    <v-textarea
-                      v-model="batchApiKeysInput"
-                      label="批量添加 API 密钥"
-                      placeholder="每行一个 key，或使用英文/中文逗号分隔"
-                      prepend-inner-icon="mdi-key-plus"
-                      variant="outlined"
-                      density="comfortable"
-                      rows="4"
-                      no-resize
-                      :error="!!apiKeyError"
-                      :error-messages="apiKeyError"
-                      @input="handleBatchApiKeyInput"
-                    />
-                    <div class="d-flex align-center justify-space-between ga-3">
-                      <div class="text-caption text-medium-emphasis">自动去重，空行会忽略。</div>
-                      <v-btn
-                        color="primary"
-                        variant="elevated"
-                        size="small"
-                        :disabled="!batchApiKeysInput.trim()"
-                        @click="addBatchApiKeys"
-                      >
-                        批量添加
-                      </v-btn>
-                    </div>
-                    <div v-if="batchApiKeyResultText" class="text-caption" :class="batchApiKeyResultClass">
-                      {{ batchApiKeyResultText }}
-                    </div>
                   </div>
 
                   <!-- 被拉黑的密钥（仅编辑模式） -->
@@ -713,37 +642,6 @@
                             {{ t('channelCard.restoreKey') }}
                           </v-btn>
                         </template>
-                      </v-list-item>
-                    </v-list>
-                  </div>
-
-                  <div v-if="isEditing && visibleCooldownKeys.length" class="mt-4">
-                    <div class="d-flex align-center ga-2 mb-2">
-                      <v-icon size="small" color="warning" icon="mdi-timer-sand" />
-                      <span class="text-body-2 font-weight-medium text-warning">冷却 Keys</span>
-                      <v-chip size="x-small" color="warning" variant="tonal">{{ visibleCooldownKeys.length }}</v-chip>
-                    </div>
-                    <v-list density="compact" class="rounded-lg" style="max-height: 150px; overflow-y: auto;">
-                      <v-list-item
-                        v-for="(ck, ckIdx) in visibleCooldownKeys"
-                        :key="'cooldown-' + ckIdx"
-                        class="px-3"
-                        style="background: rgba(var(--v-theme-warning), 0.04);"
-                      >
-                        <template #prepend>
-                          <v-icon size="small" color="warning" class="mr-2" icon="mdi-clock-outline" />
-                        </template>
-                        <v-list-item-title class="text-caption font-weight-mono">
-                          {{ ck.key.length > 20 ? ck.key.slice(0, 8) + '***' + ck.key.slice(-5) : ck.key }}
-                        </v-list-item-title>
-                        <v-list-item-subtitle class="d-flex align-center ga-1">
-                          <v-chip size="x-small" color="warning" variant="tonal">
-                            剩余 {{ formatCooldownRemaining(ck.remainingSeconds) }}
-                          </v-chip>
-                          <span class="text-caption">
-                            失败 {{ ck.failureCount }} 次 · {{ formatCooldownUntil(ck.cooldownUntil) }} 恢复
-                          </span>
-                        </v-list-item-subtitle>
                       </v-list-item>
                     </v-list>
                   </div>
@@ -807,156 +705,32 @@
               </div>
             </v-col>
 
-            <v-col v-if="form.serviceType === 'claude'" cols="12">
-              <v-card variant="outlined" rounded="lg">
-                <v-card-title class="section-card-title d-flex align-center justify-space-between ga-2">
-                  <div class="d-flex align-center ga-2">
-                    <v-icon size="small" color="primary" icon="mdi-waveform" />
-                    Claude 流式与故障拦截
+            <v-col v-if="props.channelType === 'messages' || props.channelType === 'responses'" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-identifier</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.normalizeMetadataUserIdLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.normalizeMetadataUserIdHint') }}</div>
                   </div>
-                  <div class="d-flex align-center ga-2">
-                    <v-btn size="small" variant="tonal" color="primary" @click="resetClaudeFailoverRules">
-                      恢复默认
-                    </v-btn>
-                    <v-btn size="small" variant="tonal" color="secondary" prepend-icon="mdi-plus" @click="addFailoverRule">
-                      新增规则
-                    </v-btn>
-                  </div>
-                </v-card-title>
-                <v-card-text>
-                  <div class="claude-toggle-row mb-4">
-                    <div class="claude-toggle-content">
-                      <div class="section-title section-title--soft">Key 亲和</div>
-                      <div class="text-caption text-medium-emphasis">开启后同一 user_id 优先命中同一可用 Key；关闭后按轮询选 Key。</div>
-                    </div>
-                    <div class="claude-toggle-switch">
-                      <v-switch v-model="form.keyAffinityEnabled" inset color="primary" hide-details />
-                    </div>
-                  </div>
-
-                  <div class="claude-toggle-row mb-2">
-                    <div class="claude-toggle-content">
-                      <div class="section-title section-title--soft">v1 模型列表巡检拉黑</div>
-                      <div class="text-caption text-medium-emphasis">
-                        仅建议用于兼容 <code>/v1/models</code> 的上游。开启后按周期巡检 key，返回非 200 自动拉黑。
-                      </div>
-                    </div>
-                    <div class="claude-toggle-switch">
-                      <v-switch v-model="form.modelsHealthCheckEnabled" inset color="warning" hide-details />
-                    </div>
-                  </div>
-
-                  <v-text-field
-                    v-model.number="form.modelsHealthCheckIntervalMinutes"
-                    class="mb-4"
-                    type="number"
-                    min="1"
-                    step="1"
-                    label="巡检间隔（分钟）"
-                    hint="默认 60 分钟；仅在开启“v1 模型列表巡检拉黑”时生效。"
-                    persistent-hint
-                    variant="outlined"
-                    density="compact"
-                    :disabled="!form.modelsHealthCheckEnabled"
-                    @blur="normalizeModelsHealthCheckInterval"
-                  />
-
-                  <div v-if="form.failoverRules.length === 0" class="text-caption text-medium-emphasis mb-2">
-                    暂无规则。可新增规则按状态码 / 错误码 / 关键词进行冷却或拉黑。
-                  </div>
-                  <div class="text-caption text-medium-emphasis mb-2">
-                    匹配逻辑：单条规则内“状态码/错误码/关键词”是并且关系；同一字段内多个值是或关系（逗号分隔）。
-                  </div>
-
-                  <v-card
-                    v-for="(rule, ruleIndex) in form.failoverRules"
-                    :key="`failover-rule-${ruleIndex}`"
-                    variant="tonal"
-                    class="mb-3"
-                  >
-                    <v-card-text class="pb-2">
-                      <div class="d-flex align-center justify-space-between mb-2">
-                        <div class="text-body-2 font-weight-medium">规则 {{ ruleIndex + 1 }}</div>
-                        <v-btn
-                          icon="mdi-delete"
-                          size="x-small"
-                          variant="text"
-                          color="error"
-                          @click="removeFailoverRule(ruleIndex)"
-                        />
-                      </div>
-
-                      <v-row>
-                        <v-col cols="12" md="6">
-                          <v-select
-                            v-model="rule.action"
-                            :items="[
-                              { title: '冷却 (cooldown)', value: 'cooldown' },
-                              { title: '拉黑 (blacklist)', value: 'blacklist' }
-                            ]"
-                            label="动作"
-                            variant="outlined"
-                            density="compact"
-                          />
-                        </v-col>
-                        <v-col v-if="rule.action === 'cooldown'" cols="12" md="6">
-                          <v-text-field
-                            v-model.number="rule.durationMinutes"
-                            type="number"
-                            min="1"
-                            step="1"
-                            label="冷却分钟"
-                            variant="outlined"
-                            density="compact"
-                          />
-                        </v-col>
-                        <v-col cols="12">
-                          <v-text-field
-                            v-model="rule.description"
-                            label="描述（可选）"
-                            placeholder="例如：429 冷却 60 分钟"
-                            variant="outlined"
-                            density="compact"
-                          />
-                        </v-col>
-                        <v-col cols="12" md="4">
-                          <v-text-field
-                            :model-value="(rule.statusCodes || []).join(',')"
-                            label="状态码"
-                            placeholder="例如：429,400,401"
-                            variant="outlined"
-                            density="compact"
-                            @update:model-value="updateRuleStatusCodes(ruleIndex, String($event ?? ''))"
-                          />
-                        </v-col>
-                        <v-col cols="12" md="4">
-                          <v-text-field
-                            :model-value="(rule.errorCodes || []).join(',')"
-                            label="错误码"
-                            placeholder="例如：rate_limit,1113"
-                            variant="outlined"
-                            density="compact"
-                            @update:model-value="updateRuleErrorCodes(ruleIndex, String($event ?? ''))"
-                          />
-                        </v-col>
-                        <v-col cols="12" md="4">
-                          <v-text-field
-                            :model-value="(rule.keywords || []).join(',')"
-                            label="关键词"
-                            placeholder="例如：rate limit,quota exceeded"
-                            variant="outlined"
-                            density="compact"
-                            @update:model-value="updateRuleKeywords(ruleIndex, String($event ?? ''))"
-                          />
-                        </v-col>
-                      </v-row>
-                    </v-card-text>
-                  </v-card>
-                </v-card-text>
-              </v-card>
+                </div>
+                <v-switch v-model="form.normalizeMetadataUserId" inset color="primary" hide-details />
+              </div>
             </v-col>
 
-            <!-- 能力测试 RPM -->
+            <v-col v-if="supportsChatRoleNormalization" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-account-switch</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.normalizeNonstandardChatRolesLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.normalizeNonstandardChatRolesHint') }}</div>
+                  </div>
+                </div>
+                <v-switch v-model="form.normalizeNonstandardChatRoles" inset color="primary" hide-details />
+              </div>
+            </v-col>
+
             <!-- 注入 Dummy Thought Signature（仅 Gemini 渠道显示） -->
             <v-col v-if="props.channelType === 'gemini'" cols="12">
               <div class="d-flex align-center justify-space-between">
@@ -1120,8 +894,10 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useTheme } from 'vuetify'
-import type { Channel, FailoverRule } from '../services/api'
+import type { Channel } from '../services/api'
 import { ApiService, ApiError } from '../services/api'
+import { useChannelStore } from '../stores/channel'
+import { useDialogStore } from '../stores/dialog'
 import {
   isValidApiKey as _isValidApiKey,
   isValidUrl as _isValidQuickInputUrl,
@@ -1129,6 +905,7 @@ import {
 } from '../utils/quickInputParser'
 import { buildExpectedRequestUrls } from '../utils/expectedRequestUrls'
 import { supportsAdvancedChannelOptions } from '../utils/channelAdvancedOptions'
+import { buildExpectedRequestUrl } from '../utils/baseUrlSemantics'
 import { buildChannelPayload } from '../utils/channelPayload'
 import {
   resolveChannelWatcherAction,
@@ -1151,9 +928,12 @@ const emit = defineEmits<{
   'update:show': [value: boolean]
   save: [channel: Omit<Channel, 'index' | 'latency' | 'status'>, options?: { isQuickAdd?: boolean }]
   testCapability: [channelId: number]
+  error: [message: string]
 }>()
 const { t } = useI18n()
 const apiService = new ApiService()
+const channelStore = useChannelStore()
+const dialogStore = useDialogStore()
 
 // 主题
 const theme = useTheme()
@@ -1168,8 +948,13 @@ const isQuickMode = ref(true)
 const quickInput = ref('')
 const detectedBaseUrl = ref('')
 const detectedBaseUrls = ref<string[]>([])
+const detectedRawBaseUrls = ref<string[]>([])
 const detectedApiKeys = ref<string[]>([])
 const detectedServiceType = ref<'openai' | 'gemini' | 'claude' | 'responses' | null>(null)
+
+const getImagesServiceType = (_serviceType: 'openai' | 'gemini' | 'claude' | 'responses' | null | ''): 'openai' => {
+  return 'openai'
+}
 
 // 详细表单预期请求 URL 预览（防止输入时抖动）
 const formBaseUrlPreview = ref('')
@@ -1178,25 +963,24 @@ let formBaseUrlPreviewTimer: number | null = null
 // 切换模式时，将快速模式检测到的值同步到详细表单，但不清空快速模式输入
 const toggleMode = () => {
   if (isQuickMode.value) {
-    // 从快速模式切换到详细模式：始终用检测到的值覆盖表单
-    if (detectedBaseUrls.value.length > 0) {
-      // 多个 BaseURL
-      form.baseUrl = detectedBaseUrls.value[0]
-      form.baseUrls = [...detectedBaseUrls.value]
-      baseUrlsText.value = detectedBaseUrls.value.join('\n')
-    } else if (detectedBaseUrl.value) {
-      // 单个 BaseURL
-      form.baseUrl = detectedBaseUrl.value
-      form.baseUrls = []
-      baseUrlsText.value = detectedBaseUrl.value
-    }
+    const effectiveServiceType = props.channelType === 'images'
+      ? getImagesServiceType(detectedServiceType.value)
+      : (detectedServiceType.value || getDefaultServiceTypeValue())
+    const sourceUrls = detectedRawBaseUrls.value.length > 0
+      ? detectedRawBaseUrls.value.join('\n')
+      : (detectedBaseUrl.value || '')
+
+    const { baseUrl, baseUrls } = syncBaseUrlsFormState(sourceUrls, effectiveServiceType)
+    form.baseUrl = baseUrl
+    form.baseUrls = baseUrls
+    baseUrlsText.value = sourceUrls
     if (detectedApiKeys.value.length > 0) {
       form.apiKeys = [...detectedApiKeys.value]
     }
     if (generatedChannelName.value) {
       form.name = generatedChannelName.value
     }
-    form.serviceType = props.channelType === 'images' ? 'openai' : (detectedServiceType.value || getDefaultServiceTypeValue())
+    form.serviceType = effectiveServiceType
   }
   // 切换回快速模式时不做任何清理，保留 quickInput 原有内容
   isQuickMode.value = !isQuickMode.value
@@ -1204,11 +988,15 @@ const toggleMode = () => {
 
 // 解析快速输入内容
 const parseQuickInput = () => {
-  const result = parseQuickInputUtil(quickInput.value)
+  const fallbackServiceType = props.channelType === 'images'
+    ? getImagesServiceType(form.serviceType)
+    : (form.serviceType || getDefaultServiceTypeValue())
+  const result = parseQuickInputUtil(quickInput.value, fallbackServiceType)
   detectedBaseUrl.value = result.detectedBaseUrl
   detectedBaseUrls.value = result.detectedBaseUrls
+  detectedRawBaseUrls.value = result.rawBaseUrls
   detectedApiKeys.value = result.detectedApiKeys
-  detectedServiceType.value = result.detectedServiceType
+  detectedServiceType.value = props.channelType === 'images' ? 'openai' : result.detectedServiceType
 }
 
 // 获取默认服务类型
@@ -1326,21 +1114,23 @@ const _expectedRequestUrl = computed(() => {
   const hasVersion = /\/v\d+[a-z]*$/.test(baseUrl)
 
   // 根据渠道类型和服务类型确定端点（与后端逻辑一致）
-  const serviceType = props.channelType === 'images' ? 'openai' : (detectedServiceType.value || getDefaultServiceTypeValue())
+  const serviceType = props.channelType === 'images'
+    ? 'openai'
+    : (detectedServiceType.value || getDefaultServiceTypeValue())
   const endpoint =
     props.channelType === 'images'
       ? '/images/generations'
       : props.channelType === 'responses'
-      ? serviceType === 'responses'
-        ? '/responses'
+        ? serviceType === 'responses'
+          ? '/responses'
+          : serviceType === 'claude'
+            ? '/messages'
+            : '/chat/completions'
         : serviceType === 'claude'
           ? '/messages'
-          : '/chat/completions'
-      : serviceType === 'claude'
-        ? '/messages'
-        : serviceType === 'gemini'
-          ? '/models/{model}:generateContent'
-          : '/chat/completions'
+          : serviceType === 'gemini'
+            ? '/models/{model}:generateContent'
+            : '/chat/completions'
 
   if (hasVersion || skipVersion) {
     return baseUrl + endpoint
@@ -1354,36 +1144,31 @@ const _expectedRequestUrl = computed(() => {
 const getExpectedRequestUrl = (inputBaseUrl: string): string => {
   if (!inputBaseUrl) return ''
 
-  let baseUrl = inputBaseUrl
-  const skipVersion = baseUrl.endsWith('#')
-  if (skipVersion) {
-    baseUrl = baseUrl.slice(0, -1)
-  }
-
-  const hasVersion = /\/v\d+[a-z]*$/.test(baseUrl)
-
-  const serviceType = props.channelType === 'images' ? 'openai' : (detectedServiceType.value || getDefaultServiceTypeValue())
+  const serviceType = props.channelType === 'images'
+    ? 'openai'
+    : (detectedServiceType.value || getDefaultServiceTypeValue())
   const endpoint =
     props.channelType === 'images'
       ? '/images/generations'
       : props.channelType === 'responses'
-      ? serviceType === 'responses'
-        ? '/responses'
+        ? serviceType === 'responses'
+          ? '/responses'
+          : serviceType === 'claude'
+            ? '/messages'
+            : serviceType === 'gemini'
+              ? '/models/{model}:generateContent'
+              : '/chat/completions'
         : serviceType === 'claude'
           ? '/messages'
-          : '/chat/completions'
-      : serviceType === 'claude'
-        ? '/messages'
-        : serviceType === 'gemini'
-          ? '/models/{model}:generateContent'
-          : '/chat/completions'
+          : serviceType === 'gemini'
+            ? '/models/{model}:generateContent'
+            : serviceType === 'responses'
+              ? props.channelType === 'chat'
+                ? '/chat/completions'
+                : '/responses'
+              : '/chat/completions'
 
-  if (hasVersion || skipVersion) {
-    return baseUrl + endpoint
-  }
-  // Gemini 使用 /v1beta，其他使用 /v1
-  const versionPrefix = serviceType === 'gemini' ? '/v1beta' : '/v1'
-  return baseUrl + versionPrefix + endpoint
+  return buildExpectedRequestUrl(serviceType, endpoint, inputBaseUrl)
 }
 
 // 检测 baseUrl 是否有验证错误
@@ -1464,10 +1249,18 @@ const allSourceModelOptions = computed(() => {
     return [
       { title: 'codex', value: 'codex' },
       { title: 'gpt-5', value: 'gpt-5' },
+      { title: 'gpt-5.5', value: 'gpt-5.5' },
       { title: 'gpt-5.4', value: 'gpt-5.4' },
       { title: 'gpt-5.3-codex', value: 'gpt-5.3-codex' },
       { title: 'gpt-5.2-codex', value: 'gpt-5.2-codex' },
       { title: 'gpt-5.2', value: 'gpt-5.2' }
+    ]
+  }
+  if (props.channelType === 'images') {
+    return [
+      { title: 'gpt-image-1', value: 'gpt-image-1' },
+      { title: 'dall-e-3', value: 'dall-e-3' },
+      { title: 'dall-e-2', value: 'dall-e-2' }
     ]
   }
   if (props.channelType === 'gemini') {
@@ -1482,18 +1275,13 @@ const allSourceModelOptions = computed(() => {
       { title: 'gemini-2', value: 'gemini-2' }
     ]
   }
-  if (props.channelType === 'images') {
-    return [
-      { title: 'gpt-image-1', value: 'gpt-image-1' },
-      { title: 'dall-e-3', value: 'dall-e-3' },
-      { title: 'dall-e-2', value: 'dall-e-2' }
-    ]
-  }
   if (props.channelType === 'responses') {
     // Responses API (Codex) 常用模型名称
     return [
       { title: 'codex', value: 'codex' },
       { title: 'gpt-5', value: 'gpt-5' },
+      { title: 'mini', value: 'mini' },
+      { title: 'gpt-5.5', value: 'gpt-5.5' },
       { title: 'gpt-5.4', value: 'gpt-5.4' },
       { title: 'gpt-5.3-codex', value: 'gpt-5.3-codex' },
       { title: 'gpt-5.2-codex', value: 'gpt-5.2-codex' },
@@ -1565,6 +1353,9 @@ const textVerbosityOptions = [
 ]
 
 const supportsOpenAIAdvancedOptions = computed(() => supportsAdvancedChannelOptions(form.serviceType))
+const supportsChatRoleNormalization = computed(() => {
+  return props.channelType === 'chat' || (props.channelType === 'responses' && form.serviceType === 'openai')
+})
 
 const showModelMappingPresets = computed(() => {
   return props.channelType === 'messages' && (form.serviceType === 'openai' || form.serviceType === 'responses')
@@ -1573,7 +1364,7 @@ const showModelMappingPresets = computed(() => {
 const modelNameCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
 
 const modelMappingPresets: Record<
-  'gpt-5.4' | 'gpt-5.3-codex' | 'gpt-5.2-codex',
+  'gpt-5.5' | 'gpt-5.4' | 'gpt-5.3-codex' | 'gpt-5.2-codex',
   {
     modelMapping: Record<string, string>
     reasoningMapping: Record<string, 'none' | 'low' | 'medium' | 'high' | 'xhigh'>
@@ -1581,11 +1372,25 @@ const modelMappingPresets: Record<
     textVerbosity: 'low' | 'medium' | 'high'
   }
 > = {
+  'gpt-5.5': {
+    modelMapping: {
+      opus: 'gpt-5.5',
+      sonnet: 'gpt-5.4',
+      haiku: 'gpt-5.3-codex'
+    },
+    reasoningMapping: {
+      opus: 'xhigh',
+      sonnet: 'xhigh',
+      haiku: 'high'
+    },
+    fastMode: true,
+    textVerbosity: 'medium'
+  },
   'gpt-5.4': {
     modelMapping: {
       opus: 'gpt-5.4',
       sonnet: 'gpt-5.4',
-      haiku: 'gpt-5.4'
+      haiku: 'gpt-5.3-codex'
     },
     reasoningMapping: {
       opus: 'xhigh',
@@ -1646,6 +1451,7 @@ const modelPriorityPatterns: RegExp[] = [
   /sonnet-4-5/i,
   /haiku-4-6/i,
   /haiku-4-5/i,
+  /gpt-5\.5/i,
   /gpt-5\.4/i,
   /gpt-5\.3/i,
   /gpt-5\.2/i,
@@ -1678,106 +1484,6 @@ const sortModelNamesDesc = (models: string[]): string[] => {
   })
 }
 
-const createDefaultClaudeFailoverRules = (): FailoverRule[] => [
-  {
-    description: '401 无效 key 拉黑',
-    action: 'blacklist',
-    statusCodes: [401],
-    errorCodes: ['authentication_error', '1000'],
-    keywords: ['invalid x-api-key', '身份验证失败']
-  },
-  {
-    description: '400 用量上限冷却',
-    action: 'cooldown',
-    statusCodes: [400],
-    errorCodes: ['invalid_request_error'],
-    keywords: ['reached your specified api usage limits', 'regain access on'],
-    durationMinutes: 720
-  },
-  {
-    description: '400 余额不足拉黑',
-    action: 'blacklist',
-    statusCodes: [400],
-    errorCodes: ['invalid_request_error'],
-    keywords: ['credit balance is too low', 'plans & billing', 'purchase credits']
-  },
-  {
-    description: '402 会员权益校验失败拉黑',
-    action: 'blacklist',
-    statusCodes: [402],
-    errorCodes: ['invalid_request_error'],
-    keywords: ['unable to verify your membership benefits']
-  },
-  {
-    description: '400 api_error 请求失败拉黑',
-    action: 'blacklist',
-    statusCodes: [400],
-    errorCodes: ['api_error'],
-    keywords: ['request failed. please check your input and try again']
-  },
-  {
-    description: '429 冷却 60 分钟',
-    action: 'cooldown',
-    statusCodes: [429],
-    durationMinutes: 60
-  }
-]
-
-const isLegacyClaudeDefaultFailoverRules = (rules?: FailoverRule[]): boolean => {
-  if (!rules || rules.length !== 2) return false
-
-  const hasLegacy429Cooldown = rules.some(rule => {
-    const statusCodes = rule.statusCodes || []
-    const errorCodes = rule.errorCodes || []
-    const keywords = rule.keywords || []
-    return (
-      rule.action === 'cooldown' &&
-      statusCodes.length === 1 &&
-      statusCodes[0] === 429 &&
-      (rule.durationMinutes ?? 0) === 60 &&
-      errorCodes.length === 0 &&
-      keywords.length === 0
-    )
-  })
-
-  const hasLegacy400401Blacklist = rules.some(rule => {
-    const statusCodes = rule.statusCodes || []
-    if (rule.action !== 'blacklist') return false
-    if ((rule.errorCodes || []).length > 0 || (rule.keywords || []).length > 0) return false
-    if (statusCodes.length !== 2) return false
-    const sorted = [...statusCodes].sort((a, b) => a - b)
-    return sorted[0] === 400 && sorted[1] === 401
-  })
-
-  return hasLegacy429Cooldown && hasLegacy400401Blacklist
-}
-
-const cloneFailoverRules = (rules?: FailoverRule[]): FailoverRule[] => {
-  if (!rules || rules.length === 0) return []
-  return rules.map(rule => ({
-    description: rule.description || '',
-    action: rule.action,
-    statusCodes: [...(rule.statusCodes || [])],
-    errorCodes: [...(rule.errorCodes || [])],
-    keywords: [...(rule.keywords || [])],
-    durationMinutes: rule.durationMinutes
-  }))
-}
-
-const parseCodeList = (value: string): number[] => {
-  return value
-    .split(',')
-    .map(part => Number(part.trim()))
-    .filter(num => Number.isInteger(num) && num >= 100 && num <= 599)
-}
-
-const parseStringList = (value: string): string[] => {
-  return value
-    .split(',')
-    .map(part => part.trim())
-    .filter(Boolean)
-}
-
 // 表单数据
 const form = reactive({
   name: '',
@@ -1799,19 +1505,15 @@ const form = reactive({
   proxyUrl: '',
   routePrefix: '',
   supportedModels: [] as string[],
-  modelsResponseMode: 'upstream' as 'upstream' | 'manual',
-  manualModels: [] as string[],
   autoBlacklistBalance: true,
-  keyAffinityEnabled: true,
-  modelsHealthCheckEnabled: false,
-  modelsHealthCheckIntervalMinutes: 60,
-  failoverRules: createDefaultClaudeFailoverRules() as FailoverRule[]
+  normalizeMetadataUserId: true,
+  normalizeNonstandardChatRoles: false,
 })
 
 // 多 BaseURL 文本输入（独立变量，保留用户输入的换行）
 const baseUrlsText = ref('')
 
-// 监听 baseUrlsText 变化，同步到 form（仅做基本同步，不修改用户输入）
+// 监听 baseUrlsText 变化，同步到 form（去重等效 URL）
 watch(baseUrlsText, val => {
   const { baseUrl, baseUrls } = syncBaseUrlsFormState(val, form.serviceType)
   form.baseUrl = baseUrl
@@ -1829,10 +1531,6 @@ const originalKeyMap = ref<Map<string, string>>(new Map())
 
 // 新API密钥输入
 const newApiKey = ref('')
-const batchApiKeysInput = ref('')
-const batchApiKeyMode = ref(false)
-const batchApiKeyResultText = ref('')
-const batchApiKeyResultType = ref<'success' | 'warning' | ''>('')
 
 // 密钥重复检测状态
 const apiKeyError = ref('')
@@ -1842,15 +1540,6 @@ const duplicateKeyIndex = ref(-1)
 const handleApiKeyInput = () => {
   apiKeyError.value = ''
   duplicateKeyIndex.value = -1
-  batchApiKeyResultText.value = ''
-  batchApiKeyResultType.value = ''
-}
-
-const handleBatchApiKeyInput = () => {
-  apiKeyError.value = ''
-  duplicateKeyIndex.value = -1
-  batchApiKeyResultText.value = ''
-  batchApiKeyResultType.value = ''
 }
 
 // 复制功能相关状态
@@ -1883,44 +1572,24 @@ const removeCustomHeader = (key: string) => {
   delete form.customHeaders[key]
 }
 
-const addFailoverRule = () => {
-  form.failoverRules.push({
-    description: '',
-    action: 'cooldown',
-    statusCodes: [],
-    errorCodes: [],
-    keywords: [],
-    durationMinutes: 60
-  })
-}
-
-const removeFailoverRule = (index: number) => {
-  form.failoverRules.splice(index, 1)
-}
-
-const resetClaudeFailoverRules = () => {
-  form.failoverRules = createDefaultClaudeFailoverRules()
-}
-
-const normalizeModelsHealthCheckInterval = () => {
-  const value = Number(form.modelsHealthCheckIntervalMinutes)
-  if (!Number.isFinite(value) || value <= 0) {
-    form.modelsHealthCheckIntervalMinutes = 60
-    return
-  }
-  form.modelsHealthCheckIntervalMinutes = Math.floor(value)
-}
-
-const updateRuleStatusCodes = (index: number, value: string) => {
-  form.failoverRules[index].statusCodes = parseCodeList(value)
-}
-
-const updateRuleErrorCodes = (index: number, value: string) => {
-  form.failoverRules[index].errorCodes = parseStringList(value)
-}
-
-const updateRuleKeywords = (index: number, value: string) => {
-  form.failoverRules[index].keywords = parseStringList(value)
+function resetTransientUiState() {
+  newApiKey.value = ''
+  apiKeyError.value = ''
+  duplicateKeyIndex.value = -1
+  copiedKeyIndex.value = null
+  newMapping.source = ''
+  newMapping.target = ''
+  newMapping.reasoningEffort = ''
+  sourceMappingError.value = ''
+  newHeaderKey.value = ''
+  newHeaderValue.value = ''
+  localRestoredKeys.value = new Set<string>()
+  restoringKey.value = ''
+  errors.name = ''
+  errors.serviceType = ''
+  errors.baseUrl = ''
+  errors.website = ''
+  formBaseUrlPreview.value = ''
 }
 
 // 安全地获取字符串值（处理 v-select/v-combobox 可能返回对象的情况）
@@ -1960,6 +1629,7 @@ const targetModelOptions = ref<Array<{ title: string; value: string }>>([])
 const fetchingModels = ref(false)
 const fetchModelsError = ref('')
 const hasTriedFetchModels = ref(false) // 标记是否已尝试获取过模型列表
+const silentlySaving = ref(false)
 
 // API Key 的 models 状态管理
 interface KeyModelsStatus {
@@ -1970,16 +1640,6 @@ interface KeyModelsStatus {
   modelCount?: number
 }
 const keyModelsStatus = ref<Map<string, KeyModelsStatus>>(new Map())
-let activeTargetModelFetchRequestId = 0
-
-const resetTargetModelFetchState = () => {
-  activeTargetModelFetchRequestId += 1
-  targetModelOptions.value = []
-  fetchingModels.value = false
-  fetchModelsError.value = ''
-  keyModelsStatus.value.clear()
-  hasTriedFetchModels.value = false
-}
 
 const restoreDisabledKeyLabelMap = {
   insufficient_balance: 'channelCard.blacklistReason.insufficient_balance',
@@ -2046,20 +1706,11 @@ const dialogMode = ref<'create' | 'edit'>('create')
 const isEditing = computed(() => dialogMode.value === 'edit')
 const hasDisabledKeysAvailable = computed(() => visibleDisabledKeys.value.length > 0)
 const hasConfigurableKeys = computed(() => form.apiKeys.length > 0 || (isEditing.value && hasDisabledKeysAvailable.value))
-const batchApiKeyResultClass = computed(() =>
-  batchApiKeyResultType.value === 'warning' ? 'text-warning' : 'text-success'
-)
 
-const commonSupportedModelFilters = ['claude-*', 'gpt-5*', 'grok-4*', 'gemini-3*']
+const commonSupportedModelFilters = ['claude-*', 'gpt-5*', 'grok-4*', 'gemini-3*', '!*image*']
 
 const selectedSupportedModelSet = computed(() => new Set(form.supportedModels))
 const supportedModelsError = ref('')
-
-const handleSupportedModelsChange = (patterns: string[]) => {
-  const { validPatterns, hasInvalidPatterns } = filterValidSupportedModelPatterns(patterns)
-  form.supportedModels = validPatterns
-  supportedModelsError.value = hasInvalidPatterns ? t('addChannel.supportedModelsInvalidPattern') : ''
-}
 
 // 动态header样式
 const headerClasses = computed(() => {
@@ -2087,15 +1738,6 @@ const isFormValid = computed(() => {
   )
 })
 
-watch(
-  () => form.serviceType,
-  serviceType => {
-    if (serviceType === 'claude' && form.failoverRules.length === 0) {
-      form.failoverRules = createDefaultClaudeFailoverRules()
-    }
-  }
-)
-
 // 工具函数
 const isValidUrl = (url: string): boolean => {
   try {
@@ -2111,8 +1753,115 @@ const maskApiKey = (key: string): string => {
   return key.slice(0, 8) + '***' + key.slice(-5)
 }
 
+const normalizeStringArray = (values: string[]): string[] => values.map(v => v.trim()).filter(Boolean)
+
+const handleSupportedModelsChange = (values: Array<string | { title: string; value: string }>) => {
+  const normalizedValues = values
+    .map(getStringValue)
+    .map(v => v.trim())
+    .filter(Boolean)
+
+  const { validPatterns, hasInvalidPatterns } = filterValidSupportedModelPatterns(normalizedValues)
+  form.supportedModels = validPatterns
+  supportedModelsError.value = hasInvalidPatterns ? t('addChannel.supportedModelsInvalidPattern') : ''
+}
+
+const normalizeStringRecord = (record: Record<string, string>): Record<string, string> => {
+  const normalized: Record<string, string> = {}
+  Object.entries(record)
+    .map(([key, value]) => [key.trim(), value.trim()] as const)
+    .filter(([key, value]) => key && value)
+    .sort(([keyA], [keyB]) => keyA.localeCompare(keyB))
+    .forEach(([key, value]) => {
+      normalized[key] = value
+    })
+  return normalized
+}
+
+const buildComparablePayload = () => {
+  const payload = buildChannelPayload(form)
+  return {
+    ...payload,
+    apiKeys: normalizeStringArray(payload.apiKeys),
+    baseUrls: normalizeStringArray(payload.baseUrls || []),
+    supportedModels: normalizeStringArray(payload.supportedModels || []),
+    customHeaders: normalizeStringRecord(payload.customHeaders || {}),
+    modelMapping: Object.fromEntries(Object.entries(payload.modelMapping || {}).sort(([a], [b]) => a.localeCompare(b))),
+    reasoningMapping: Object.fromEntries(Object.entries(payload.reasoningMapping || {}).sort(([a], [b]) => a.localeCompare(b)))
+  }
+}
+
+const hasEditableDraftChanges = computed(() => {
+  if (!isEditing.value || !props.channel) return false
+  const currentPayload = buildComparablePayload()
+  const originalPayload = {
+    name: props.channel.name.trim(),
+    serviceType: props.channel.serviceType,
+    baseUrl: props.channel.baseUrl || '',
+    baseUrls: normalizeStringArray(props.channel.baseUrls || []),
+    website: (props.channel.website || '').trim(),
+    insecureSkipVerify: !!props.channel.insecureSkipVerify,
+    lowQuality: !!props.channel.lowQuality,
+    injectDummyThoughtSignature: !!props.channel.injectDummyThoughtSignature,
+    stripThoughtSignature: !!props.channel.stripThoughtSignature,
+    description: (props.channel.description || '').trim(),
+    apiKeys: normalizeStringArray(props.channel.apiKeys || []),
+    modelMapping: Object.fromEntries(Object.entries(props.channel.modelMapping || {}).sort(([a], [b]) => a.localeCompare(b))),
+    reasoningMapping: Object.fromEntries(Object.entries(props.channel.reasoningMapping || {}).sort(([a], [b]) => a.localeCompare(b))),
+    textVerbosity: props.channel.textVerbosity || '',
+    fastMode: !!props.channel.fastMode,
+    customHeaders: normalizeStringRecord(props.channel.customHeaders || {}),
+    proxyUrl: props.channel.proxyUrl || '',
+    routePrefix: props.channel.routePrefix || '',
+    supportedModels: normalizeStringArray(props.channel.supportedModels || []),
+    autoBlacklistBalance: props.channel.autoBlacklistBalance ?? true,
+    normalizeMetadataUserId: props.channel.normalizeMetadataUserId ?? true,
+    normalizeNonstandardChatRoles: !!props.channel.normalizeNonstandardChatRoles,
+  }
+
+  return JSON.stringify(currentPayload) !== JSON.stringify(originalPayload)
+})
+
+const ensureLatestSavedChannel = async (): Promise<number | null> => {
+  if (!isEditing.value || props.channel?.index === undefined || props.channel?.index === null) {
+    return props.channel?.index ?? null
+  }
+  if (!hasEditableDraftChanges.value) {
+    return props.channel.index
+  }
+  if (silentlySaving.value) {
+    return null
+  }
+
+  if (formRef.value) {
+    const { valid } = await formRef.value.validate()
+    if (!valid) {
+      return null
+    }
+  }
+
+  silentlySaving.value = true
+  try {
+    const payload = buildChannelPayload(form)
+    const result = await channelStore.saveChannel(payload, props.channel.index)
+    await channelStore.refreshChannels()
+    const latestChannel = channelStore.currentChannelsData.channels?.find(ch => ch.index === props.channel!.index) || null
+    if (latestChannel) {
+      dialogStore.editingChannel = latestChannel
+    }
+    return result.channelId ?? props.channel.index
+  } catch (error) {
+    const message = error instanceof Error ? error.message : t('system.unknown')
+    emit('error', message)
+    return null
+  } finally {
+    silentlySaving.value = false
+  }
+}
+
 // 表单操作
 const resetForm = () => {
+  resetTransientUiState()
   form.name = ''
   form.serviceType = props.channelType === 'images' ? 'openai' : ''
   form.baseUrl = ''
@@ -2133,23 +1882,9 @@ const resetForm = () => {
   form.routePrefix = ''
   form.supportedModels = []
   supportedModelsError.value = ''
-  form.modelsResponseMode = 'upstream'
-  form.manualModels = []
   form.autoBlacklistBalance = true
-  form.keyAffinityEnabled = true
-  form.modelsHealthCheckEnabled = false
-  form.modelsHealthCheckIntervalMinutes = 60
-  form.failoverRules = createDefaultClaudeFailoverRules()
-  newApiKey.value = ''
-  batchApiKeysInput.value = ''
-  batchApiKeyMode.value = false
-  batchApiKeyResultText.value = ''
-  batchApiKeyResultType.value = ''
-  newMapping.source = ''
-  newMapping.target = ''
-  sourceMappingError.value = ''
-  newHeaderKey.value = ''
-  newHeaderValue.value = ''
+  form.normalizeMetadataUserId = true
+  form.normalizeNonstandardChatRoles = false
 
   // 重置 baseUrlsText
   baseUrlsText.value = ''
@@ -2157,27 +1892,25 @@ const resetForm = () => {
   // 清空原始密钥映射
   originalKeyMap.value.clear()
 
-  // 清空密钥错误状态
-  apiKeyError.value = ''
-  duplicateKeyIndex.value = -1
-
   // 清空模型缓存和状态
-  resetTargetModelFetchState()
-
-  // 清除错误信息
-  errors.name = ''
-  errors.serviceType = ''
-  errors.baseUrl = ''
+  targetModelOptions.value = []
+  fetchingModels.value = false
+  fetchModelsError.value = ''
+  keyModelsStatus.value.clear()
+  hasTriedFetchModels.value = false
 
   // 重置快速添加模式数据
   quickInput.value = ''
   detectedBaseUrl.value = ''
+  detectedBaseUrls.value = []
+  detectedRawBaseUrls.value = []
   detectedApiKeys.value = []
   detectedServiceType.value = null
   randomSuffix.value = generateRandomString(6)
 }
 
 const loadChannelData = (channel: Channel) => {
+  resetTransientUiState()
   form.name = channel.name
   form.serviceType = props.channelType === 'images' ? 'openai' : channel.serviceType
   form.baseUrl = channel.baseUrl
@@ -2189,12 +1922,11 @@ const loadChannelData = (channel: Channel) => {
   form.stripThoughtSignature = !!channel.stripThoughtSignature
   form.description = channel.description || ''
 
-  // 同步 baseUrlsText（优先使用 baseUrls，否则使用 baseUrl）
-  if (channel.baseUrls && channel.baseUrls.length > 0) {
-    baseUrlsText.value = channel.baseUrls.join('\n')
-  } else {
-    baseUrlsText.value = channel.baseUrl || ''
-  }
+  // 同步 baseUrlsText（优先使用 baseUrls，否则使用 baseUrl），保留用户显式配置的原始 URL 形式
+  const rawUrls = channel.baseUrls && channel.baseUrls.length > 0
+    ? channel.baseUrls
+    : (channel.baseUrl ? [channel.baseUrl] : [])
+  baseUrlsText.value = rawUrls.join('\n')
 
   // 直接存储原始密钥，不需要映射关系
   form.apiKeys = [...channel.apiKeys]
@@ -2212,23 +1944,9 @@ const loadChannelData = (channel: Channel) => {
   const { validPatterns, hasInvalidPatterns } = filterValidSupportedModelPatterns(channel.supportedModels || [])
   form.supportedModels = validPatterns
   supportedModelsError.value = hasInvalidPatterns ? t('addChannel.supportedModelsInvalidPattern') : ''
-  form.modelsResponseMode = channel.modelsResponseMode === 'manual' ? 'manual' : 'upstream'
-  form.manualModels = channel.manualModels || []
   form.autoBlacklistBalance = channel.autoBlacklistBalance ?? true
-  form.keyAffinityEnabled = channel.keyAffinityEnabled ?? (channel.serviceType === 'claude')
-  form.modelsHealthCheckEnabled = channel.modelsHealthCheckEnabled ?? false
-  form.modelsHealthCheckIntervalMinutes = channel.modelsHealthCheckIntervalMinutes ?? 60
-  normalizeModelsHealthCheckInterval()
-  const rawFailoverRules = channel.failoverRules && channel.failoverRules.length > 0
-    ? channel.failoverRules
-    : channel.serviceType === 'claude'
-      ? createDefaultClaudeFailoverRules()
-      : []
-  form.failoverRules = cloneFailoverRules(
-    channel.serviceType === 'claude' && isLegacyClaudeDefaultFailoverRules(rawFailoverRules)
-      ? createDefaultClaudeFailoverRules()
-      : rawFailoverRules
-  )
+  form.normalizeMetadataUserId = channel.normalizeMetadataUserId ?? true
+  form.normalizeNonstandardChatRoles = !!channel.normalizeNonstandardChatRoles
 
   // 立即同步 baseUrl 到预览变量，避免等待 debounce
   formBaseUrlPreview.value = channel.baseUrl
@@ -2238,11 +1956,11 @@ const loadChannelData = (channel: Channel) => {
   newMapping.target = ''
 
   // 清空模型缓存和状态（切换渠道时重置）
-  resetTargetModelFetchState()
-  batchApiKeysInput.value = ''
-  batchApiKeyMode.value = false
-  batchApiKeyResultText.value = ''
-  batchApiKeyResultType.value = ''
+  targetModelOptions.value = []
+  fetchingModels.value = false
+  fetchModelsError.value = ''
+  keyModelsStatus.value.clear()
+  hasTriedFetchModels.value = false
 }
 
 const addApiKey = () => {
@@ -2254,9 +1972,6 @@ const addApiKey = () => {
   duplicateKeyIndex.value = -1
 
   // 检查是否与现有密钥重复
-  apiKeyError.value = ''
-  batchApiKeyResultText.value = ''
-  batchApiKeyResultType.value = ''
   const duplicateIndex = findDuplicateKeyIndex(key)
   if (duplicateIndex !== -1) {
     apiKeyError.value = t('addChannel.duplicateKeyExists')
@@ -2276,75 +1991,12 @@ const findDuplicateKeyIndex = (newKey: string): number => {
   return form.apiKeys.findIndex(existingKey => existingKey === newKey)
 }
 
-const parseBatchApiKeys = (raw: string): string[] => {
-  return raw
-    .split(/\r?\n|,|，/)
-    .map(item => item.trim())
-    .filter(Boolean)
-}
-
-const toggleBatchApiKeyMode = () => {
-  batchApiKeyMode.value = !batchApiKeyMode.value
-  apiKeyError.value = ''
-  duplicateKeyIndex.value = -1
-  batchApiKeyResultText.value = ''
-  batchApiKeyResultType.value = ''
-}
-
-const addBatchApiKeys = () => {
-  const candidates = parseBatchApiKeys(batchApiKeysInput.value)
-  if (candidates.length === 0) {
-    return
-  }
-
-  apiKeyError.value = ''
-  duplicateKeyIndex.value = -1
-  batchApiKeyResultText.value = ''
-  batchApiKeyResultType.value = ''
-
-  let addedCount = 0
-  let skippedCount = 0
-
-  for (const key of candidates) {
-    const duplicateIndex = findDuplicateKeyIndex(key)
-    if (duplicateIndex !== -1) {
-      skippedCount++
-      if (duplicateKeyIndex.value === -1) {
-        duplicateKeyIndex.value = duplicateIndex
-      }
-      continue
-    }
-    form.apiKeys.push(key)
-    addedCount++
-  }
-
-  if (addedCount === 0) {
-    apiKeyError.value = t('addChannel.duplicateKeyExists')
-    batchApiKeyResultText.value = `未添加新密钥，已跳过 ${skippedCount} 个重复项。`
-    batchApiKeyResultType.value = 'warning'
-    return
-  }
-
-  batchApiKeysInput.value = ''
-
-  if (skippedCount > 0) {
-    batchApiKeyResultText.value = `已添加 ${addedCount} 个密钥，跳过 ${skippedCount} 个重复项。`
-    batchApiKeyResultType.value = 'warning'
-    return
-  }
-
-  batchApiKeyResultText.value = `已成功添加 ${addedCount} 个密钥。`
-  batchApiKeyResultType.value = 'success'
-}
-
 const removeApiKey = (index: number) => {
   form.apiKeys.splice(index, 1)
 
   // 如果删除的是当前高亮的重复密钥，清除高亮状态
   if (duplicateKeyIndex.value === index) {
     duplicateKeyIndex.value = -1
-    batchApiKeyResultText.value = ''
-    batchApiKeyResultType.value = ''
     apiKeyError.value = ''
   } else if (duplicateKeyIndex.value > index) {
     // 如果删除的密钥在高亮密钥之前，调整高亮索引
@@ -2378,26 +2030,6 @@ const localRestoredKeys = ref(new Set<string>())
 const visibleDisabledKeys = computed(() =>
   (props.channel?.disabledApiKeys || []).filter(dk => !localRestoredKeys.value.has(dk.key))
 )
-const visibleCooldownKeys = computed(() => props.channel?.cooldownApiKeys || [])
-
-const formatCooldownRemaining = (seconds: number): string => {
-  if (!Number.isFinite(seconds) || seconds <= 0) return '即将恢复'
-  const total = Math.floor(seconds)
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  if (hours > 0) return `${hours}h ${minutes}m`
-  if (minutes > 0) return `${minutes}m`
-  return `${total}s`
-}
-
-const formatCooldownUntil = (iso: string): string => {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  } catch {
-    return iso
-  }
-}
 
 const restoreDisabledKey = async (apiKey: string) => {
   if (!props.channel) return
@@ -2511,6 +2143,7 @@ const appendSupportedModelFilter = (filter: string) => {
     return
   }
   form.supportedModels.push(filter)
+  supportedModelsError.value = ''
 }
 
 // 处理目标模型输入框点击事件(仅在首次或有新 key 时触发请求)
@@ -2537,6 +2170,16 @@ const fetchTargetModels = async () => {
     return
   }
 
+  const channelId = props.channel?.index
+  if (isEditing.value) {
+    const savedChannelId = await ensureLatestSavedChannel()
+    if (savedChannelId === null) {
+      hasTriedFetchModels.value = false
+      fetchingModels.value = false
+      return
+    }
+  }
+
   // 仅为未检测过的 API Key 发起请求
   const uncheckedKeys = candidateKeys.filter(key => !keyModelsStatus.value.has(key))
 
@@ -2544,12 +2187,8 @@ const fetchTargetModels = async () => {
     return
   }
 
-  const requestId = activeTargetModelFetchRequestId + 1
-  activeTargetModelFetchRequestId = requestId
   fetchingModels.value = true
   fetchModelsError.value = ''
-
-  const channelId = props.channel?.index
 
   // modelsApiType 决定请求协议（Bearer/x-goog-api-key、/v1/models vs /v1beta/models）
   // 对于 gemini 渠道组内配置为 openai/claude serviceType 的渠道，应走对应协议而非 Gemini 协议
@@ -2569,24 +2208,21 @@ const fetchTargetModels = async () => {
     modelsApiType = 'messages'
   }
 
+  const requestOverrides = {
+    baseUrl: form.baseUrl || undefined,
+    proxyUrl: form.proxyUrl || undefined,
+    insecureSkipVerify: form.insecureSkipVerify || undefined,
+    customHeaders: Object.keys(form.customHeaders).length > 0 ? { ...form.customHeaders } : undefined,
+  }
+
   // 每个 unchecked key 并发独立请求
   const keyPromises = uncheckedKeys.map(async (apiKey) => {
     keyModelsStatus.value.set(apiKey, { loading: true, success: false })
 
     try {
       let response: any
-      // 始终传递 form.baseUrl，确保检测使用表单当前值（而非已保存的旧配置）
       const id = channelId ?? 0
-      const request = {
-        key: apiKey,
-        baseUrl: form.baseUrl || undefined,
-        baseUrls: form.baseUrls.length > 0 ? form.baseUrls : undefined,
-        proxyUrl: form.proxyUrl || undefined,
-        insecureSkipVerify: form.insecureSkipVerify,
-        customHeaders: Object.keys(form.customHeaders).length > 0 ? form.customHeaders : undefined,
-        routePrefix: form.routePrefix || undefined,
-        supportedModels: form.supportedModels.length > 0 ? form.supportedModels : undefined
-      }
+      const request = { key: apiKey, ...requestOverrides }
 
       switch (modelsApiType) {
         case 'messages':
@@ -2598,16 +2234,12 @@ const fetchTargetModels = async () => {
         case 'chat':
           response = await apiService.getChatChannelModels(id, request)
           break
-        case 'gemini':
-          response = await apiService.getGeminiChannelModels(id, request)
-          break
         case 'images':
           response = await apiService.getImagesChannelModels(id, request)
           break
-      }
-
-      if (activeTargetModelFetchRequestId !== requestId) {
-        return [] as { id: string }[]
+        case 'gemini':
+          response = await apiService.getGeminiChannelModels(id, request)
+          break
       }
 
       keyModelsStatus.value.set(apiKey, {
@@ -2626,11 +2258,6 @@ const fetchTargetModels = async () => {
       } else if (error instanceof Error) {
         errorMsg = error.message
       }
-
-      if (activeTargetModelFetchRequestId !== requestId) {
-        return [] as { id: string }[]
-      }
-
       keyModelsStatus.value.set(apiKey, {
         loading: false,
         success: false,
@@ -2644,17 +2271,11 @@ const fetchTargetModels = async () => {
   try {
     const results = await Promise.all(keyPromises)
 
-    if (activeTargetModelFetchRequestId !== requestId) {
-      return
-    }
-
-    // 合并所有成功 key 的模型列表（去重）
     const allModels = new Set<string>(targetModelOptions.value.map(opt => opt.value))
     results.forEach(models => models.forEach(m => allModels.add(m.id)))
 
     targetModelOptions.value = sortModelNamesDesc(Array.from(allModels)).map(id => ({ title: id, value: id }))
 
-    // 所有 key（含已有记录）都失败时才显示错误
     const allFailed = candidateKeys.every(key => {
       const s = keyModelsStatus.value.get(key)
       return s && !s.success
@@ -2663,9 +2284,7 @@ const fetchTargetModels = async () => {
       fetchModelsError.value = t('addChannel.allApiKeysModelsFailed')
     }
   } finally {
-    if (activeTargetModelFetchRequestId === requestId) {
-      fetchingModels.value = false
-    }
+    fetchingModels.value = false
   }
 }
 
@@ -2675,21 +2294,6 @@ const handleSubmit = async () => {
   const { valid } = await formRef.value.validate()
   if (!valid) return
 
-  // 处理 BaseURL：去重（忽略末尾 / 和 # 差异），并移除 UI 专用的尾部 #
-  const seenUrls = new Set<string>()
-  if (form.baseUrls.length > 0) {
-    form.baseUrls
-      .map(url => url.trim().replace(/[#/]+$/, ''))
-      .filter(Boolean)
-      .forEach(url => {
-        const normalized = url.replace(/[#/]+$/, '')
-        if (!seenUrls.has(normalized)) {
-          seenUrls.add(normalized)
-        }
-      })
-  }
-
-  normalizeModelsHealthCheckInterval()
   const channelData = buildChannelPayload(form)
 
   emit('save', channelData)
@@ -2700,10 +2304,17 @@ const handleCancel = () => {
   resetForm()
 }
 
-const handleTestCapability = () => {
-  if (props.channel?.index !== undefined && props.channel?.index !== null) {
-    emit('testCapability', props.channel.index)
+const handleTestCapability = async () => {
+  if (props.channel?.index === undefined || props.channel?.index === null) {
+    return
   }
+
+  const savedChannelId = await ensureLatestSavedChannel()
+  if (savedChannelId === null) {
+    return
+  }
+
+  emit('testCapability', savedChannelId)
 }
 
 // 监听props变化
@@ -2756,19 +2367,6 @@ watch(
 )
 
 watch(
-  () => [form.serviceType, form.baseUrl] as const,
-  (next, prev) => {
-    if (!prev) {
-      return
-    }
-    if (next[0] === prev[0] && next[1] === prev[1]) {
-      return
-    }
-    resetTargetModelFetchState()
-  }
-)
-
-watch(
   () => form.baseUrl,
   value => {
     if (formBaseUrlPreviewTimer !== null) {
@@ -2779,6 +2377,25 @@ watch(
     }, 200)
   },
   { immediate: true }
+)
+
+watch(
+  () => JSON.stringify({
+    baseUrl: form.baseUrl,
+    baseUrls: form.baseUrls,
+    apiKeys: form.apiKeys,
+    proxyUrl: form.proxyUrl,
+    insecureSkipVerify: form.insecureSkipVerify,
+    customHeaders: form.customHeaders,
+    serviceType: form.serviceType,
+    routePrefix: form.routePrefix,
+  }),
+  () => {
+    targetModelOptions.value = []
+    keyModelsStatus.value.clear()
+    hasTriedFetchModels.value = false
+    fetchModelsError.value = ''
+  }
 )
 
 // ESC键监听
@@ -2922,6 +2539,13 @@ onUnmounted(() => {
   padding-inline: 12px;
 }
 
+.header-capability-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .capability-test-btn :deep(.v-btn__content) {
   gap: 4px;
   line-height: 1.5;
@@ -2935,28 +2559,6 @@ onUnmounted(() => {
 .advanced-switch-row :deep(.v-selection-control) {
   justify-content: flex-end;
   margin-inline-start: 16px;
-}
-
-.claude-toggle-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  column-gap: 12px;
-}
-
-.claude-toggle-content {
-  min-width: 0;
-}
-
-.claude-toggle-switch {
-  width: 72px;
-  display: flex;
-  justify-content: flex-end;
-  padding-top: 2px;
-}
-
-.claude-toggle-switch :deep(.v-selection-control) {
-  margin: 0;
 }
 
 </style>

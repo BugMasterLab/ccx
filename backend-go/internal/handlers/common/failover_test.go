@@ -84,6 +84,7 @@ func TestClassifyMessage(t *testing.T) {
 		{"token expired", "Your token has expired", true, false},
 		{"permission denied", "Permission denied for this resource", true, false},
 		{"中文-密钥无效", "密钥无效，请检查", true, false},
+		{"中文-令牌已过期", "该令牌已过期", true, false},
 
 		// 临时错误
 		{"timeout", "Request timeout, please retry", true, false},
@@ -519,6 +520,9 @@ func TestIsInsufficientBalanceMessage_HighConfidenceVariants(t *testing.T) {
 		{name: "english no balance", msg: "no balance", want: true},
 		{name: "english insufficient funds", msg: "payment declined: insufficient funds", want: true},
 		{name: "english quota used up", msg: "quota used up for current billing period", want: true},
+		{name: "english token quota not enough", msg: "token quota is not enough, token remain quota: ¥0.100000, need quota: ¥0.300000", want: true},
+		{name: "english daily usage limit exceeded", msg: "daily usage limit exceeded", want: true},
+		{name: "english daily limit exceeded", msg: "reason=\"DAILY_LIMIT_EXCEEDED\" message=\"daily usage limit exceeded\"", want: true},
 		{name: "chinese balance exhausted", msg: "账户余额已用尽，请充值", want: true},
 		{name: "chinese quota used up", msg: "账户额度已用完", want: true},
 		{name: "chinese quota exhausted", msg: "当前额度耗尽", want: true},
@@ -593,6 +597,16 @@ func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
 			},
 		},
 		{
+			name:       "401 new api token expired message should blacklist as authentication",
+			statusCode: 401,
+			body:       `{"error":{"code":"","message":"该令牌已过期 (request id: 202605041407066680249308268d9d6QnF3nAtC)","type":"new_api_error"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "authentication_error",
+				Message:         "该令牌已过期 (request id: 202605041407066680249308268d9d6QnF3nAtC)",
+			},
+		},
+		{
 			name:       "403 top level insufficient account balance message should blacklist",
 			statusCode: 403,
 			body:       `{"message":"Insufficient account balance"}`,
@@ -613,6 +627,16 @@ func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
 			},
 		},
 		{
+			name:       "403 token quota not enough message should blacklist as insufficient balance",
+			statusCode: 403,
+			body:       `{"error":{"message":"token quota is not enough, token remain quota: ¥0.100000, need quota: ¥0.300000 (request id: 20260426121858142194522mDUp325B)","type":"new_api_error","param":"","code":"pre_consume_quota_failed"},"type":"error"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "token quota is not enough, token remain quota: ¥0.100000, need quota: ¥0.300000 (request id: 20260426121858142194522mDUp325B)",
+			},
+		},
+		{
 			name:       "429 insufficient quota message should blacklist as insufficient balance",
 			statusCode: 429,
 			body:       `{"error":{"message":"insufficient quota for current billing period"}}`,
@@ -620,6 +644,26 @@ func TestShouldBlacklistKey_BalanceMessages(t *testing.T) {
 				ShouldBlacklist: true,
 				Reason:          "insufficient_balance",
 				Message:         "insufficient quota for current billing period",
+			},
+		},
+		{
+			name:       "429 top level usage limit exceeded code should blacklist as insufficient balance",
+			statusCode: 429,
+			body:       `{"code":"USAGE_LIMIT_EXCEEDED","message":"error: code=429 reason=\"DAILY_LIMIT_EXCEEDED\" message=\"daily usage limit exceeded\" metadata=map[]"}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "error: code=429 reason=\"DAILY_LIMIT_EXCEEDED\" message=\"daily usage limit exceeded\" metadata=map[]",
+			},
+		},
+		{
+			name:       "429 nested daily limit exceeded code should blacklist as insufficient balance",
+			statusCode: 429,
+			body:       `{"error":{"code":"DAILY_LIMIT_EXCEEDED","message":"daily usage limit exceeded"}}`,
+			want: BlacklistResult{
+				ShouldBlacklist: true,
+				Reason:          "insufficient_balance",
+				Message:         "daily usage limit exceeded",
 			},
 		},
 		{
@@ -937,25 +981,63 @@ func TestShouldRetryWithNextKey_FuzzyMode_InvalidRequestShouldNotFailover(t *tes
 	}
 }
 
-// TestIsNonRetryableErrorCode 测试不可重试错误码判断
+func TestShouldRetryWithNextKey_InvalidRequest5xxShouldFailover(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      []byte
+		fuzzyMode bool
+	}{
+		{
+			name:      "invalid_request code - normal mode",
+			body:      []byte(`{"error":{"code":"invalid_request","message":"invalid request from upstream"}}`),
+			fuzzyMode: false,
+		},
+		{
+			name:      "invalid_request code - fuzzy mode",
+			body:      []byte(`{"error":{"code":"invalid_request","message":"invalid request from upstream"}}`),
+			fuzzyMode: true,
+		},
+		{
+			name:      "schema validation message - normal mode",
+			body:      []byte(`{"error":{"type":"upstream_error","upstream_error":{"message":"Schema validation failed: unsupported content type input_text"}}}`),
+			fuzzyMode: false,
+		},
+		{
+			name:      "schema validation message - fuzzy mode",
+			body:      []byte(`{"error":{"type":"upstream_error","upstream_error":{"message":"Schema validation failed: unsupported content type input_text"}}}`),
+			fuzzyMode: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotFailover, gotQuota := ShouldRetryWithNextKey(500, tt.body, tt.fuzzyMode, "Messages")
+			if !gotFailover {
+				t.Errorf("ShouldRetryWithNextKey(500, invalid_request_body, %v) failover = %v, want true", tt.fuzzyMode, gotFailover)
+			}
+			if gotQuota {
+				t.Errorf("ShouldRetryWithNextKey(500, invalid_request_body, %v) quota = %v, want false", tt.fuzzyMode, gotQuota)
+			}
+		})
+	}
+}
+
+// TestIsNonRetryableErrorCode 测试参数校验类不可重试错误码判断
 func TestIsNonRetryableErrorCode(t *testing.T) {
 	tests := []struct {
 		code string
 		want bool
 	}{
-		// 内容审核相关 - 不应重试
-		{"sensitive_words_detected", true},
-		{"content_policy_violation", true},
-		{"content_filter", true},
-		{"content_blocked", true},
-		{"moderation_blocked", true},
 		// 请求内容无效 - 不应重试
 		{"invalid_request", true},
 		{"invalid_request_error", true},
 		{"bad_request", true},
-		// 大小写不敏感
-		{"SENSITIVE_WORDS_DETECTED", true},
-		{"Content_Policy_Violation", true},
+		// 内容审核相关 - 已拆分到 isContentModerationErrorCode，此处应返回 false
+		{"sensitive_words_detected", false},
+		{"content_policy_violation", false},
+		{"content_filter", false},
+		{"content_blocked", false},
+		{"moderation_blocked", false},
 		// 其他错误码 - 应该重试
 		{"server_error", false},
 		{"rate_limit", false},
@@ -973,6 +1055,46 @@ func TestIsNonRetryableErrorCode(t *testing.T) {
 			got := isNonRetryableErrorCode(tt.code)
 			if got != tt.want {
 				t.Errorf("isNonRetryableErrorCode(%q) = %v, want %v", tt.code, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsContentModerationErrorCode 测试内容审核类错误码判断
+func TestIsContentModerationErrorCode(t *testing.T) {
+	tests := []struct {
+		code string
+		want bool
+	}{
+		// 内容审核相关 - 不应重试
+		{"sensitive_words_detected", true},
+		{"content_policy_violation", true},
+		{"content_filter", true},
+		{"content_blocked", true},
+		{"moderation_blocked", true},
+		// 大小写不敏感
+		{"SENSITIVE_WORDS_DETECTED", true},
+		{"Content_Policy_Violation", true},
+		// 参数校验类 - 不属于内容审核
+		{"invalid_request", false},
+		{"invalid_request_error", false},
+		{"bad_request", false},
+		// 其他错误码
+		{"server_error", false},
+		{"rate_limit", false},
+		{"authentication_error", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		name := tt.code
+		if name == "" {
+			name = "empty"
+		}
+		t.Run(name, func(t *testing.T) {
+			got := isContentModerationErrorCode(tt.code)
+			if got != tt.want {
+				t.Errorf("isContentModerationErrorCode(%q) = %v, want %v", tt.code, got, tt.want)
 			}
 		})
 	}

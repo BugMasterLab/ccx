@@ -1,42 +1,187 @@
-## [v2.6.80] - 2026-05-07
+## [v2.6.77] - 2026-05-05
 
-### Added
+### 修复
 
-- **全局统计新增总 Token 和缓存读写展示** - 页面汇总卡片现在显示 `输入 Token + 输出 Token` 的总 Token，并展示缓存读取/写入 token。
-- **补充 Token 统计说明** - 总 Token 提示明确说明该值仅为 usage 汇总，不包含价格、余额、扣费、退款或账务流水含义。
+- **黑名单过期 token 错误** - 将过期 token 相关的错误信息加入熔断黑名单，避免因上游返回的 token 过期错误触发不必要的故障转移
 
-## [v2.6.79] - 2026-05-07
+## [v2.6.76] - 2026-05-04
 
-### Added
+### 修复
 
-- **接入 AxonHub-style 转发数据面** - 同格式 raw passthrough 与跨格式转换路径统一记录转发用量统计，按入口协议和转发模式聚合请求数、输入/输出 token、缓存创建 token、缓存读取 token。
-- **保留 CCX 控制面韧性机制** - 转发数据面继续复用现有 scheduler、failover、熔断、拉黑、冷却、channel logs 和 metrics finalize，不引入余额、价格表、扣费流水或退款逻辑。
+- **移除 Gemini 和 Passthrough 路径中 responses input 的 status 字段** - `stripStatusFromResponsesInput` 处理也覆盖 Gemini→Responses 转换器和 Passthrough 通道，防止上游收到 `Unknown parameter: input[n].status` 报错
+
+## [v2.6.75] - 2026-05-04
 
 ### Fixed
 
-- **补齐 raw stream cleanup 与 usage 统计覆盖** - Responses raw stream 复用共享预检、fan-out 和清理路径，避免重试或客户端取消时泄漏上游响应体。
-- **补充跨格式 failover 回归覆盖** - 覆盖 Responses 到 OpenAI-compatible 转发在首个 key 失败后继续 failover，并保持 AxonHub forwarding usage 统计口径一致。
+- **修复 Messages→Responses thinking 请求字段兼容** - Claude `thinking` block 转 Responses `input` 的 `reasoning` item 时不再写入仅响应侧使用的 `status` 字段，避免上游报 `Unknown parameter: input[n].status`
+- **修复 Gemini→Responses thinking 请求字段兼容** - Gemini `thought` part 转 Responses `input` 的 `reasoning` item 时不再写入 `status` 字段，消除上游 `Unknown parameter: input[n].status` 报错
+- **修复 Passthrough 路径 input status 泄漏** - `normalizeResponsesInputForPassthrough` 清除所有 input item 上的 `status` 字段，防止客户端回传 response output 时 `status` 泄漏到上游
+
+## [v2.6.74] - 2026-05-04
+
+### Added
+
+- **Responses 渠道内置源模型列表新增 mini 模型** - 前端渠道编辑弹窗的 Responses 内置源模型选项中新增 mini 模型
+
+### Fixed
+
+- **修正 Chat→Responses 缓存 usage 口径** - OpenAI/Responses 风格的 `cached_tokens` 不再转换为 Claude 顶层 `cache_read_input_tokens`，并在协议转换输出中将 cache read 从 `input_tokens` 扣除，避免 `total_tokens` 重复累计缓存命中 token
+- **修正 Responses→Chat 工具调用消息顺序** - 修复 responses 协议转换时工具调用消息排序不正确的问题，确保多轮工具调用按正确顺序排列
+- **补充渠道日志弹窗缺失的 i18n** - 替换 `ChannelLogsDialog` 中硬编码的中文字符串（连接/首字/总计时长标签、请求状态文本），改用 i18n 键值；`toLocaleTimeString` 改为使用系统 locale 而非硬编码 `zh-CN`
+- **清除前端剩余硬编码中文并移除死代码** - 替换 `ChannelOrchestration` 中硬编码的 tooltip 文本；移除 `system` store 中未使用的 `systemStatusText`/`systemStatusDesc` 方法及 `RETRO_THEME.name` 字段
+
+## [v2.6.73] - 2026-05-04
+
+### Added
+
+- **OpenAI Chat 渠道新增非标准 role 规范化选项** - 新增 `normalizeNonstandardChatRoles` 配置项，启用后将非标准 Chat role（如 `developer`、`function` 等）自动改写为 `user`，提高与不支持扩展 role 的上游兼容性；前端渠道编辑弹窗增加对应开关
+- 新增 `backend-go/internal/converters/chat_roles.go` 实现 role 规范化逻辑
+
+### Fixed
+
+- **修复 Chat 协议转换中工具调用链丢失问题** - 修复 responses 协议转换时 tool call chain 被截断的问题，确保多轮工具调用链完整保留
 
 ### Changed
 
-- **清理后端 lint baseline** - 全仓后端 `golangci-lint run` 现在返回 `0 issues`，并保留完整 Go 测试通过。
+- **提取 `buildChatCompletionRequestBody` 统一请求体构造逻辑** - 将 openai/gemini/default 三个分支中重复的 model 映射和参数注入逻辑抽离为独立函数，消除重复代码
 
-## [v2.6.70] - 2026-05-03
+## [v2.6.72] - 2026-05-03
+
+### Added
+
+- **全面支持 DeepSeek thinking 内容跨协议透传** - 在 `chat`、`messages`、`responses`、`gemini` 四条链路中完整支持 `reasoning_content` / `thinking` 字段的双向透传：
+  - Chat API：Claude → OpenAI 转换时 `thinking_delta` 输出为 `delta.reasoning_content`；OpenAI 上游的 `reasoning_content` 回传时注入为 Claude `thinking` block
+  - Messages API：OpenAI 上游 `reasoning_content` 转换为 Claude `thinking` content block
+  - Responses API：新增 `claude_to_responses` 转换器，支持 Claude thinking → Responses reasoning 转换
+  - 新增全链路 DeepSeek thinking 矩阵测试覆盖
 
 ### Fixed
 
-- **修正 Claude 透传用量统计** - 直接透传响应保持原样返回给客户端，同时在内部 metrics 中按低质量渠道规则修正输入/输出 token 统计，并保留缓存命中 token，避免看板统计失真。
-- **透传模式仍支持剥离 billing header** - sub2api 透传路径在启用剥离配置时继续移除 billing 标记，同时不改变其它透传预处理语义。
+- **修复 Failover Fuzzy 模式下 5xx 误判为不可重试错误** - `ShouldRetryWithNextKey` 的参数校验类不可重试错误检查（`invalid_request` 等）现在仅对 4xx 客户端错误生效，5xx 服务端错误允许 failover 到下一个渠道；内容审核类错误仍在任何状态码下阻止 failover，避免重复发送相同违规请求
+
+### Changed
+
+- **统一各协议上游响应日志输出** - 抽取公共响应头/响应体日志函数，统一 `messages`、`responses`、`gemini`、`chat`、`images` 非流式响应日志，并补齐流式响应头及 `chat`、`gemini`、`images` 上游流式原始内容日志
+
+## [v2.6.71] - 2026-05-02
+
+### 修复
+
+- **统一 Chat/Codex 能力测试的模型探测顺序与 gpt-5.5 对齐** - 修正 `capability_probe_models` 中 Chat 和 Codex 协议的模型探测顺序，使前后端一致使用 gpt-5.5 作为优先探测模型
+
+## [v2.6.70] - 2026-04-30
+
+### 新增
+
+- **引入 httptrace 生命周期追踪优化上游请求状态上报** - 新增 `RequestLifecycleTrace` 回调结构体，支持连接建立和首字节到达事件；封装 `SendRequestWithLifecycleTrace` 注入 `httptrace.ClientTrace`，upstream failover 使用生命周期回调替代事后状态更新，使日志状态更精确
+
+### 文档
+
+- **规范发布公告空分组输出** - 改进发布流程中空分组的输出格式
+
+## [v2.6.69] - 2026-04-28
+
+### Changed
+
+- **为 Images 渠道日志补充具体端点标识** - 后端 `ChannelLog` 新增 `operation` 字段并透传到前端日志弹窗，Images 请求现在可直接区分 `generations`、`edits`、`variations`，便于排查不同图片端点的路由命中与重试情况
+
+### Fixed
+
+- **增强 Images 本地失败诊断日志并保护敏感信息** - 为 `multipart` 校验失败、JSON 参数校验失败和本地构建上游请求失败补充分阶段诊断日志，仅输出 `operation`、`content-type`、`body_bytes`、`stage/reason` 与脱敏 key 等上下文，不记录原始 `multipart` body、文件名、prompt 原文或未脱敏凭证
+- **修复手动登录成功后系统状态未及时同步** - 前端在手动输入 access key 并完成 `refreshChannels()` 后，会立即根据最新刷新结果同步 `systemStatus` 为 `running` 或 `error`，避免界面状态继续停留在 `Connecting`
+
+## [v2.6.68] - 2026-04-28
+
+### Added
+
+- **新增 OpenAI Images edits/variations 代理入口** - 补齐 `/v1/images/edits` 与 `/v1/images/variations`（含 `routePrefix` 变体），支持沿用 Images 渠道的多 key failover、metrics、channel logs 与 `#` BaseURL 语义，并新增 multipart 请求重写与回归测试覆盖 `model` 映射、文件字段保留和流式标记识别
+- **新增独立 Images 渠道与 OpenAI Images 代理入口** - 新增 `imagesUpstream` 配置、`ChannelKindImages` 调度类型、`/v1/images/generations` 与 `/api/images/channels/*` 管理接口，支持独立的 key 管理、排序、状态切换、promotion、metrics/history、logs、ping 与 models 查询，避免图片请求与 Chat 渠道混用指标和熔断状态
+- **前端接入 Images 渠道页签与基础运维能力** - 在管理界面新增 Images 标签页，接入 dashboard、CRUD、排序、promotion、日志、图表和模型查询；Images 渠道默认走 OpenAI 兼容语义，并隐藏未实现的 capability test 入口
+
+### Changed
+
+- **精简能力测试弹窗的冗余状态提示与来源文案** - 移除“共享结果 / 当前执行状态 / 测试范围”等低信息量提示、空态引导与 loading 副文案，删除前端未实际区分来源的 `snapshotSource` 字段，仅保留运行模式、兼容协议、进度与更新时间，降低 `CapabilityTestDialog` 与相关 i18n 文案的视觉噪音和误导性。
+- **扩展调度器、指标迁移与回归测试以支持第五类渠道** - `scheduler`、`channel_metrics_handler`、SQLite metrics key 迁移、模型查询 fallback 与相关 handler/scheduler 回归测试统一纳入 Images 渠道，保持与 messages / responses / chat / gemini 一致的隔离和恢复语义
+- **将能力测试 RPM 从渠道配置迁移到测试弹窗** - 在能力测试对话框新增默认值为 `10`、范围为 `1–60` 的 RPM 输入；前端请求与后端能力测试入口同步接收并钳制 `rpm`，同时从渠道级配置、payload 与管理视图中移除 `channel.rpm`，避免将测试速率持久化到渠道配置。
+- **扩展能力测试为多协议并发启动与独立轮询** - 能力测试弹窗允许分别启动多个协议测试，前端按协议维护 `jobId` 引用并恢复多个活跃任务的轮询，避免后续启动覆盖已有协议状态与进度显示。
+- **保留能力测试多协议恢复与继续执行语义** - 取消后恢复旧任务时继续保留已选协议，未开始的协议仍可继续加入测试，减少多协议测试被中断后的状态丢失与重复操作。
+
+### Fixed
+
+- **避免 multipart 图片请求在开发日志中输出原始二进制体** - `multipart/form-data` 的 Images 请求在开发环境下仅记录省略提示和请求头，避免日志污染与大体积二进制输出影响排查效率
+- **修复编辑渠道时目标模型查询触发表单重载** - 编辑弹窗在静默保存当前渠道后不再对同一渠道执行 `loadChannelData` 回填，并让同一渠道的 watcher 更新保持 `noop`，避免点击目标模型名时重复请求 `/models` 且清空用户已选的源模型名；同时补充对应回归测试覆盖同渠道静默保存场景。
+- **补齐能力测试 RPM 的前后端边界保护** - 前端发起请求前统一将 `rpm` 约束到 `1–60`，后端在缺省或越界时回退到安全值（默认 `10`，最大 `60`），保证能力测试速率行为一致且可控。
+- **修复能力测试 snapshot 跨协议覆盖丢失** - `replaceFromJob` 从全量替换改为协议级合并，确保多协议独立 job 的 `ProtocolJobIDs` 和 `Tests` 不会互相覆盖，重新打开对话框能正确恢复所有协议的任务状态。
+- **修复能力测试取消时重复 DELETE 导致状态刷新被跳过** - 对 `activeEntries` 中的 jobId 去重后再执行取消，取消与状态查询各自独立 try/catch，避免 legacy 多协议 snapshot 恢复后因 409 错误中断 UI 状态更新。
+- **修复跨 Tab 恢复运行中能力测试时轮询/取消 404** - snapshot 新增按协议保存原始 `jobId/channelKind/channelId` 引用，前端轮询、取消与重试统一按协议使用原始 job 路径，确保跨协议标签页恢复相同 identity 的运行中任务时仍能继续跟踪和取消。
+
+## [v2.6.67] - 2026-04-22
+
+### Changed
+
+- **统一渠道状态管理暴露层与恢复编排** - 为 channels 列表、dashboard、metrics/history、status/promotion、resume 与 ping 抽取共享 view / handler / transition helper，收口 messages / responses / chat / gemini 四类渠道管理接口的重复实现，并保持状态语义、运行时状态与返回结构一致
+- **补齐渠道状态与连通性回归测试** - 新增和更新 handlers/config/scheduler/metrics/transitions 相关测试，覆盖统一状态视图、Chat 自动 suspended、promotion/status 接口、自动恢复编排，以及 chat / gemini / responses / messages 的 ping 路径
+- **支持模型过滤增强为包含/排除规则** - `supportedModels` 现支持精确匹配、`prefix*`、`*suffix`、`*contains*` 以及 `!` 排除规则；非法中间通配如 `foo*bar` 在前端会被拦截为无效输入，后端会跳过该条规则而不影响其他合法规则生效
+- **修复 Responses Compact 多渠道模型过滤绕过** - `/v1/responses/compact` 多渠道选择现在会携带原始请求模型参与 `supportedModels` 过滤，并补充后端调度/handler 回归测试与前端规则校验测试
+
+### Fixed
+
+- **修复自动恢复错过 UTC 槽位后不补跑** - 为定时自动恢复新增基于持久化上次检查时间的启动补偿检查与运行中兜底检测；当服务启动、容器恢复或宿主机从睡眠恢复后，仅在确实错过最近一个 UTC `00:00:01` / `08:00:01` / `16:00:01` 恢复槽位时才会补跑，并始终按真实错过的槽位时间执行恢复判定，避免提前恢复仍处于冷却中的 key；同时补充调度时序与状态持久化单元测试覆盖最近槽位、错过槽位与跨重启判定
+
+## [v2.6.66] - 2026-04-20
+
+### Fixed
+
+- **补充日额度耗尽错误的 key 拉黑识别** - 将 `USAGE_LIMIT_EXCEEDED`、`DAILY_LIMIT_EXCEEDED` 及 `daily usage limit exceeded` 等错误码/消息统一识别为额度耗尽，触发自动拉黑 key 而非仅临时失败，并补充 HTTP 与 SSE 回归测试覆盖 Responses/流式场景
+- **区分客户端取消与失败日志终态** - 将客户端主动取消的请求标记为独立 `cancelled` 终态，并补充后端回归测试与前端状态样式，避免在渠道日志中误显示为失败
+- **统一进行中日志高亮样式** - 将进行中请求的视觉强调集中到状态码徽章，移除行级左侧高亮，保持渠道日志列表的对齐一致性与可读性
 
 ### Other
 
-- **忽略本地 ccLoad 调研目录** - 将本地外部仓库和调研文档加入忽略规则，避免误提交。
+- **忽略 Python 字节码缓存目录** - `.gitignore` 新增 `__pycache__/`，避免本地探测脚本生成的缓存目录污染工作区
 
-## [v2.6.69] - 2026-05-03
+## [v2.6.65] - 2026-04-20
+
+### Added
+
+- **编辑弹窗新增静默保存后执行能力** - 编辑已有渠道时，点击“目标模型名”或“能力测试”会先验证并静默保存当前表单，再基于保存后的最新配置继续执行；`rpm`、`proxyUrl`、`baseUrl`、`apiKeys` 等修改无需手动保存即可生效
+- **渠道日志实时显示请求生命周期状态** - 扩展 `ChannelLog` 结构支持请求状态追踪（pending/connecting/first_byte/streaming/completed/failed），在请求各阶段实时更新日志状态，前端显示状态标签、各阶段耗时（连接耗时、首字节耗时、总耗时）和进行中请求的脉动动画效果
+- **渠道日志默认自动刷新** - 前端日志对话框打开时自动开始 3 秒轮询，移除手动刷新按钮，关闭对话框时自动停止查询
+
+### Changed
+
+- **能力测试协议顺序与 Claude 探测优先级对齐** - 默认能力测试执行顺序统一调整为 `messages → responses → chat → gemini`，前后端排序与首屏占位保持一致；同时将 Claude 探测模型优先级更新为优先探测 `claude-opus-4-7`，减少展示顺序与实际执行顺序不一致
+- **能力测试 RPM 输入移至测试按钮旁** - 编辑渠道时将能力测试 RPM 控件移动到弹窗右上角测试按钮旁，并收窄输入框宽度；新增渠道时不再显示该控件，提升编辑场景的就近操作效率
+- **扩展按渠道模型查询的临时连接参数** - 前端模型查询请求与四类后端 `/channels/:id/models` 入口新增支持 `proxyUrl`、`insecureSkipVerify` 与 `customHeaders`，新增渠道场景也可直接带临时连接参数获取模型列表
+- **公共 `/v1/models` 复用渠道代理与自定义请求头** - 聚合模型列表与模型详情查询现在会沿用渠道配置中的 `proxyUrl` 和 `customHeaders`，与正式转发链路保持一致
+- **统一 Base URL 等价去重与请求预览语义** - 为前后端新增共享 canonical Base URL 规则，将根域名与默认版本前缀 URL（如 `/v1`、`/v1beta`）视为等效并保留最短形式，同时继续保留 `#` 作为独立语义；同步影响渠道新增/编辑、快速输入解析、payload 构建与预期请求 URL 预览
+- **兼容等效 Base URL 的历史指标与图表聚合** - 后端配置、运行时指标 key、历史统计与图表聚合改为按等效 Base URL 兼容读取，避免用户在 `root` 与 `/v1` 之间切换后出现历史访问记录和图表数据断裂，并补充前后端回归测试
+- **优化渠道日志记录机制** - 新增 `CreatePendingLog`、`UpdateLogStatus`、`CompleteLog` 函数支持日志生命周期管理，`ChannelLogStore` 新增 `Update` 方法支持通过 `requestID` 更新已存在的日志条目
+- **新增 UTC 0/8/16 时段自动恢复黑名单 key** - 为因余额/额度类原因自动拉黑的 key 增加基于 UTC `00:00:01`、`08:00:01`、`16:00:01` 的定时恢复编排，恢复后将 key 切入 `half_open` 探测而非直接回到 `closed`，并跳过 1 小时内刚自动封禁的 key 以顺延到下个时段
+- **自动恢复时按渠道状态最小激活** - 当渠道因 active key 为空而处于 `suspended` 时，若本轮恢复出了可用 key，则自动恢复为 `active`；`disabled` 渠道保持不变，避免误激活手动禁用渠道
+- **补充恢复编排与熔断回归测试** - 新增 metrics/scheduler 单测覆盖 UTC 时段计算、可自动恢复 reason 筛选、多 BaseURL half-open 迁移与 suspended 渠道激活规则
 
 ### Fixed
 
-- **禁止管理和自动探测复用拉黑/冷却 Key** - 模型列表、Ping、能力测试、自动模型健康检查和聚合模型接口统一只使用 active 且未冷却的 Key；已拉黑或冷却中的 Key 会直接跳过或拒绝，不再作为 fallback 被调用。
+- **修复 Responses 桥接误把会话标识映射到 `user` 字段** - Claude Messages 转发到 Responses 上游时，不再把 `metadata.user_id`、`X-Claude-Code-Session-Id` 或 `X-Client-Request-Id` 回填到 Responses `user` 字段，统一仅用于 `prompt_cache_key`，避免桥接请求携带非预期用户身份
+- **修复渠道日志可读性与进行中状态展示** - 日志列表为进行中请求增加透明占位状态码徽章，内联展示 `keyMask` 与 `baseUrl` 便于排查路由命中，并将连接/首字节/总耗时统一改为秒级格式，提升高频扫描可读性
+- **修复编辑渠道切换时弹窗临时输入残留** - `AddChannelModal` 在关闭弹窗、切换新增/编辑模式和切换编辑渠道时统一重置自定义请求头输入框，并同步清理新 API Key、模型映射等临时表单状态，避免上一个渠道的草稿残留到下一个渠道
+- **修复合并后的指标 serviceType 签名不一致** - 统一自动恢复与熔断相关代码、测试对新的 metrics identity/serviceType 签名的调用，修复 worktree 合并后 `MoveKeyToHalfOpen`、`GetKeyCircuitState` 与对应回归测试的编译错误，涉及 `internal/metrics` 与 `internal/scheduler`
+- **修复客户端取消请求的日志终态缺失** - 在客户端取消分支（`context.Canceled`）中补充 `CompleteLog` 调用，避免日志永久停留在进行中状态
+- **修复日志并发读写安全问题** - `ChannelLogStore.Get` 方法返回深拷贝而非共享指针，避免 HTTP 序列化与日志更新并发时的数据竞争
+- **修复前端进行中请求误标为失败** - 仅在 `status === 'failed'` 时显示错误背景，`statusCode === 0` 时显示 `-` 而非 `ERR`，避免 pending/connecting 请求被误判为失败
+- **修复连接阶段时间戳记录时机** - 将 `ConnectedAt` 时间戳记录移到收到上游响应后，确保连接耗时准确反映 DNS 解析、TCP 握手和 TLS 协商的真实耗时
+- **修复高并发场景下终态日志丢失** - `CompleteLog` 在 `Update` 失败时补写终态日志，避免长请求在环形缓冲淘汰后静默丢失生命周期记录
+- **修复渠道删除时的日志索引污染** - 在 `ChannelLog` 中记录创建时的渠道索引，补写日志时验证索引匹配，避免在渠道删除导致索引漂移时将日志写入错误的渠道
+- **修复终态日志补写条件失效** - 将渠道日志 `Update` 返回值改为区分“正常找到 / 环形缓冲淘汰 / 渠道删除”，并在索引漂移场景下跨索引查找请求，仅在确认被淘汰时补写终态日志，避免高并发下终态丢失且不再污染被删除或移位后的渠道日志
+- **修复删除后已淘汰请求的终态误判** - 为渠道日志新增独立的在途请求索引 `requestLocations`，仅跟踪未完成请求；`Update` 现在基于在途索引区分“仍在途但已被环形缓冲淘汰”与“渠道删除后请求已失效”，避免长请求先淘汰后删渠道时把终态日志错误回填到移位后的渠道或幽灵日志桶
+- **修复删除渠道时残留在途索引污染** - `RemoveAndShift` 现在会先统一重写全部 `requestLocations`：删除指向被删渠道的在途请求索引，并将其后渠道的在途请求索引整体前移；这样即使请求日志已先被环形缓冲淘汰，删除渠道后也不会因旧索引残留而把终态日志误补写到复用后的渠道桶
+- **修复移位后淘汰请求的终态回填索引** - `Update` 现在返回在途请求的当前实际渠道索引；`CompleteLog` 在请求已移位且日志已被环形缓冲淘汰时，会按最新索引回填终态日志，而不再使用调用方持有的旧索引，避免日志写回失效索引或污染后续复用的渠道桶
+
+### Other
+
+- **前端开发依赖升级** - 升级 `eslint` `10.2.0 → 10.2.1`、`typescript` `6.0.2 → 6.0.3`、`vue-tsc` `3.2.6 → 3.2.7`
 
 ## [v2.6.64] - 2026-04-16
 

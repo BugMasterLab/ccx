@@ -12,28 +12,19 @@ import (
 )
 
 const (
-	maxBackups = 10
+	maxBackups      = 10
+	keyRecoveryTime = 5 * time.Minute
+	maxFailureCount = 3
 )
-
-// keyBackoffDurations 定义各档失败冷却时间（指数退避，最大 120 分钟）
-// 第1次失败→5分钟，第2次→10分钟，第3次→20分钟，第4次→30分钟，第5次→60分钟，第6次及以上→120分钟
-var keyBackoffDurations = []time.Duration{
-	5 * time.Minute,
-	10 * time.Minute,
-	20 * time.Minute,
-	30 * time.Minute,
-	60 * time.Minute,
-	120 * time.Minute,
-}
 
 // NewConfigManager 创建配置管理器
 func NewConfigManager(configFile string) (*ConfigManager, error) {
 	cm := &ConfigManager{
-		configFile:          configFile,
-		failedKeysCache:     make(map[string]*FailedKey),
-		keyBackoffDurations: keyBackoffDurations,
-		roundRobinCounters:  make(map[string]*uint64),
-		stopChan:            make(chan struct{}),
+		configFile:      configFile,
+		failedKeysCache: make(map[string]*FailedKey),
+		keyRecoveryTime: keyRecoveryTime,
+		maxFailureCount: maxFailureCount,
+		stopChan:        make(chan struct{}),
 	}
 
 	// 加载配置
@@ -48,7 +39,6 @@ func NewConfigManager(configFile string) (*ConfigManager, error) {
 
 	// 启动定期清理
 	go cm.cleanupExpiredFailures()
-	go cm.modelsHealthCheckLoop()
 
 	return cm, nil
 }
@@ -113,7 +103,6 @@ func (cm *ConfigManager) createDefaultConfig() error {
 		ResponsesUpstream:        []UpstreamConfig{},
 		CurrentResponsesUpstream: 0,
 		GeminiUpstream:           []UpstreamConfig{},
-		ImagesUpstream:           []UpstreamConfig{},
 		FuzzyModeEnabled:         true, // 默认启用 Fuzzy 模式
 		StripBillingHeader:       true, // 默认启用移除计费头
 	}
@@ -177,7 +166,7 @@ func (cm *ConfigManager) applyServiceTypeDefaults() bool {
 		if err != nil {
 			cm.config.ImagesUpstream[i].ServiceType = "openai"
 			updated = true
-			log.Printf("[Config-Migration] Images 渠道 [%d] %s serviceType 不受支持，已强制改为 openai", i, cm.config.ImagesUpstream[i].Name)
+			log.Printf("[Config-Migration] Images 渠道 [%d] %s serviceType=%s 不受支持，已强制改为 openai", i, cm.config.ImagesUpstream[i].Name, normalizeUpstreamServiceType(cm.config.ImagesUpstream[i].ServiceType, "openai"))
 			continue
 		}
 		if cm.config.ImagesUpstream[i].ServiceType != normalized {
@@ -192,9 +181,12 @@ func (cm *ConfigManager) applyServiceTypeDefaults() bool {
 
 // migrateOldFormat 迁移旧格式配置，返回是否有迁移
 func (cm *ConfigManager) migrateOldFormat() bool {
-	needMigration := cm.migrateUpstreams(cm.config.Upstream, cm.config.CurrentUpstream, "Messages")
+	needMigration := false
 
 	// 迁移 Messages 渠道
+	if cm.migrateUpstreams(cm.config.Upstream, cm.config.CurrentUpstream, "Messages") {
+		needMigration = true
+	}
 
 	// 迁移 Responses 渠道
 	if cm.migrateUpstreams(cm.config.ResponsesUpstream, cm.config.CurrentResponsesUpstream, "Responses") {
@@ -286,6 +278,7 @@ func (cm *ConfigManager) validateChannelKeys() bool {
 			status = "active"
 		}
 
+		// 如果是 active 状态但没有配置 key，自动设为 suspended
 		if status == "active" && len(upstream.APIKeys) == 0 {
 			upstream.Status = "suspended"
 			modified = true
@@ -317,6 +310,7 @@ func (cm *ConfigManager) validateChannelKeys() bool {
 			status = "active"
 		}
 
+		// 如果是 active 状态但没有配置 key，自动设为 suspended
 		if status == "active" && len(upstream.APIKeys) == 0 {
 			upstream.Status = "suspended"
 			modified = true
@@ -396,9 +390,7 @@ func (cm *ConfigManager) cleanupOldBackups(backupDir string) {
 
 	// 删除最旧的备份
 	for i := 0; i < len(entries)-maxBackups; i++ {
-		if err := os.Remove(filepath.Join(backupDir, entries[i].Name())); err != nil {
-			log.Printf("[Config-Backup] 警告: 删除旧备份失败: %v", err)
-		}
+		os.Remove(filepath.Join(backupDir, entries[i].Name()))
 	}
 }
 

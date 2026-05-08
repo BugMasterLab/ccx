@@ -1,4 +1,4 @@
-// Package common provides shared handler helpers.
+// Package common 提供 handlers 模块的公共功能
 package common
 
 import (
@@ -11,19 +11,19 @@ import (
 	"github.com/BenedictKing/ccx/internal/utils"
 )
 
+// GenerateRequestID 生成唯一的请求标识
 func GenerateRequestID() string {
 	b := make([]byte, 8)
-	if _, err := rand.Read(b); err != nil {
-		return time.Now().Format("20060102150405.000000000")
-	}
+	rand.Read(b)
 	return hex.EncodeToString(b)
 }
 
+// CreatePendingLog 创建 pending 状态的日志条目（请求开始时调用）
 func CreatePendingLog(
 	channelLogStore *metrics.ChannelLogStore,
 	channelIndex int,
 	model, originalModel string,
-	apiKey, baseURL, interfaceType string,
+	apiKey, baseURL, interfaceType, operation string,
 	requestSource string,
 ) string {
 	if channelLogStore == nil {
@@ -35,13 +35,15 @@ func CreatePendingLog(
 
 	requestID := GenerateRequestID()
 	now := time.Now()
+
 	channelLogStore.Record(channelIndex, &metrics.ChannelLog{
 		RequestID:     requestID,
-		ChannelIndex:  channelIndex,
+		ChannelIndex:  channelIndex, // 记录创建时的渠道索引
 		Timestamp:     now,
 		StartTime:     now,
 		Model:         model,
 		OriginalModel: originalModel,
+		Operation:     operation,
 		StatusCode:    0,
 		DurationMs:    0,
 		Success:       false,
@@ -53,9 +55,11 @@ func CreatePendingLog(
 		RequestSource: requestSource,
 		Status:        metrics.StatusPending,
 	})
+
 	return requestID
 }
 
+// UpdateLogStatus 更新日志状态（连接建立、首字节、流式传输等）
 func UpdateLogStatus(
 	channelLogStore *metrics.ChannelLogStore,
 	channelIndex int,
@@ -82,6 +86,7 @@ func UpdateLogStatus(
 	})
 }
 
+// CompleteLog 完成日志记录（请求结束时调用）
 func CompleteLog(
 	channelLogStore *metrics.ChannelLogStore,
 	channelIndex int,
@@ -94,6 +99,7 @@ func CompleteLog(
 	if channelLogStore == nil || requestID == "" {
 		return
 	}
+
 	if len(errorInfo) > 200 {
 		errorInfo = errorInfo[:200]
 	}
@@ -106,12 +112,11 @@ func CompleteLog(
 		log.ErrorInfo = errorInfo
 		log.IsRetry = isRetry
 		log.CompletedAt = &now
-		if !log.StartTime.IsZero() {
-			log.DurationMs = now.Sub(log.StartTime).Milliseconds()
-		}
+		log.DurationMs = now.Sub(log.StartTime).Milliseconds()
 		log.Status = status
 	})
 
+	// 仅在确认是环形缓冲淘汰时补写终态日志；若渠道已删除则不补写，避免污染其他渠道。
 	if updateStatus == metrics.UpdateMissingEvicted && actualChannelIndex >= 0 {
 		channelLogStore.Record(actualChannelIndex, &metrics.ChannelLog{
 			RequestID:    requestID,
@@ -139,7 +144,9 @@ func getStatusFromResult(success bool, errorInfo string) string {
 	return metrics.StatusFailed
 }
 
-// RecordChannelLog keeps compatibility for older call sites.
+// RecordChannelLog 统一记录渠道尝试日志。
+// 约束：凡是会进入渠道图表统计的尝试，都应该调用此函数或等价逻辑写入日志，保证图表与日志口径一致。
+// 注意：此函数用于兼容旧代码，新代码应使用 CreatePendingLog + UpdateLogStatus + CompleteLog 组合
 func RecordChannelLog(
 	channelLogStore *metrics.ChannelLogStore,
 	channelIndex int,
@@ -167,6 +174,8 @@ func RecordChannelLog(
 	)
 }
 
+// RecordChannelLogWithSource 记录带来源标识的渠道尝试日志。
+// 注意：此函数用于兼容旧代码，新代码应使用 CreatePendingLog + UpdateLogStatus + CompleteLog 组合
 func RecordChannelLogWithSource(
 	channelLogStore *metrics.ChannelLogStore,
 	channelIndex int,
@@ -191,11 +200,17 @@ func RecordChannelLogWithSource(
 	now := time.Now()
 	startTime := now.Add(-time.Duration(durationMs) * time.Millisecond)
 	requestID := GenerateRequestID()
-	status := getStatusFromResult(success, errorInfo)
+
+	var status string
+	if success {
+		status = metrics.StatusCompleted
+	} else {
+		status = metrics.StatusFailed
+	}
 
 	channelLogStore.Record(channelIndex, &metrics.ChannelLog{
 		RequestID:     requestID,
-		ChannelIndex:  channelIndex,
+		ChannelIndex:  channelIndex, // 记录创建时的渠道索引
 		Timestamp:     now,
 		StartTime:     startTime,
 		Model:         model,

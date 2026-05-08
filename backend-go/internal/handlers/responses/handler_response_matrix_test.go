@@ -59,6 +59,7 @@ func newResponsesTestRouterWithMetrics(t *testing.T, upstream config.UpstreamCon
 		responsesMetrics,
 		metrics.NewMetricsManager(),
 		metrics.NewMetricsManager(),
+		metrics.NewMetricsManager(),
 		session.NewTraceAffinityManager(),
 		nil,
 	)

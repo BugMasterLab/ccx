@@ -63,7 +63,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("初始化配置管理器失败: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	// 初始化会话管理器（Responses API 专用）
 	sessionManager := session.NewSessionManager(
@@ -89,9 +89,12 @@ func main() {
 		log.Printf("[Metrics-Init] 指标持久化已禁用，使用纯内存模式")
 	}
 
-	// 初始化多渠道调度器（Messages、Responses、Gemini 和 Chat 使用独立的指标管理器）
+	// 初始化多渠道调度器（Messages、Responses、Gemini、Chat 和 Images 使用独立的指标管理器）
 	var messagesMetricsManager, responsesMetricsManager, geminiMetricsManager, chatMetricsManager, imagesMetricsManager *metrics.MetricsManager
 	if metricsStore != nil {
+		if err := metricsStore.MigrateMetricsKeysToIdentity(cfgManager.GetConfig()); err != nil {
+			log.Fatalf("[Metrics-Migration] metrics key 迁移失败: %v", err)
+		}
 		messagesMetricsManager = metrics.NewMetricsManagerWithPersistence(
 			envCfg.MetricsWindowSize, envCfg.MetricsFailureThreshold, metricsStore, "messages")
 		responsesMetricsManager = metrics.NewMetricsManagerWithPersistence(
@@ -119,22 +122,124 @@ func main() {
 	log.Printf("[Scheduler-Init] 多渠道调度器已初始化 (失败率阈值: %.0f%%, 滑动窗口: %d)",
 		messagesMetricsManager.GetFailureThreshold()*100, messagesMetricsManager.GetWindowSize())
 
-	// 初始化 pricing / usage（PR3 T8a 起 messages handler 经 pipeline.Process
-	// 路径调用 wire.LBOutboundAdapter.Finalize，需要 pricing.Loader + usage.Store）。
+	// PR3: pricing + usage store
 	priceLoader, err := pricing.NewLoaderFromEnv()
 	if err != nil {
-		log.Fatalf("[Main-Pricing] 初始化价格表失败: %v", err)
+		log.Fatalf("[Main-Pricing] failed to load prices: %v", err)
 	}
 	usageStore, err := usage.NewNDJSONStore(usage.DefaultConfig())
 	if err != nil {
-		log.Fatalf("[Main-Usage] 初始化 usage store 失败: %v", err)
+		log.Fatalf("[Main-Usage] failed to init NDJSON store: %v", err)
 	}
 	defer func() { _ = usageStore.Close() }()
-	messages.SetGlobalDependencies(usageStore, priceLoader)
-	chat.SetGlobalDependencies(usageStore, priceLoader)
-	responses.SetGlobalDependencies(usageStore, priceLoader)
-	gemini.SetGlobalDependencies(usageStore, priceLoader)
-	log.Printf("[Main-Wiring] messages 模块依赖注入完成 (price_version=%s)", priceLoader.Version())
+
+	scheduledRecoveryStop := make(chan struct{})
+	go func() {
+		runScheduledRecovery := func(now time.Time, missedSlot time.Time) bool {
+			effectiveTime := now.UTC()
+			if !missedSlot.IsZero() {
+				effectiveTime = missedSlot.UTC()
+				log.Printf("[Scheduler-Recovery] 检测到错过 UTC 恢复槽位 %s，立即补跑", missedSlot.Format(time.RFC3339))
+			}
+			results, err := channelScheduler.RunScheduledRecoveries(effectiveTime)
+			if err != nil {
+				log.Printf("[Scheduler-Recovery] 警告: 自动恢复执行失败: %v", err)
+				return false
+			}
+			if len(results) == 0 {
+				log.Printf("[Scheduler-Recovery] UTC 自动恢复完成，本轮无可恢复 key")
+				return true
+			}
+			restoredKeys := 0
+			activatedChannels := 0
+			for _, result := range results {
+				restoredKeys += len(result.RestoredKeys)
+				if result.ActivatedChannel {
+					activatedChannels++
+				}
+			}
+			log.Printf("[Scheduler-Recovery] UTC 自动恢复完成：恢复 %d 个 key，激活 %d 个渠道", restoredKeys, activatedChannels)
+			return true
+		}
+
+		recordRecoveryCheck := func(checkedAt time.Time) {
+			if err := saveScheduledRecoveryLastCheck(scheduledRecoveryStateFile, checkedAt); err != nil {
+				log.Printf("[Scheduler-Recovery] 警告: 持久化恢复检查时间失败: %v", err)
+			}
+		}
+
+		lastRecoveryCheck, err := loadScheduledRecoveryLastCheck(scheduledRecoveryStateFile)
+		if err != nil {
+			log.Printf("[Scheduler-Recovery] 警告: 读取恢复检查时间失败: %v", err)
+			lastRecoveryCheck = time.Time{}
+		}
+		commitRecoveryCheck := func(checkedAt time.Time, attempted bool, succeeded bool) {
+			if attempted && !succeeded {
+				log.Printf("[Scheduler-Recovery] 警告: 本轮恢复失败，保留检查点 %s 以便后续重试", lastRecoveryCheck.Format(time.RFC3339))
+				return
+			}
+			lastRecoveryCheck = checkedAt
+			recordRecoveryCheck(lastRecoveryCheck)
+		}
+
+		startupNow := time.Now().UTC()
+		if !lastRecoveryCheck.IsZero() {
+			if missedSlot, ok := scheduler.MissedScheduledRecoveryTimeUTC(lastRecoveryCheck, startupNow); ok {
+				commitRecoveryCheck(startupNow, true, runScheduledRecovery(startupNow, missedSlot))
+			} else {
+				commitRecoveryCheck(startupNow, false, true)
+			}
+		} else {
+			commitRecoveryCheck(startupNow, false, true)
+		}
+
+		recoveryFallbackTicker := time.NewTicker(1 * time.Minute)
+		defer recoveryFallbackTicker.Stop()
+
+		for {
+			next := scheduler.NextScheduledRecoveryTimeUTC(time.Now())
+			wait := time.Until(next)
+			if wait < 0 {
+				wait = 0
+			}
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+				now := time.Now().UTC()
+				scheduledAt := next.UTC()
+				if now.After(scheduledAt.Add(time.Second)) {
+					if missedSlot, ok := scheduler.MissedScheduledRecoveryTimeUTC(lastRecoveryCheck, now); ok {
+						commitRecoveryCheck(now, true, runScheduledRecovery(now, missedSlot))
+					} else {
+						commitRecoveryCheck(now, true, runScheduledRecovery(scheduledAt, time.Time{}))
+					}
+				} else {
+					commitRecoveryCheck(now, true, runScheduledRecovery(scheduledAt, time.Time{}))
+				}
+			case tickAt := <-recoveryFallbackTicker.C:
+				now := tickAt.UTC()
+				if missedSlot, ok := scheduler.MissedScheduledRecoveryTimeUTC(lastRecoveryCheck, now); ok {
+					commitRecoveryCheck(now, true, runScheduledRecovery(now, missedSlot))
+				} else {
+					commitRecoveryCheck(now, false, true)
+				}
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			case <-scheduledRecoveryStop:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				return
+			}
+		}
+	}()
 
 	// 设置 Gin 模式
 	if envCfg.IsProduction() {
@@ -198,8 +303,8 @@ func main() {
 		apiGroup.POST("/messages/channels/:id/models", messages.GetChannelModels(cfgManager))
 		apiGroup.GET("/messages/models/stats/history", handlers.GetModelStatsHistory(messagesMetricsManager))
 		apiGroup.GET("/messages/channels/:id/logs", handlers.GetChannelLogs(channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages)))
-		apiGroup.POST("/messages/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages), "messages"))
 		apiGroup.GET("/messages/channels/:id/capability-snapshot", handlers.GetCapabilitySnapshot(cfgManager, "messages"))
+		apiGroup.POST("/messages/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages), "messages"))
 		apiGroup.GET("/messages/channels/:id/capability-test/:jobId", handlers.GetCapabilityTestJobStatus(cfgManager, "messages"))
 		apiGroup.DELETE("/messages/channels/:id/capability-test/:jobId", handlers.CancelCapabilityTestJob(cfgManager, "messages"))
 		apiGroup.POST("/messages/channels/:id/capability-test/:jobId/retry", handlers.RetryCapabilityTestModel(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages), "messages"))
@@ -219,7 +324,7 @@ func main() {
 		apiGroup.POST("/responses/channels/reorder", responses.ReorderChannels(cfgManager))
 		apiGroup.PATCH("/responses/channels/:id/status", responses.SetChannelStatus(cfgManager))
 		apiGroup.POST("/responses/channels/:id/resume", handlers.ResumeChannel(channelScheduler, cfgManager, true))
-		apiGroup.POST("/responses/channels/:id/promotion", handlers.SetResponsesChannelPromotion(cfgManager))
+		apiGroup.POST("/responses/channels/:id/promotion", responses.SetChannelPromotion(cfgManager))
 		apiGroup.GET("/responses/channels/metrics", handlers.GetChannelMetricsWithConfig(responsesMetricsManager, cfgManager, true))
 		apiGroup.GET("/responses/channels/metrics/history", handlers.GetChannelMetricsHistory(responsesMetricsManager, cfgManager, true))
 		apiGroup.GET("/responses/channels/:id/keys/metrics/history", handlers.GetChannelKeyMetricsHistory(responsesMetricsManager, cfgManager, true))
@@ -229,8 +334,8 @@ func main() {
 		apiGroup.POST("/responses/channels/:id/models", responses.GetChannelModels(cfgManager))
 		apiGroup.GET("/responses/models/stats/history", handlers.GetModelStatsHistory(responsesMetricsManager))
 		apiGroup.GET("/responses/channels/:id/logs", handlers.GetChannelLogs(channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses)))
-		apiGroup.POST("/responses/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses), "responses"))
 		apiGroup.GET("/responses/channels/:id/capability-snapshot", handlers.GetCapabilitySnapshot(cfgManager, "responses"))
+		apiGroup.POST("/responses/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses), "responses"))
 		apiGroup.GET("/responses/channels/:id/capability-test/:jobId", handlers.GetCapabilityTestJobStatus(cfgManager, "responses"))
 		apiGroup.DELETE("/responses/channels/:id/capability-test/:jobId", handlers.CancelCapabilityTestJob(cfgManager, "responses"))
 		apiGroup.POST("/responses/channels/:id/capability-test/:jobId/retry", handlers.RetryCapabilityTestModel(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses), "responses"))
@@ -260,8 +365,8 @@ func main() {
 		apiGroup.POST("/gemini/channels/:id/models", gemini.GetChannelModels(cfgManager))
 		apiGroup.GET("/gemini/models/stats/history", handlers.GetModelStatsHistory(geminiMetricsManager))
 		apiGroup.GET("/gemini/channels/:id/logs", handlers.GetChannelLogs(channelScheduler.GetChannelLogStore(scheduler.ChannelKindGemini)))
-		apiGroup.POST("/gemini/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindGemini), "gemini"))
 		apiGroup.GET("/gemini/channels/:id/capability-snapshot", handlers.GetCapabilitySnapshot(cfgManager, "gemini"))
+		apiGroup.POST("/gemini/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindGemini), "gemini"))
 		apiGroup.GET("/gemini/channels/:id/capability-test/:jobId", handlers.GetCapabilityTestJobStatus(cfgManager, "gemini"))
 		apiGroup.DELETE("/gemini/channels/:id/capability-test/:jobId", handlers.CancelCapabilityTestJob(cfgManager, "gemini"))
 		apiGroup.POST("/gemini/channels/:id/capability-test/:jobId/retry", handlers.RetryCapabilityTestModel(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindGemini), "gemini"))
@@ -291,14 +396,38 @@ func main() {
 		apiGroup.POST("/chat/channels/:id/models", chat.GetChannelModels(cfgManager))
 		apiGroup.GET("/chat/models/stats/history", handlers.GetModelStatsHistory(chatMetricsManager))
 		apiGroup.GET("/chat/channels/:id/logs", handlers.GetChannelLogs(channelScheduler.GetChannelLogStore(scheduler.ChannelKindChat)))
-		apiGroup.POST("/chat/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindChat), "chat"))
 		apiGroup.GET("/chat/channels/:id/capability-snapshot", handlers.GetCapabilitySnapshot(cfgManager, "chat"))
+		apiGroup.POST("/chat/channels/:id/capability-test", handlers.TestChannelCapability(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindChat), "chat"))
 		apiGroup.GET("/chat/channels/:id/capability-test/:jobId", handlers.GetCapabilityTestJobStatus(cfgManager, "chat"))
 		apiGroup.DELETE("/chat/channels/:id/capability-test/:jobId", handlers.CancelCapabilityTestJob(cfgManager, "chat"))
 		apiGroup.POST("/chat/channels/:id/capability-test/:jobId/retry", handlers.RetryCapabilityTestModel(cfgManager, channelScheduler.GetChannelLogStore(scheduler.ChannelKindChat), "chat"))
 		apiGroup.GET("/chat/channels/scheduler/stats", handlers.GetSchedulerStats(channelScheduler))
 
-		registerImagesAdminRoutes(apiGroup, cfgManager, channelScheduler, imagesMetricsManager)
+		// Images 渠道管理
+		apiGroup.GET("/images/channels", images.GetUpstreams(cfgManager))
+		apiGroup.POST("/images/channels", images.AddUpstream(cfgManager))
+		apiGroup.PUT("/images/channels/:id", images.UpdateUpstream(cfgManager, channelScheduler))
+		apiGroup.DELETE("/images/channels/:id", images.DeleteUpstream(cfgManager, channelScheduler))
+		apiGroup.POST("/images/channels/:id/keys", images.AddApiKey(cfgManager))
+		apiGroup.DELETE("/images/channels/:id/keys/:apiKey", images.DeleteApiKey(cfgManager))
+		apiGroup.POST("/images/channels/:id/keys/:apiKey/top", images.MoveApiKeyToTop(cfgManager))
+		apiGroup.POST("/images/channels/:id/keys/:apiKey/bottom", images.MoveApiKeyToBottom(cfgManager))
+		apiGroup.POST("/images/channels/:id/keys/restore", handlers.RestoreBlacklistedKey(cfgManager, "Images"))
+
+		// Images 多渠道调度 API
+		apiGroup.POST("/images/channels/reorder", images.ReorderChannels(cfgManager))
+		apiGroup.PATCH("/images/channels/:id/status", images.SetChannelStatus(cfgManager))
+		apiGroup.POST("/images/channels/:id/resume", handlers.ResumeChannelWithKind(channelScheduler, cfgManager, scheduler.ChannelKindImages))
+		apiGroup.POST("/images/channels/:id/promotion", images.SetChannelPromotion(cfgManager))
+		apiGroup.GET("/images/channels/metrics", handlers.GetImagesChannelMetrics(imagesMetricsManager, cfgManager))
+		apiGroup.GET("/images/channels/metrics/history", handlers.GetImagesChannelMetricsHistory(imagesMetricsManager, cfgManager))
+		apiGroup.GET("/images/channels/:id/keys/metrics/history", handlers.GetImagesChannelKeyMetricsHistory(imagesMetricsManager, cfgManager))
+		apiGroup.GET("/images/global/stats/history", handlers.GetGlobalStatsHistory(imagesMetricsManager))
+		apiGroup.GET("/images/ping/:id", images.PingChannel(cfgManager))
+		apiGroup.GET("/images/ping", images.PingAllChannels(cfgManager))
+		apiGroup.POST("/images/channels/:id/models", images.GetChannelModels(cfgManager))
+		apiGroup.GET("/images/models/stats/history", handlers.GetModelStatsHistory(imagesMetricsManager))
+		apiGroup.GET("/images/channels/:id/logs", handlers.GetChannelLogs(channelScheduler.GetChannelLogStore(scheduler.ChannelKindImages)))
 
 		// Fuzzy 模式设置
 		apiGroup.GET("/settings/fuzzy-mode", handlers.GetFuzzyMode(cfgManager))
@@ -310,6 +439,10 @@ func main() {
 	}
 
 	// 代理端点 - Messages API
+	messages.SetGlobalDependencies(usageStore, priceLoader)
+	chat.SetGlobalDependencies(usageStore, priceLoader)
+	responses.SetGlobalDependencies(usageStore, priceLoader)
+	gemini.SetGlobalDependencies(usageStore, priceLoader)
 	messagesHandler := messages.Handler(envCfg, cfgManager, channelScheduler)
 	r.POST("/v1/messages", messagesHandler)
 	r.POST("/:routePrefix/v1/messages", messagesHandler)
@@ -348,6 +481,7 @@ func main() {
 	r.POST("/v1/chat/completions", chatHandler)
 	r.POST("/:routePrefix/v1/chat/completions", chatHandler)
 
+	// 代理端点 - Images API (OpenAI Images 兼容)
 	imagesHandler := images.Handler(envCfg, cfgManager, channelScheduler)
 	r.POST("/v1/images/generations", imagesHandler)
 	r.POST("/:routePrefix/v1/images/generations", imagesHandler)
@@ -452,6 +586,7 @@ func main() {
 			}
 		}
 
+		close(scheduledRecoveryStop)
 		close(shutdownDone)
 	}()
 
@@ -467,29 +602,4 @@ func main() {
 	case <-time.After(15 * time.Second):
 		log.Println("[Server-Shutdown] 警告: 等待关闭超时")
 	}
-}
-
-func registerImagesAdminRoutes(apiGroup *gin.RouterGroup, cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler, imagesMetricsManager *metrics.MetricsManager) {
-	apiGroup.GET("/images/channels", images.GetUpstreams(cfgManager))
-	apiGroup.POST("/images/channels", images.AddUpstream(cfgManager))
-	apiGroup.PUT("/images/channels/:id", images.UpdateUpstream(cfgManager, channelScheduler))
-	apiGroup.DELETE("/images/channels/:id", images.DeleteUpstream(cfgManager, channelScheduler))
-	apiGroup.POST("/images/channels/:id/keys", images.AddApiKey(cfgManager))
-	apiGroup.DELETE("/images/channels/:id/keys/:apiKey", images.DeleteApiKey(cfgManager))
-	apiGroup.POST("/images/channels/:id/keys/:apiKey/top", images.MoveApiKeyToTop(cfgManager))
-	apiGroup.POST("/images/channels/:id/keys/:apiKey/bottom", images.MoveApiKeyToBottom(cfgManager))
-	apiGroup.POST("/images/channels/:id/keys/restore", handlers.RestoreBlacklistedKey(cfgManager, "Images"))
-	apiGroup.POST("/images/channels/reorder", images.ReorderChannels(cfgManager))
-	apiGroup.PATCH("/images/channels/:id/status", images.SetChannelStatus(cfgManager))
-	apiGroup.POST("/images/channels/:id/resume", handlers.ResumeChannelWithKind(channelScheduler, cfgManager, scheduler.ChannelKindImages))
-	apiGroup.POST("/images/channels/:id/promotion", images.SetChannelPromotion(cfgManager))
-	apiGroup.GET("/images/channels/metrics", handlers.GetImagesChannelMetrics(imagesMetricsManager, cfgManager))
-	apiGroup.GET("/images/channels/metrics/history", handlers.GetImagesChannelMetricsHistory(imagesMetricsManager, cfgManager))
-	apiGroup.GET("/images/channels/:id/keys/metrics/history", handlers.GetImagesChannelKeyMetricsHistory(imagesMetricsManager, cfgManager))
-	apiGroup.GET("/images/global/stats/history", handlers.GetGlobalStatsHistory(imagesMetricsManager))
-	apiGroup.GET("/images/ping/:id", images.PingChannel(cfgManager))
-	apiGroup.GET("/images/ping", images.PingAllChannels(cfgManager))
-	apiGroup.POST("/images/channels/:id/models", images.GetChannelModels(cfgManager))
-	apiGroup.GET("/images/models/stats/history", handlers.GetModelStatsHistory(imagesMetricsManager))
-	apiGroup.GET("/images/channels/:id/logs", handlers.GetChannelLogs(channelScheduler.GetChannelLogStore(scheduler.ChannelKindImages)))
 }

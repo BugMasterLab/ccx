@@ -92,6 +92,7 @@ func TestTryUpstreamWithAllKeys_ModelRouteUnavailableSkipsBreakerAndCooldown(t *
 					return nil, nil
 				},
 				"gpt-5.5",
+				"",
 				0,
 				channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages),
 			)
@@ -197,6 +198,7 @@ func TestTryUpstreamWithAllKeys_CooldownStreamErrorContinuesFailover(t *testing.
 			return &types.Usage{InputTokens: 1, OutputTokens: 2}, nil
 		},
 		"claude",
+		"",
 		0,
 		channelScheduler.GetChannelLogStore(scheduler.ChannelKindMessages),
 	)
@@ -320,6 +322,7 @@ func TestTryUpstreamWithAllKeys_CrossFormatConvertedKeepsFailoverAndUsageStats(t
 			}, nil
 		},
 		"gpt-4o",
+		"",
 		0,
 		channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses),
 	)

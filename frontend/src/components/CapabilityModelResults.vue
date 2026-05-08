@@ -94,7 +94,7 @@ const shouldShowPendingPlaceholder = computed(() => modelResults.value.length ==
 const shouldShowDetailsUnavailable = computed(() => modelResults.value.length === 0 && !shouldShowPendingPlaceholder.value)
 
 const getModelDisplayState = (modelResult: CapabilityModelJobResult): 'idle' | 'pending' | 'running' | 'success' | 'cancelled' | 'skipped' | 'failed' => {
-  if (modelResult.status === 'idle') return 'idle'
+  if ((modelResult.status as any) === 'idle') return 'idle'
   if (modelResult.lifecycle === 'pending') return 'pending'
   if (modelResult.lifecycle === 'active') return 'running'
   if (modelResult.lifecycle === 'cancelled' || modelResult.outcome === 'cancelled') return 'cancelled'
@@ -105,8 +105,8 @@ const getModelDisplayState = (modelResult: CapabilityModelJobResult): 'idle' | '
 
 const getModelBadgeClass = (modelResult: CapabilityModelJobResult): string => {
   switch (getModelDisplayState(modelResult)) {
+    case 'idle': return 'skipped-badge'
     case 'running': return 'running-badge'
-    case 'idle':
     case 'pending': return 'queued-badge'
     case 'success': return 'success-badge'
     case 'cancelled':
@@ -117,8 +117,8 @@ const getModelBadgeClass = (modelResult: CapabilityModelJobResult): string => {
 
 const getModelStatusIcon = (modelResult: CapabilityModelJobResult): string => {
   switch (getModelDisplayState(modelResult)) {
-    case 'pending': return 'mdi-timer-sand'
     case 'idle': return 'mdi-clock-outline'
+    case 'pending': return 'mdi-timer-sand'
     case 'running': return 'mdi-progress-clock'
     case 'cancelled': return 'mdi-stop-circle-outline'
     case 'skipped': return 'mdi-skip-next'
@@ -130,8 +130,8 @@ const getModelStatusIcon = (modelResult: CapabilityModelJobResult): string => {
 const getModelStatusLabel = (status: string, modelResult?: CapabilityModelJobResult) => {
   if (modelResult?.lifecycle === 'cancelled' || modelResult?.outcome === 'cancelled') return t('capability.cancelled')
   switch (status) {
-    case 'queued': return t('capability.modelQueued')
     case 'idle': return t('capability.notStarted')
+    case 'queued': return t('capability.modelQueued')
     case 'running': return t('capability.modelRunning')
     case 'success': return t('capability.modelSuccess')
     case 'failed': return t('capability.modelFailed')

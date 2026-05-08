@@ -733,7 +733,7 @@ func cleanupRawStreamFanout(cancel context.CancelFunc, eventChan <-chan rawStrea
 
 // StreamContext 流处理上下文
 type StreamContext struct {
-	LogBuffer            bytes.Buffer
+	LogBuffer            *LimitedLogBuffer
 	OutputTextBuffer     bytes.Buffer
 	Synthesizer          *utils.StreamSynthesizer
 	LoggingEnabled       bool

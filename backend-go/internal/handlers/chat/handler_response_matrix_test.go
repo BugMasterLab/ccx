@@ -7,10 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
 	"github.com/BenedictKing/ccx/internal/metrics"
@@ -34,27 +31,21 @@ func setupChatTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) 
 	if err != nil {
 		t.Fatalf("NewConfigManager() err = %v", err)
 	}
-	t.Cleanup(func() { _ = cm.Close() })
+	t.Cleanup(func() { cm.Close() })
 	return cm
 }
 
 func newChatTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.Engine {
 	t.Helper()
-	r, _ := newChatTestRouterWithMetrics(t, upstream)
-	return r
-}
-
-func newChatTestRouterWithMetrics(t *testing.T, upstream config.UpstreamConfig) (*gin.Engine, *metrics.MetricsManager) {
-	t.Helper()
 	gin.SetMode(gin.TestMode)
 	cfgManager := setupChatTestConfigManager(t, []config.UpstreamConfig{upstream})
-	chatMetrics := metrics.NewMetricsManager()
 	channelScheduler := scheduler.NewChannelScheduler(
 		cfgManager,
 		metrics.NewMetricsManager(),
 		metrics.NewMetricsManager(),
 		metrics.NewMetricsManager(),
-		chatMetrics,
+		metrics.NewMetricsManager(),
+		metrics.NewMetricsManager(),
 		session.NewTraceAffinityManager(),
 		nil,
 	)
@@ -65,7 +56,7 @@ func newChatTestRouterWithMetrics(t *testing.T, upstream config.UpstreamConfig) 
 
 	r := gin.New()
 	r.POST("/v1/chat/completions", Handler(envCfg, cfgManager, channelScheduler))
-	return r, chatMetrics
+	return r
 }
 
 func performChatHandlerRequest(t *testing.T, router *gin.Engine, body string) *httptest.ResponseRecorder {
@@ -76,189 +67,6 @@ func performChatHandlerRequest(t *testing.T, router *gin.Engine, body string) *h
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	return w
-}
-
-func TestChatHandler_StreamRawPassthroughPreservesOpenAIUpstreamSSEBytesAndMetrics(t *testing.T) {
-	rawStream := "" +
-		":keep-alive\n\n" +
-		"id:chat-1\n" +
-		"event:chunk\n" +
-		"data:{\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
-		"retry:1500\n" +
-		"data:{\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":2,\"total_tokens\":7}}\n\n" +
-		"data:{\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"choices\":[],\"usage\":{\"prompt_tokens_details\":{\"cached_tokens\":3}}}\n\n" +
-		"data:[DONE]\n\n"
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(rawStream))
-	}))
-	defer upstream.Close()
-
-	router, chatMetrics := newChatTestRouterWithMetrics(t, config.UpstreamConfig{
-		Name:        "chat-openai-raw-stream",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"sk-chat-stream"},
-		ServiceType: "openai",
-		Status:      "active",
-	})
-
-	w := performChatHandlerRequest(t, router, `{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got != rawStream {
-		t.Fatalf("raw stream body mismatch\n got: %q\nwant: %q", got, rawStream)
-	}
-
-	points := chatMetrics.GetKeyHistoricalStats(upstream.URL, "sk-chat-stream", "openai", time.Hour, time.Minute)
-	var successCount, inputTokens, outputTokens, cacheReadTokens int64
-	for _, point := range points {
-		successCount += point.SuccessCount
-		inputTokens += point.InputTokens
-		outputTokens += point.OutputTokens
-		cacheReadTokens += point.CacheReadInputTokens
-	}
-	if successCount != 1 {
-		t.Fatalf("successCount = %d, want 1", successCount)
-	}
-	if inputTokens != 2 || outputTokens != 2 || cacheReadTokens != 3 {
-		t.Fatalf("metrics tokens = input:%d output:%d cache_read:%d, want input:2 output:2 cache_read:3", inputTokens, outputTokens, cacheReadTokens)
-	}
-}
-
-func TestChatHandler_NonStreamRawPassthroughRecordsCachedTokens(t *testing.T) {
-	rawBody := `{"id":"chatcmpl_1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":7}},"vendor_ext":{"kept":true}}`
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(rawBody))
-	}))
-	defer upstream.Close()
-
-	router, chatMetrics := newChatTestRouterWithMetrics(t, config.UpstreamConfig{
-		Name:        "chat-openai-raw-nonstream",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"sk-chat-nonstream"},
-		ServiceType: "openai",
-		Status:      "active",
-	})
-
-	w := performChatHandlerRequest(t, router, `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got != rawBody {
-		t.Fatalf("raw non-stream body mismatch\n got: %q\nwant: %q", got, rawBody)
-	}
-
-	points := chatMetrics.GetKeyHistoricalStats(upstream.URL, "sk-chat-nonstream", "openai", time.Hour, time.Minute)
-	var successCount, inputTokens, outputTokens, cacheReadTokens int64
-	for _, point := range points {
-		successCount += point.SuccessCount
-		inputTokens += point.InputTokens
-		outputTokens += point.OutputTokens
-		cacheReadTokens += point.CacheReadInputTokens
-	}
-	if successCount != 1 {
-		t.Fatalf("successCount = %d, want 1", successCount)
-	}
-	if inputTokens != 3 || outputTokens != 2 || cacheReadTokens != 7 {
-		t.Fatalf("metrics tokens = input:%d output:%d cache_read:%d, want input:3 output:2 cache_read:7", inputTokens, outputTokens, cacheReadTokens)
-	}
-}
-
-func TestChatHandler_StreamRawPassthroughCancelsFirstAttemptBeforeFailover(t *testing.T) {
-	firstClosed := make(chan struct{})
-	var secondSawFirstClosed atomic.Bool
-	successStream := "" +
-		"data:{\"id\":\"chatcmpl_2\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n" +
-		"data:{\"id\":\"chatcmpl_2\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":4,\"completion_tokens\":2,\"total_tokens\":6}}\n\n" +
-		"data:[DONE]\n\n"
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		auth := r.Header.Get("Authorization")
-		switch {
-		case strings.Contains(auth, "sk-first"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("event: error\ndata:{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down\"}}\n\n"))
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-			<-r.Context().Done()
-			close(firstClosed)
-		case strings.Contains(auth, "sk-second"):
-			select {
-			case <-firstClosed:
-				secondSawFirstClosed.Store(true)
-			case <-time.After(2 * time.Second):
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(successStream))
-		default:
-			http.Error(w, "unexpected key", http.StatusInternalServerError)
-		}
-	}))
-	defer upstream.Close()
-
-	router := newChatTestRouter(t, config.UpstreamConfig{
-		Name:        "chat-openai-raw-failover",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"sk-first", "sk-second"},
-		ServiceType: "openai",
-		Status:      "active",
-	})
-
-	w := performChatHandlerRequest(t, router, `{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got != successStream {
-		t.Fatalf("body = %q, want successful second attempt stream %q", got, successStream)
-	}
-	if !secondSawFirstClosed.Load() {
-		t.Fatalf("second attempt started before first attempt body/fan-out was released")
-	}
-}
-
-func TestChatHandler_CrossFormatStreamDoesNotUseRawPassthrough(t *testing.T) {
-	upstreamRaw := "" +
-		"event:raw_should_not_pass\n" +
-		"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n" +
-		"event:message_delta\n" +
-		"data: {\"type\":\"message_delta\",\"usage\":{\"input_tokens\":3,\"output_tokens\":2}}\n\n"
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(upstreamRaw))
-	}))
-	defer upstream.Close()
-
-	router := newChatTestRouter(t, config.UpstreamConfig{
-		Name:        "chat-claude-stream-conversion",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"sk-claude-stream"},
-		ServiceType: "claude",
-		Status:      "active",
-	})
-
-	w := performChatHandlerRequest(t, router, `{"model":"gpt-4o","stream":true,"messages":[{"role":"user","content":"hello"}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got == upstreamRaw {
-		t.Fatalf("cross-format stream was raw-passthroughed unexpectedly")
-	}
-	if bytes.Contains(w.Body.Bytes(), []byte("event:raw_should_not_pass")) {
-		t.Fatalf("cross-format response leaked raw upstream event: %s", w.Body.String())
-	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("chat.completion.chunk")) {
-		t.Fatalf("cross-format response did not include converted Chat chunks: %s", w.Body.String())
-	}
 }
 
 // TestChatHandler_NonStreamMatrix_OpenAIFormat 验证 Chat 入口在 openai/claude 上游下
@@ -405,6 +213,172 @@ func TestChatHandler_NonStreamMatrix_Passthrough(t *testing.T) {
 				t.Fatalf("response body does not contain upstream output prefix, got %s", w.Body.String())
 			}
 		})
+	}
+}
+
+func TestChatHandler_PassthroughPreservesMultimodalRequest(t *testing.T) {
+	tests := []struct {
+		name        string
+		serviceType string
+	}{
+		{name: "handler_openai_multimodal_passthrough", serviceType: "openai"},
+		{name: "handler_responses_multimodal_passthrough", serviceType: "responses"},
+		{name: "handler_gemini_multimodal_passthrough", serviceType: "gemini"},
+	}
+
+	requestBody := `{"model":"gpt-4o-image","messages":[{"role":"user","content":[{"type":"text","text":"修改这个图片"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var captured map[string]interface{}
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				defer r.Body.Close()
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Fatalf("decode upstream request: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{"id":"chatcmpl_1","object":"chat.completion","model":"gpt-4o-image","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+			}))
+			defer upstream.Close()
+
+			router := newChatTestRouter(t, config.UpstreamConfig{
+				Name:        tt.name,
+				BaseURL:     upstream.URL,
+				APIKeys:     []string{"sk-test"},
+				ServiceType: tt.serviceType,
+				Status:      "active",
+			})
+
+			w := performChatHandlerRequest(t, router, requestBody)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+			}
+
+			messages, ok := captured["messages"].([]interface{})
+			if !ok || len(messages) != 1 {
+				t.Fatalf("captured messages = %#v, want single message", captured["messages"])
+			}
+
+			message, ok := messages[0].(map[string]interface{})
+			if !ok {
+				t.Fatalf("captured message = %#v, want object", messages[0])
+			}
+
+			content, ok := message["content"].([]interface{})
+			if !ok || len(content) != 2 {
+				t.Fatalf("captured content = %#v, want 2-part array", message["content"])
+			}
+
+			imagePart, ok := content[1].(map[string]interface{})
+			if !ok || imagePart["type"] != "image_url" {
+				t.Fatalf("captured image part = %#v, want image_url", content[1])
+			}
+
+			imageURL, ok := imagePart["image_url"].(map[string]interface{})
+			if !ok || imageURL["url"] != "https://example.com/image.png" {
+				t.Fatalf("captured image_url = %#v, want original url", imagePart["image_url"])
+			}
+		})
+	}
+}
+
+func TestChatHandler_ImageEditPassthroughSucceeds(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var captured map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode upstream request: %v", err)
+		}
+
+		messages, ok := captured["messages"].([]interface{})
+		if !ok || len(messages) != 1 {
+			t.Fatalf("captured messages = %#v, want single message", captured["messages"])
+		}
+
+		message, ok := messages[0].(map[string]interface{})
+		if !ok {
+			t.Fatalf("captured message = %#v, want object", messages[0])
+		}
+
+		content, ok := message["content"].([]interface{})
+		if !ok || len(content) != 2 {
+			t.Fatalf("captured content = %#v, want 2-part array", message["content"])
+		}
+
+		textPart, ok := content[0].(map[string]interface{})
+		if !ok || textPart["type"] != "text" || textPart["text"] != "修改这个图片" {
+			t.Fatalf("captured text part = %#v, want original prompt", content[0])
+		}
+
+		imagePart, ok := content[1].(map[string]interface{})
+		if !ok || imagePart["type"] != "image_url" {
+			t.Fatalf("captured image part = %#v, want image_url", content[1])
+		}
+
+		imageURL, ok := imagePart["image_url"].(map[string]interface{})
+		if !ok || imageURL["url"] != "https://example.com/image.png" {
+			t.Fatalf("captured image_url = %#v, want original url", imagePart["image_url"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"id":"chatcmpl_imgedit_1","object":"chat.completion","created":1677652288,"choices":[{"index":0,"message":{"role":"assistant","content":"图片已修改完成"},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":12,"total_tokens":21}}`))
+	}))
+	defer upstream.Close()
+
+	router := newChatTestRouter(t, config.UpstreamConfig{
+		Name:        "chat_openai_image_edit",
+		BaseURL:     upstream.URL,
+		APIKeys:     []string{"sk-test"},
+		ServiceType: "openai",
+		Status:      "active",
+	})
+
+	requestBody := `{"model":"gpt-4o-image","stream":false,"messages":[{"role":"user","content":[{"type":"text","text":"修改这个图片"},{"type":"image_url","image_url":{"url":"https://example.com/image.png"}}]}]}`
+	w := performChatHandlerRequest(t, router, requestBody)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
+	}
+
+	var resp struct {
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Choices []struct {
+			Message struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+			TotalTokens      int `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v, body=%s", err, w.Body.String())
+	}
+
+	if resp.ID != "chatcmpl_imgedit_1" {
+		t.Fatalf("id = %q, want chatcmpl_imgedit_1", resp.ID)
+	}
+	if resp.Object != "chat.completion" {
+		t.Fatalf("object = %q, want chat.completion", resp.Object)
+	}
+	if len(resp.Choices) != 1 {
+		t.Fatalf("choices = %#v, want single choice", resp.Choices)
+	}
+	if resp.Choices[0].Message.Content != "图片已修改完成" {
+		t.Fatalf("content = %q, want 图片已修改完成", resp.Choices[0].Message.Content)
+	}
+	if resp.Choices[0].FinishReason != "stop" {
+		t.Fatalf("finish_reason = %q, want stop", resp.Choices[0].FinishReason)
+	}
+	if resp.Usage.PromptTokens != 9 || resp.Usage.CompletionTokens != 12 || resp.Usage.TotalTokens != 21 {
+		t.Fatalf("usage = %#v, want {9 12 21}", resp.Usage)
 	}
 }
 

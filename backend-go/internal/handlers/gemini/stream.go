@@ -48,24 +48,31 @@ func handleStreamSuccess(
 	}
 
 	var totalUsage *types.Usage
+	logBuffer := common.NewLimitedLogBuffer(common.MaxUpstreamResponseLogBytes)
+	streamLoggingEnabled := envCfg.EnableResponseLogs && envCfg.IsDevelopment()
+
+	common.LogUpstreamResponseHeaders(resp, envCfg, "Gemini")
 
 	switch upstreamType {
 	case "gemini":
-		totalUsage = streamGeminiToGemini(c, resp, flusher, envCfg)
+		totalUsage = streamGeminiToGemini(c, resp, flusher, envCfg, logBuffer, streamLoggingEnabled)
 	case "claude":
-		totalUsage = streamClaudeToGemini(c, resp, flusher, envCfg, model)
+		totalUsage = streamClaudeToGemini(c, resp, flusher, envCfg, model, logBuffer, streamLoggingEnabled)
 	case "openai":
-		totalUsage = streamOpenAIToGemini(c, resp, flusher, envCfg, model)
+		totalUsage = streamOpenAIToGemini(c, resp, flusher, envCfg, model, logBuffer, streamLoggingEnabled)
 	case "responses":
-		totalUsage = streamResponsesToGemini(c, resp, flusher, envCfg, model)
+		totalUsage = streamResponsesToGemini(c, resp, flusher, envCfg, model, logBuffer, streamLoggingEnabled)
 	default:
 		// 默认透传
-		totalUsage = streamGeminiToGemini(c, resp, flusher, envCfg)
+		totalUsage = streamGeminiToGemini(c, resp, flusher, envCfg, logBuffer, streamLoggingEnabled)
 	}
 
 	if envCfg.EnableResponseLogs {
 		responseTime := time.Since(startTime).Milliseconds()
 		log.Printf("[Gemini-Stream-Timing] 流式响应完成: %dms", responseTime)
+		if logBuffer.Len() > 0 {
+			log.Printf("[Gemini-Stream] 上游流式响应原始内容:\n%s", logBuffer.String())
+		}
 	}
 
 	return totalUsage, nil
@@ -77,6 +84,8 @@ func streamGeminiToGemini(
 	resp *http.Response,
 	flusher http.Flusher,
 	envCfg *config.EnvConfig,
+	logBuffer *common.LimitedLogBuffer,
+	loggingEnabled bool,
 ) *types.Usage {
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer
@@ -85,6 +94,9 @@ func streamGeminiToGemini(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if loggingEnabled {
+			logBuffer.WriteString(line + "\n")
+		}
 
 		// 直接转发 SSE 数据
 		if strings.HasPrefix(line, "data: ") {
@@ -123,6 +135,8 @@ func streamClaudeToGemini(
 	flusher http.Flusher,
 	envCfg *config.EnvConfig,
 	model string,
+	logBuffer *common.LimitedLogBuffer,
+	loggingEnabled bool,
 ) *types.Usage {
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -132,6 +146,9 @@ func streamClaudeToGemini(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if loggingEnabled {
+			logBuffer.WriteString(line + "\n")
+		}
 
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -157,7 +174,30 @@ func streamClaudeToGemini(
 				continue
 			}
 			deltaType, _ := delta["type"].(string)
-			if deltaType == "text_delta" {
+			switch deltaType {
+			case "thinking_delta":
+				thinking, _ := delta["thinking"].(string)
+				if thinking == "" {
+					continue
+				}
+				geminiChunk := types.GeminiStreamChunk{
+					Candidates: []types.GeminiCandidate{
+						{
+							Content: &types.GeminiContent{
+								Parts: []types.GeminiPart{
+									{Text: thinking, Thought: true},
+								},
+								Role: "model",
+							},
+						},
+					},
+				}
+				chunkBytes, _ := json.Marshal(geminiChunk)
+				fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+				if flusher != nil {
+					flusher.Flush()
+				}
+			case "text_delta":
 				text, _ := delta["text"].(string)
 				currentText.WriteString(text)
 
@@ -230,6 +270,8 @@ func streamOpenAIToGemini(
 	flusher http.Flusher,
 	envCfg *config.EnvConfig,
 	model string,
+	logBuffer *common.LimitedLogBuffer,
+	loggingEnabled bool,
 ) *types.Usage {
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -239,6 +281,9 @@ func streamOpenAIToGemini(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if loggingEnabled {
+			logBuffer.WriteString(line + "\n")
+		}
 
 		if !strings.HasPrefix(line, "data: ") {
 			continue
@@ -319,6 +364,27 @@ func streamOpenAIToGemini(
 		}
 
 		// 提取文本内容
+		if reasoning, _ := delta["reasoning_content"].(string); reasoning != "" {
+			geminiChunk := types.GeminiStreamChunk{
+				Candidates: []types.GeminiCandidate{
+					{
+						Content: &types.GeminiContent{
+							Parts: []types.GeminiPart{
+								{Text: reasoning, Thought: true},
+							},
+							Role: "model",
+						},
+					},
+				},
+			}
+
+			chunkBytes, _ := json.Marshal(geminiChunk)
+			fmt.Fprintf(c.Writer, "data: %s\n\n", string(chunkBytes))
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+
 		content, _ := delta["content"].(string)
 		if content != "" {
 			currentText.WriteString(content)
@@ -387,6 +453,8 @@ func streamResponsesToGemini(
 	flusher http.Flusher,
 	envCfg *config.EnvConfig,
 	model string,
+	logBuffer *common.LimitedLogBuffer,
+	loggingEnabled bool,
 ) *types.Usage {
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
@@ -396,6 +464,9 @@ func streamResponsesToGemini(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if loggingEnabled {
+			logBuffer.WriteString(line + "\n")
+		}
 		if line == "" {
 			continue
 		}

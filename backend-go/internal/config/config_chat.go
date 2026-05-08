@@ -12,7 +12,7 @@ import (
 // ============== Chat 渠道方法 ==============
 
 // GetCurrentChatUpstream 获取当前 Chat 上游配置
-// 优先选择第一个 active 状态的渠道，若无则返回显式错误
+// 优先选择第一个 active 状态的渠道，若无则回退到第一个渠道
 func (cm *ConfigManager) GetCurrentChatUpstream() (*UpstreamConfig, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
@@ -29,7 +29,8 @@ func (cm *ConfigManager) GetCurrentChatUpstream() (*UpstreamConfig, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("没有可用的 Chat 渠道：未找到 active 渠道")
+	// 没有 active 渠道，回退到第一个渠道
+	return &cm.config.ChatUpstream[0], nil
 }
 
 // GetCurrentChatUpstreamWithIndex 获取当前 Chat 上游配置及其索引
@@ -48,7 +49,7 @@ func (cm *ConfigManager) GetCurrentChatUpstreamWithIndex() (*UpstreamConfig, int
 		}
 	}
 
-	return nil, -1, fmt.Errorf("没有可用的 Chat 渠道：未找到 active 渠道")
+	return &cm.config.ChatUpstream[0], 0, nil
 }
 
 // AddChatUpstream 添加 Chat 上游
@@ -68,12 +69,12 @@ func (cm *ConfigManager) AddChatUpstream(upstream UpstreamConfig) error {
 		upstream.Status = "active"
 	}
 
+	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, "openai")
+
 	// 去重 API Keys 和 Base URLs
 	upstream.APIKeys = deduplicateStrings(upstream.APIKeys)
 	upstream.BaseURL = utils.CanonicalBaseURL(upstream.BaseURL, upstream.ServiceType)
 	upstream.BaseURLs = deduplicateBaseURLs(upstream.BaseURLs, upstream.ServiceType)
-	upstream.NormalizeModelsHealthCheckOptions()
-	upstream.NormalizeModelsResponseMode()
 
 	cm.config.ChatUpstream = append(cm.config.ChatUpstream, upstream)
 
@@ -96,15 +97,13 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 	}
 
 	upstream := &cm.config.ChatUpstream[index]
+	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, "openai")
 	serviceType := upstream.ServiceType
 	if updates.ServiceType != nil {
-		serviceType = *updates.ServiceType
+		serviceType = normalizeUpstreamServiceType(*updates.ServiceType, "openai")
 	}
 
 	if updates.Name != nil {
-		if err := validateChatUpstreamNameLocked(cm.config.ChatUpstream, index, *updates.Name); err != nil {
-			return false, err
-		}
 		upstream.Name = *updates.Name
 	}
 	if updates.BaseURL != nil {
@@ -157,11 +156,10 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 		}
 		upstream.HistoricalAPIKeys = newHistoricalKeys
 
-		if len(upstream.APIKeys) == 1 && len(updates.APIKeys) == 1 &&
-			upstream.APIKeys[0] != updates.APIKeys[0] {
+		wasSuspended := upstream.Status == "suspended"
+		if applySingleKeyReplacementTransition(upstream, updates.APIKeys) {
 			shouldResetMetrics = true
-			if upstream.Status == "suspended" {
-				upstream.Status = "active"
+			if wasSuspended {
 				log.Printf("[Config-Upstream] Chat 渠道 [%d] %s 已从暂停状态自动激活（单 key 更换）", index, upstream.Name)
 			}
 		}
@@ -178,6 +176,9 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 	}
 	if updates.FastMode != nil {
 		upstream.FastMode = *updates.FastMode
+	}
+	if updates.NormalizeNonstandardChatRoles != nil {
+		upstream.NormalizeNonstandardChatRoles = *updates.NormalizeNonstandardChatRoles
 	}
 	if updates.InsecureSkipVerify != nil {
 		upstream.InsecureSkipVerify = *updates.InsecureSkipVerify
@@ -198,23 +199,9 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 		v := *updates.AutoBlacklistBalance
 		upstream.AutoBlacklistBalance = &v
 	}
-	if updates.KeyAffinityEnabled != nil {
-		v := *updates.KeyAffinityEnabled
-		upstream.KeyAffinityEnabled = &v
-	}
-	if updates.ModelsHealthCheckEnabled != nil {
-		v := *updates.ModelsHealthCheckEnabled
-		upstream.ModelsHealthCheckEnabled = &v
-	}
-	if updates.ModelsHealthCheckIntervalMinutes != nil {
-		v := *updates.ModelsHealthCheckIntervalMinutes
-		if v <= 0 {
-			v = 60
-		}
-		upstream.ModelsHealthCheckIntervalMinutes = &v
-	}
-	if updates.FailoverRules != nil {
-		upstream.FailoverRules = CloneFailoverRules(updates.FailoverRules)
+	if updates.NormalizeMetadataUserID != nil {
+		v := *updates.NormalizeMetadataUserID
+		upstream.NormalizeMetadataUserID = &v
 	}
 	if updates.CustomHeaders != nil {
 		upstream.CustomHeaders = updates.CustomHeaders
@@ -225,17 +212,9 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 	if updates.SupportedModels != nil {
 		upstream.SupportedModels = updates.SupportedModels
 	}
-	if updates.ModelsResponseMode != nil {
-		upstream.ModelsResponseMode = *updates.ModelsResponseMode
-	}
-	if updates.ManualModels != nil {
-		upstream.ManualModels = updates.ManualModels
-	}
 	if updates.RoutePrefix != nil {
 		upstream.RoutePrefix = *updates.RoutePrefix
 	}
-	upstream.NormalizeModelsHealthCheckOptions()
-	upstream.NormalizeModelsResponseMode()
 
 	if err := cm.saveConfigLocked(cm.config); err != nil {
 		return false, err
@@ -243,18 +222,6 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 
 	log.Printf("[Config-Upstream] 已更新 Chat 上游: [%d] %s", index, cm.config.ChatUpstream[index].Name)
 	return shouldResetMetrics, nil
-}
-
-func validateChatUpstreamNameLocked(upstreams []UpstreamConfig, currentIndex int, candidate string) error {
-	for i, existing := range upstreams {
-		if i == currentIndex {
-			continue
-		}
-		if existing.Name == candidate {
-			return fmt.Errorf("渠道名称 '%s' 已存在", candidate)
-		}
-	}
-	return nil
 }
 
 // RemoveChatUpstream 删除 Chat 上游
@@ -269,7 +236,6 @@ func (cm *ConfigManager) RemoveChatUpstream(index int) (*UpstreamConfig, error) 
 	removed := cm.config.ChatUpstream[index]
 	cm.config.ChatUpstream = append(cm.config.ChatUpstream[:index], cm.config.ChatUpstream[index+1:]...)
 
-	// 清理被删除渠道的失败 key 冷却记录
 	cm.clearFailedKeysForUpstream(&removed, "chat")
 
 	if err := cm.saveConfigLocked(cm.config); err != nil {

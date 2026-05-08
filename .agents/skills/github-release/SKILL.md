@@ -115,9 +115,9 @@ cat CHANGELOG.md
 CHANGELOG 原文：
 
 ```
-- **修复 ModelMapping 导致请求字段丢失** - 解决使用模型重定向时 Claude API 返回 403 的问题：
+- **修复 ModelMapping 导致请求字段丢失** - 解决使用模型重定向时 Codex API 返回 403 的问题：
   - 原因：`ClaudeRequest` 结构体缺少 `metadata` 字段，JSON 反序列化时该字段被丢弃
-  - 表现：配置 `modelMapping` 后请求被上游拒绝（如 `opus` → `claude-opus-4-5-20251101`）
+  - 表现：配置 `modelMapping` 后请求被上游拒绝（如 `opus` → `Codex-opus-4-5-20251101`）
   - 修复：在 `ClaudeRequest` 中添加 `Metadata map[string]interface{}` 字段
   - 涉及文件：`backend-go/internal/types/types.go`
 ```

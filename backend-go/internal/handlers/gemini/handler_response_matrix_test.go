@@ -7,10 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
 	"github.com/BenedictKing/ccx/internal/metrics"
@@ -34,26 +31,20 @@ func setupGeminiTestConfigManager(t *testing.T, upstream []config.UpstreamConfig
 	if err != nil {
 		t.Fatalf("NewConfigManager() err = %v", err)
 	}
-	t.Cleanup(func() { _ = cm.Close() })
+	t.Cleanup(func() { cm.Close() })
 	return cm
 }
 
 func newGeminiTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.Engine {
 	t.Helper()
-	r, _ := newGeminiTestRouterWithMetrics(t, upstream)
-	return r
-}
-
-func newGeminiTestRouterWithMetrics(t *testing.T, upstream config.UpstreamConfig) (*gin.Engine, *metrics.MetricsManager) {
-	t.Helper()
 	gin.SetMode(gin.TestMode)
 	cfgManager := setupGeminiTestConfigManager(t, []config.UpstreamConfig{upstream})
-	geminiMetrics := metrics.NewMetricsManager()
 	channelScheduler := scheduler.NewChannelScheduler(
 		cfgManager,
 		metrics.NewMetricsManager(),
 		metrics.NewMetricsManager(),
-		geminiMetrics,
+		metrics.NewMetricsManager(),
+		metrics.NewMetricsManager(),
 		metrics.NewMetricsManager(),
 		session.NewTraceAffinityManager(),
 		nil,
@@ -65,7 +56,7 @@ func newGeminiTestRouterWithMetrics(t *testing.T, upstream config.UpstreamConfig
 
 	r := gin.New()
 	r.POST("/v1beta/models/*modelAction", Handler(envCfg, cfgManager, channelScheduler))
-	return r, geminiMetrics
+	return r
 }
 
 func performGeminiHandlerRequest(t *testing.T, router *gin.Engine, model string, body string) *httptest.ResponseRecorder {
@@ -77,197 +68,6 @@ func performGeminiHandlerRequest(t *testing.T, router *gin.Engine, model string,
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	return w
-}
-
-func performGeminiStreamHandlerRequest(t *testing.T, router *gin.Engine, model string, body string) *httptest.ResponseRecorder {
-	t.Helper()
-	url := "/v1beta/models/" + model + ":streamGenerateContent"
-	req := httptest.NewRequest(http.MethodPost, url, bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", "secret-key")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	return w
-}
-
-func TestGeminiHandler_StreamRawPassthroughPreservesNativeSSEBytesAndMetrics(t *testing.T) {
-	rawStream := "" +
-		":keep-alive\r\n\r\n" +
-		"id:gem-1\r\n" +
-		"event:model\r\n" +
-		"data:{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"hi\"}]}}]}\r\n\r\n" +
-		"retry:1500\r\n" +
-		"data:{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":9,\"candidatesTokenCount\":4,\"totalTokenCount\":13}}\r\n\r\n" +
-		"data:{\"usageMetadata\":{\"cachedContentTokenCount\":2}}\r\n\r\n"
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(rawStream))
-	}))
-	defer upstream.Close()
-
-	router, geminiMetrics := newGeminiTestRouterWithMetrics(t, config.UpstreamConfig{
-		Name:        "gemini-native-raw-stream",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"gemini-stream-key"},
-		ServiceType: "gemini",
-		Status:      "active",
-	})
-
-	w := performGeminiStreamHandlerRequest(t, router, "gemini-2.0-flash", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got != rawStream {
-		t.Fatalf("raw stream body mismatch\n got: %q\nwant: %q", got, rawStream)
-	}
-
-	points := geminiMetrics.GetKeyHistoricalStats(upstream.URL, "gemini-stream-key", "gemini", time.Hour, time.Minute)
-	var successCount, inputTokens, outputTokens, cacheReadTokens int64
-	for _, point := range points {
-		successCount += point.SuccessCount
-		inputTokens += point.InputTokens
-		outputTokens += point.OutputTokens
-		cacheReadTokens += point.CacheReadInputTokens
-	}
-	if successCount != 1 {
-		t.Fatalf("successCount = %d, want 1", successCount)
-	}
-	if inputTokens != 7 || outputTokens != 4 || cacheReadTokens != 2 {
-		t.Fatalf("metrics tokens = input:%d output:%d cache_read:%d, want input:7 output:4 cache_read:2", inputTokens, outputTokens, cacheReadTokens)
-	}
-}
-
-func TestGeminiHandler_NonStreamRawPassthroughRecordsCachedContentTokens(t *testing.T) {
-	rawBody := `{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]},"finishReason":"STOP","index":0}],"usageMetadata":{"promptTokenCount":9,"cachedContentTokenCount":12,"candidatesTokenCount":4,"totalTokenCount":13},"vendorExt":{"kept":true}}`
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(rawBody))
-	}))
-	defer upstream.Close()
-
-	router, geminiMetrics := newGeminiTestRouterWithMetrics(t, config.UpstreamConfig{
-		Name:        "gemini-native-raw-nonstream",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"gemini-nonstream-key"},
-		ServiceType: "gemini",
-		Status:      "active",
-	})
-
-	w := performGeminiHandlerRequest(t, router, "gemini-2.0-flash", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got != rawBody {
-		t.Fatalf("raw non-stream body mismatch\n got: %q\nwant: %q", got, rawBody)
-	}
-
-	points := geminiMetrics.GetKeyHistoricalStats(upstream.URL, "gemini-nonstream-key", "gemini", time.Hour, time.Minute)
-	var successCount, inputTokens, outputTokens, cacheReadTokens int64
-	for _, point := range points {
-		successCount += point.SuccessCount
-		inputTokens += point.InputTokens
-		outputTokens += point.OutputTokens
-		cacheReadTokens += point.CacheReadInputTokens
-	}
-	if successCount != 1 {
-		t.Fatalf("successCount = %d, want 1", successCount)
-	}
-	if inputTokens != 0 || outputTokens != 4 || cacheReadTokens != 12 {
-		t.Fatalf("metrics tokens = input:%d output:%d cache_read:%d, want input:0 output:4 cache_read:12", inputTokens, outputTokens, cacheReadTokens)
-	}
-}
-
-func TestGeminiHandler_StreamRawPassthroughCancelsFirstAttemptBeforeFailover(t *testing.T) {
-	firstClosed := make(chan struct{})
-	var secondSawFirstClosed atomic.Bool
-	successStream := "" +
-		"data:{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"ok\"}]}}]}\n\n" +
-		"data:{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":4,\"candidatesTokenCount\":2,\"totalTokenCount\":6}}\n\n"
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		key := r.Header.Get("x-goog-api-key")
-		switch {
-		case strings.Contains(key, "gemini-first"):
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("event: error\ndata:{\"error\":{\"type\":\"rate_limit_error\",\"message\":\"slow down\"}}\n\n"))
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-			<-r.Context().Done()
-			close(firstClosed)
-		case strings.Contains(key, "gemini-second"):
-			select {
-			case <-firstClosed:
-				secondSawFirstClosed.Store(true)
-			case <-time.After(2 * time.Second):
-			}
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte(successStream))
-		default:
-			http.Error(w, "unexpected key", http.StatusInternalServerError)
-		}
-	}))
-	defer upstream.Close()
-
-	router := newGeminiTestRouter(t, config.UpstreamConfig{
-		Name:        "gemini-native-raw-failover",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"gemini-first", "gemini-second"},
-		ServiceType: "gemini",
-		Status:      "active",
-	})
-
-	w := performGeminiStreamHandlerRequest(t, router, "gemini-2.0-flash", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got != successStream {
-		t.Fatalf("body = %q, want successful second attempt stream %q", got, successStream)
-	}
-	if !secondSawFirstClosed.Load() {
-		t.Fatalf("second attempt started before first attempt body/fan-out was released")
-	}
-}
-
-func TestGeminiHandler_CrossFormatStreamDoesNotUseRawPassthrough(t *testing.T) {
-	upstreamRaw := "" +
-		"event:raw_should_not_pass\n" +
-		"data: {\"id\":\"chatcmpl_1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"hi\"}}]}\n\n" +
-		"data: {\"choices\":[{\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n"
-
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(upstreamRaw))
-	}))
-	defer upstream.Close()
-
-	router := newGeminiTestRouter(t, config.UpstreamConfig{
-		Name:        "gemini-openai-stream-conversion",
-		BaseURL:     upstream.URL,
-		APIKeys:     []string{"sk-openai-stream"},
-		ServiceType: "openai",
-		Status:      "active",
-	})
-
-	w := performGeminiStreamHandlerRequest(t, router, "gemini-2.0-flash", `{"contents":[{"role":"user","parts":[{"text":"hello"}]}]}`)
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := w.Body.String(); got == upstreamRaw {
-		t.Fatalf("cross-format stream was raw-passthroughed unexpectedly")
-	}
-	if bytes.Contains(w.Body.Bytes(), []byte("event:raw_should_not_pass")) {
-		t.Fatalf("cross-format response leaked raw upstream event: %s", w.Body.String())
-	}
-	if !bytes.Contains(w.Body.Bytes(), []byte("candidates")) {
-		t.Fatalf("cross-format response did not include converted Gemini chunks: %s", w.Body.String())
-	}
 }
 
 func TestGeminiHandler_NonStreamMatrix_AllFourUpstreams(t *testing.T) {

@@ -26,7 +26,7 @@ func NormalizeImagesServiceTypeForProxy(serviceType string) (string, error) {
 }
 
 // GetCurrentImagesUpstream 获取当前 Images 上游配置
-// 选择第一个 active 状态的渠道；若未找到 active 渠道则返回错误
+// 优先选择第一个 active 状态的渠道，若无则回退到第一个渠道
 func (cm *ConfigManager) GetCurrentImagesUpstream() (*UpstreamConfig, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
@@ -43,7 +43,8 @@ func (cm *ConfigManager) GetCurrentImagesUpstream() (*UpstreamConfig, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("没有可用的 Images 渠道：未找到 active 渠道")
+	// 没有 active 渠道，回退到第一个渠道
+	return &cm.config.ImagesUpstream[0], nil
 }
 
 // GetCurrentImagesUpstreamWithIndex 获取当前 Images 上游配置及其索引
@@ -62,7 +63,7 @@ func (cm *ConfigManager) GetCurrentImagesUpstreamWithIndex() (*UpstreamConfig, i
 		}
 	}
 
-	return nil, -1, fmt.Errorf("没有可用的 Images 渠道：未找到 active 渠道")
+	return &cm.config.ImagesUpstream[0], 0, nil
 }
 
 // AddImagesUpstream 添加 Images 上游
@@ -129,9 +130,6 @@ func (cm *ConfigManager) UpdateImagesUpstream(index int, updates UpstreamUpdate)
 	}
 
 	if updates.Name != nil {
-		if err := validateImagesUpstreamNameLocked(cm.config.ImagesUpstream, index, *updates.Name); err != nil {
-			return false, err
-		}
 		upstream.Name = *updates.Name
 	}
 	if updates.BaseURL != nil {
@@ -205,6 +203,9 @@ func (cm *ConfigManager) UpdateImagesUpstream(index int, updates UpstreamUpdate)
 	if updates.FastMode != nil {
 		upstream.FastMode = *updates.FastMode
 	}
+	if updates.NormalizeNonstandardChatRoles != nil {
+		upstream.NormalizeNonstandardChatRoles = *updates.NormalizeNonstandardChatRoles
+	}
 	if updates.InsecureSkipVerify != nil {
 		upstream.InsecureSkipVerify = *updates.InsecureSkipVerify
 	}
@@ -223,6 +224,10 @@ func (cm *ConfigManager) UpdateImagesUpstream(index int, updates UpstreamUpdate)
 	if updates.AutoBlacklistBalance != nil {
 		v := *updates.AutoBlacklistBalance
 		upstream.AutoBlacklistBalance = &v
+	}
+	if updates.NormalizeMetadataUserID != nil {
+		v := *updates.NormalizeMetadataUserID
+		upstream.NormalizeMetadataUserID = &v
 	}
 	if updates.CustomHeaders != nil {
 		upstream.CustomHeaders = updates.CustomHeaders
@@ -243,18 +248,6 @@ func (cm *ConfigManager) UpdateImagesUpstream(index int, updates UpstreamUpdate)
 
 	log.Printf("[Config-Upstream] 已更新 Images 上游: [%d] %s", index, cm.config.ImagesUpstream[index].Name)
 	return shouldResetMetrics, nil
-}
-
-func validateImagesUpstreamNameLocked(upstreams []UpstreamConfig, currentIndex int, candidate string) error {
-	for i, existing := range upstreams {
-		if i == currentIndex {
-			continue
-		}
-		if existing.Name == candidate {
-			return fmt.Errorf("渠道名称 '%s' 已存在", candidate)
-		}
-	}
-	return nil
 }
 
 // RemoveImagesUpstream 删除 Images 上游

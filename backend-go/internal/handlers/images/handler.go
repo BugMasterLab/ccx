@@ -26,7 +26,7 @@ const (
 	operationVariations  = "variations"
 )
 
-// Handler Images API ?????
+// Handler Images API 代理处理器
 func Handler(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
@@ -58,7 +58,7 @@ func Handler(
 		}
 
 		userID := utils.ExtractUnifiedSessionID(c, bodyBytes)
-		logImagesOriginalRequest(c, bodyBytes, contentType, envCfg)
+		common.LogOriginalRequest(c, bodyBytes, envCfg, "Images")
 
 		if channelScheduler.IsMultiChannelMode(scheduler.ChannelKindImages) {
 			handleMultiChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, userID, startTime, operation, contentType, isStream)
@@ -66,20 +66,6 @@ func Handler(
 			handleSingleChannel(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, startTime, operation, contentType, isStream)
 		}
 	})
-}
-
-func logImagesOriginalRequest(c *gin.Context, bodyBytes []byte, contentType string, envCfg *config.EnvConfig) {
-	if isMultipartContentType(contentType) {
-		if envCfg.EnableRequestLogs {
-			log.Printf("[Request-Receive] 收到Images请求: %s %s", c.Request.Method, c.Request.URL.Path)
-			if envCfg.IsDevelopment() {
-				log.Printf("[Images-Request] multipart request body omitted from logs")
-			}
-		}
-		return
-	}
-
-	common.LogOriginalRequest(c, bodyBytes, envCfg, "Images")
 }
 
 func extractOperation(path string) string {
@@ -95,12 +81,69 @@ func extractOperation(path string) string {
 	return ""
 }
 
+func sanitizeDiagnosticError(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.TrimSpace(err.Error())
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
+	msg = strings.Join(strings.Fields(msg), " ")
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	return msg
+}
+
+func logImagesValidationFailure(c *gin.Context, operation string, contentType string, bodyBytes []byte, stage string, reason string, err error) {
+	log.Printf("[Images-Validation] operation=%s method=%s path=%s content_type=%q body_bytes=%d stage=%s reason=%s error=%q",
+		operation,
+		c.Request.Method,
+		c.Request.URL.Path,
+		contentType,
+		len(bodyBytes),
+		stage,
+		reason,
+		sanitizeDiagnosticError(err),
+	)
+}
+
+func logImagesMultipartFailure(c *gin.Context, operation string, contentType string, bodyBytes []byte, err error) {
+	stage, reason := describeMultipartDiagnostic(err)
+	log.Printf("[Images-Multipart] operation=%s method=%s path=%s content_type=%q body_bytes=%d stage=%s reason=%s multipart=true boundary_present=%t error=%q",
+		operation,
+		c.Request.Method,
+		c.Request.URL.Path,
+		contentType,
+		len(bodyBytes),
+		stage,
+		reason,
+		hasMultipartBoundary(contentType),
+		sanitizeDiagnosticError(err),
+	)
+}
+
+func logImagesBuildRequestFailure(operation string, baseURL string, apiKey string, model string, contentType string, bodyBytes []byte, stage string, reason string, err error) {
+	log.Printf("[Images-BuildRequest] operation=%s base_url=%q key_mask=%s model=%q content_type=%q body_bytes=%d stage=%s reason=%s error=%q",
+		operation,
+		baseURL,
+		utils.MaskAPIKey(apiKey),
+		model,
+		contentType,
+		len(bodyBytes),
+		stage,
+		reason,
+		sanitizeDiagnosticError(err),
+	)
+}
+
 func parseImagesRequest(c *gin.Context, bodyBytes []byte, contentType string, operation string) (string, bool, bool) {
 	if operation != operationGenerations {
 		if isJSONContentType(contentType) {
 			var reqMap map[string]interface{}
 			if len(bodyBytes) > 0 {
 				if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+					logImagesValidationFailure(c, operation, contentType, bodyBytes, "parse_json", "invalid_json", err)
 					imagesErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err), "invalid_request_error", "invalid_json")
 					return "", false, false
 				}
@@ -113,9 +156,12 @@ func parseImagesRequest(c *gin.Context, bodyBytes []byte, contentType string, op
 		}
 		if isMultipartContentType(contentType) {
 			if err := validateMultipartBody(bodyBytes, contentType); err != nil {
+				logImagesMultipartFailure(c, operation, contentType, bodyBytes, err)
 				imagesErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("Invalid multipart body: %v", err), "invalid_request_error", "invalid_multipart")
 				return "", false, false
 			}
+		} else {
+			logImagesValidationFailure(c, operation, contentType, bodyBytes, "content_type", "invalid_content_type", fmt.Errorf("unsupported content type for images %s", operation))
 		}
 		model := extractImagesModel(bodyBytes, contentType)
 		if strings.TrimSpace(model) == "" {
@@ -127,6 +173,7 @@ func parseImagesRequest(c *gin.Context, bodyBytes []byte, contentType string, op
 	var reqMap map[string]interface{}
 	if len(bodyBytes) > 0 {
 		if err := json.Unmarshal(bodyBytes, &reqMap); err != nil {
+			logImagesValidationFailure(c, operation, contentType, bodyBytes, "parse_json", "invalid_json", err)
 			imagesErrorResponse(c, http.StatusBadRequest, fmt.Sprintf("Invalid request body: %v", err), "invalid_request_error", "invalid_json")
 			return "", false, false
 		}
@@ -134,11 +181,13 @@ func parseImagesRequest(c *gin.Context, bodyBytes []byte, contentType string, op
 
 	model, _ := reqMap["model"].(string)
 	if model == "" {
+		logImagesValidationFailure(c, operation, contentType, bodyBytes, "validate_required", "missing_model", fmt.Errorf("model is required"))
 		imagesErrorResponse(c, http.StatusBadRequest, "model is required", "invalid_request_error", "missing_parameter")
 		return "", false, false
 	}
 	prompt, _ := reqMap["prompt"].(string)
 	if prompt == "" {
+		logImagesValidationFailure(c, operation, contentType, bodyBytes, "validate_required", "missing_prompt", fmt.Errorf("prompt is required"))
 		imagesErrorResponse(c, http.StatusBadRequest, "prompt is required", "invalid_request_error", "missing_parameter")
 		return "", false, false
 	}
@@ -205,9 +254,10 @@ func handleMultiChannel(
 					channelScheduler.MarkURLSuccess(scheduler.ChannelKindImages, channelIndex, url)
 				},
 				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
-					return handleSuccess(c, resp, startTime, isStream)
+					return handleSuccess(c, resp, envCfg, startTime, isStream)
 				},
 				model,
+				operation,
 				selection.ChannelIndex,
 				channelScheduler.GetChannelLogStore(scheduler.ChannelKindImages),
 			)
@@ -278,9 +328,10 @@ func handleSingleChannel(
 		nil,
 		nil,
 		func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
-			return handleSuccess(c, resp, startTime, isStream)
+			return handleSuccess(c, resp, envCfg, startTime, isStream)
 		},
 		model,
+		operation,
 		channelIndex,
 		channelScheduler.GetChannelLogStore(scheduler.ChannelKindImages),
 	)
@@ -288,7 +339,7 @@ func handleSingleChannel(
 		return
 	}
 
-	log.Printf("[Images-Error] ?? API??????")
+	log.Printf("[Images-Error] 所有 API密钥都失败了")
 	handleAllKeysFailed(c, lastFailoverError, lastError)
 }
 
@@ -315,6 +366,7 @@ func buildOperationRequest(
 ) (*http.Request, error) {
 	serviceType, err := config.NormalizeImagesServiceTypeForProxy(upstream.ServiceType)
 	if err != nil {
+		logImagesBuildRequestFailure(operation, baseURL, apiKey, model, contentType, bodyBytes, "normalize_service_type", "invalid_service_type", err)
 		return nil, err
 	}
 	upstream.ServiceType = serviceType
@@ -328,12 +380,21 @@ func buildOperationRequest(
 		if redirectedModel != "" && (!hasModelField || strings.TrimSpace(originalModel) == "" || redirectedModel != originalModel) {
 			requestBody, requestContentType, err = rewriteMultipartFormField(bodyBytes, contentType, "model", redirectedModel)
 			if err != nil {
+				stage, reason := describeMultipartDiagnostic(err)
+				if stage == "" {
+					stage = "rewrite_field"
+				}
+				if reason == "" {
+					reason = "part_read_failed"
+				}
+				logImagesBuildRequestFailure(operation, baseURL, apiKey, redirectedModel, contentType, bodyBytes, stage, reason, err)
 				return nil, err
 			}
 		}
 	} else if operation == operationGenerations || len(bodyBytes) > 0 {
 		requestBody, requestContentType, err = buildJSONRequestBody(bodyBytes, model, redirectedModel, operation)
 		if err != nil {
+			logImagesBuildRequestFailure(operation, baseURL, apiKey, redirectedModel, contentType, bodyBytes, "build_json", "invalid_json", err)
 			return nil, err
 		}
 	}
@@ -341,14 +402,15 @@ func buildOperationRequest(
 	url := buildOperationURL(baseURL, operation)
 	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, url, bytes.NewReader(requestBody))
 	if err != nil {
+		logImagesBuildRequestFailure(operation, baseURL, apiKey, redirectedModel, requestContentType, requestBody, "new_request", "request_init_failed", err)
 		return nil, err
 	}
 	if c.Request.URL != nil {
 		req.URL.RawQuery = c.Request.URL.RawQuery
 	}
-	req.Header = utils.PrepareUpstreamHeadersWithContentType(c, req.URL.Host, requestContentType)
-	utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
+	req.Header = prepareImagesUpstreamHeaders(c, req.URL.Host, requestContentType)
 	utils.SetAuthenticationHeader(req.Header, apiKey)
+	utils.ApplyCustomHeaders(req.Header, upstream.CustomHeaders)
 	return req, nil
 }
 
@@ -383,16 +445,40 @@ func buildJSONRequestBody(bodyBytes []byte, model string, redirectedModel string
 	return requestBody, "application/json", nil
 }
 
-func handleSuccess(c *gin.Context, resp *http.Response, startTime time.Time, isStream bool) (*types.Usage, error) {
-	defer func() { _ = resp.Body.Close() }()
+func prepareImagesUpstreamHeaders(c *gin.Context, targetHost string, contentType string) http.Header {
+	headers := c.Request.Header.Clone()
+	headers.Set("Host", targetHost)
+	headers.Del("x-proxy-key")
+	headers.Del("X-Forwarded-For")
+	headers.Del("X-Forwarded-Host")
+	headers.Del("X-Forwarded-Proto")
+	headers.Del("X-Real-IP")
+	headers.Del("Via")
+	headers.Del("Forwarded")
+	headers.Del("Accept-Encoding")
+	if strings.TrimSpace(contentType) == "" {
+		headers.Del("Content-Type")
+	} else {
+		headers.Set("Content-Type", contentType)
+	}
+	return headers
+}
+
+func handleSuccess(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time, isStream bool) (*types.Usage, error) {
+	defer resp.Body.Close()
 	if isStream {
-		return nil, passthroughStreamingResponse(c, resp)
+		return nil, passthroughStreamingResponseWithLog(c, resp, envCfg, startTime)
 	}
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
 		imagesErrorResponse(c, http.StatusInternalServerError, "Failed to read response", "server_error", "server_error")
 		return nil, err
+	}
+	if envCfg.EnableResponseLogs {
+		responseTime := time.Since(startTime).Milliseconds()
+		log.Printf("[Images-Timing] 响应完成: %dms, 状态: %d", responseTime, resp.StatusCode)
+		common.LogUpstreamResponse(resp, bodyBytes, envCfg, "Images")
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	var respMap map[string]interface{}
@@ -404,24 +490,48 @@ func handleSuccess(c *gin.Context, resp *http.Response, startTime time.Time, isS
 		outputTokens, _ := u["output_tokens"].(float64)
 		return &types.Usage{InputTokens: int(inputTokens), OutputTokens: int(outputTokens)}, nil
 	}
-	_ = startTime
 	return nil, nil
 }
 
 func passthroughStreamingResponse(c *gin.Context, resp *http.Response) error {
+	return passthroughStreamingResponseWithLog(c, resp, config.NewEnvConfig(), time.Now())
+}
+
+func passthroughStreamingResponseWithLog(c *gin.Context, resp *http.Response, envCfg *config.EnvConfig, startTime time.Time) error {
+	if envCfg.EnableResponseLogs {
+		responseTime := time.Since(startTime).Milliseconds()
+		log.Printf("[Images-Stream] 流式响应开始: %dms, 状态: %d", responseTime, resp.StatusCode)
+		common.LogUpstreamResponseHeaders(resp, envCfg, "Images")
+	}
+
 	utils.ForwardResponseHeaders(resp.Header, c.Writer)
 	c.Status(resp.StatusCode)
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		_, err := io.Copy(c.Writer, resp.Body)
+		bodyBytes, err := io.ReadAll(resp.Body)
+		if len(bodyBytes) > 0 {
+			common.LogUpstreamResponseBody(bodyBytes, envCfg, "Images")
+			if _, writeErr := c.Writer.Write(bodyBytes); writeErr != nil {
+				err = writeErr
+			}
+		}
+		if envCfg.EnableResponseLogs {
+			responseTime := time.Since(startTime).Milliseconds()
+			log.Printf("[Images-Stream] 流式响应完成: %dms", responseTime)
+		}
 		return err
 	}
 
 	buffer := make([]byte, 4*1024)
+	logBuffer := common.NewLimitedLogBuffer(common.MaxUpstreamResponseLogBytes)
+	streamLoggingEnabled := envCfg.EnableResponseLogs && envCfg.IsDevelopment()
 	for {
 		n, err := resp.Body.Read(buffer)
 		if n > 0 {
+			if streamLoggingEnabled {
+				logBuffer.Write(buffer[:n])
+			}
 			if _, writeErr := c.Writer.Write(buffer[:n]); writeErr != nil {
 				if common.IsClientDisconnectError(writeErr) || writeErr == io.ErrClosedPipe || strings.Contains(strings.ToLower(writeErr.Error()), "closed pipe") {
 					return context.Canceled
@@ -431,6 +541,13 @@ func passthroughStreamingResponse(c *gin.Context, resp *http.Response) error {
 			flusher.Flush()
 		}
 		if err == io.EOF {
+			if logBuffer.Len() > 0 {
+				common.LogUpstreamResponseBody(logBuffer.Bytes(), envCfg, "Images")
+			}
+			if envCfg.EnableResponseLogs {
+				responseTime := time.Since(startTime).Milliseconds()
+				log.Printf("[Images-Stream] 流式响应完成: %dms", responseTime)
+			}
 			return nil
 		}
 		if err != nil {

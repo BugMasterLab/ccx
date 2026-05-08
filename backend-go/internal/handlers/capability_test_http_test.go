@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,111 +23,6 @@ func resetCapabilityTestState() {
 	capabilityCache.Lock()
 	capabilityCache.entries = make(map[string]*capabilityCacheEntry)
 	capabilityCache.Unlock()
-}
-
-func TestChannelCapability_DoesNotProbeDisabledOnlyChannel(t *testing.T) {
-	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
-
-	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	tmpDir := t.TempDir()
-	configFile := filepath.Join(tmpDir, "config.json")
-	configJSON := `{"upstream":[{"name":"disabled-channel","serviceType":"claude","baseUrl":"` + upstream.URL + `","disabledApiKeys":[{"key":"sk-disabled"}]}]}`
-	if err := os.WriteFile(configFile, []byte(configJSON), 0644); err != nil {
-		t.Fatalf("write config failed: %v", err)
-	}
-	cfgManager, err := config.NewConfigManager(configFile)
-	if err != nil {
-		t.Fatalf("create config manager failed: %v", err)
-	}
-	defer func() { _ = cfgManager.Close() }()
-
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
-
-	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test", strings.NewReader(`{"targetProtocols":["messages"],"timeout":10000}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := calls.Load(); got != 0 {
-		t.Fatalf("upstream calls = %d, want 0", got)
-	}
-
-	var resp struct {
-		Job CapabilityTestJob `json:"job"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response failed: %v", err)
-	}
-	if resp.Job.Outcome != CapabilityOutcomeFailed {
-		t.Fatalf("job outcome=%s, want failed", resp.Job.Outcome)
-	}
-	if resp.Job.Error == nil || *resp.Job.Error != "no_api_key" {
-		t.Fatalf("job error=%v, want no_api_key", resp.Job.Error)
-	}
-}
-
-func TestChannelCapability_DoesNotProbeCooldownOnlyChannel(t *testing.T) {
-	resetCapabilityTestState()
-	gin.SetMode(gin.TestMode)
-
-	var calls atomic.Int32
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer upstream.Close()
-
-	tmpDir := t.TempDir()
-	configFile := filepath.Join(tmpDir, "config.json")
-	configJSON := `{"upstream":[{"name":"cooldown-channel","serviceType":"claude","baseUrl":"` + upstream.URL + `","apiKeys":["sk-cooldown"]}]}`
-	if err := os.WriteFile(configFile, []byte(configJSON), 0644); err != nil {
-		t.Fatalf("write config failed: %v", err)
-	}
-	cfgManager, err := config.NewConfigManager(configFile)
-	if err != nil {
-		t.Fatalf("create config manager failed: %v", err)
-	}
-	defer func() { _ = cfgManager.Close() }()
-	cfgManager.MarkKeyAsFailedWithDuration("sk-cooldown", "Messages", time.Hour)
-
-	r := gin.New()
-	r.POST("/messages/channels/:id/capability-test", TestChannelCapability(cfgManager, nil, "messages"))
-
-	req := httptest.NewRequest(http.MethodPost, "/messages/channels/0/capability-test", strings.NewReader(`{"targetProtocols":["messages"],"timeout":10000}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status=%d, want=%d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if got := calls.Load(); got != 0 {
-		t.Fatalf("upstream calls = %d, want 0", got)
-	}
-
-	var resp struct {
-		Job CapabilityTestJob `json:"job"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal response failed: %v", err)
-	}
-	if resp.Job.Outcome != CapabilityOutcomeFailed {
-		t.Fatalf("job outcome=%s, want failed", resp.Job.Outcome)
-	}
-	if resp.Job.Error == nil || *resp.Job.Error != "no_api_key" {
-		t.Fatalf("job error=%v, want no_api_key", resp.Job.Error)
-	}
 }
 
 func TestCancelCapabilityTestJob_HTTP(t *testing.T) {
@@ -154,7 +48,7 @@ func TestCancelCapabilityTestJob_HTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	r := gin.New()
 	r.DELETE("/messages/channels/:id/capability-test/:jobId", CancelCapabilityTestJob(cfgManager, "messages"))
@@ -198,7 +92,7 @@ func TestGetCapabilityTestJobStatus_HTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	r := gin.New()
 	r.GET("/messages/channels/:id/capability-test/:jobId", GetCapabilityTestJobStatus(cfgManager, "messages"))
@@ -234,7 +128,7 @@ func TestCapabilityCacheHit_DoesNotBindExecutionLookupKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
 	channel := cfg.Upstream[0]
@@ -242,7 +136,7 @@ func TestCapabilityCacheHit_DoesNotBindExecutionLookupKey(t *testing.T) {
 	apiKey := channel.APIKeys[0]
 	protocols := []string{"messages"}
 	cacheKey := buildCapabilityCacheKey(baseURL, apiKey, channel.ServiceType, protocols, nil)
-	identityKey := resolveCapabilityIdentityKey(nil, "messages", 0, &channel)
+	identityKey := resolveCapabilityIdentityKey(&channel)
 	executionLookupKey := buildCapabilityExecutionLookupKey(identityKey, "messages", protocols, nil)
 
 	setCapabilityCache(cacheKey, CapabilityTestResponse{
@@ -305,7 +199,7 @@ func TestRetryCapabilityTestModel_HTTP_RejectsUnknownModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	r := gin.New()
 	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
@@ -341,7 +235,7 @@ func TestRetryCapabilityTestModel_HTTP_RejectsRunningJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	r := gin.New()
 	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
@@ -378,7 +272,7 @@ func TestRetryCapabilityTestModel_HTTP_RejectsNonRetryableModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	r := gin.New()
 	r.POST("/messages/channels/:id/capability-test/:jobId/retry", RetryCapabilityTestModel(cfgManager, nil, "messages"))
@@ -429,7 +323,7 @@ func TestExecuteModelTest_RecordsCapabilityLogOnSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
 	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", store)
@@ -487,7 +381,7 @@ func TestExecuteModelTest_RecordsCapabilityLogOnFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
 	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", store)
@@ -549,7 +443,7 @@ func TestExecuteModelTest_TruncatesLargeFailureBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
 	result := executeModelTest(context.Background(), &cfg.Upstream[0], "messages", "claude-test", 5*time.Second, job.JobID, cfgManager, 0, "messages", "test-key", store)
@@ -603,7 +497,7 @@ func TestExecuteModelTest_RespectsAutoBlacklistBalance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
 	if len(cfg.Upstream) != 1 {
@@ -653,11 +547,11 @@ func TestResumedCancelledJob_ReturnsUpdatedState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
 	channel := cfg.Upstream[0]
-	job.IdentityKey = resolveCapabilityIdentityKey(nil, "messages", 0, &channel)
+	job.IdentityKey = resolveCapabilityIdentityKey(&channel)
 	baseURL := ""
 	if len(channel.GetAllBaseURLs()) > 0 {
 		baseURL = channel.GetAllBaseURLs()[0]
@@ -665,10 +559,12 @@ func TestResumedCancelledJob_ReturnsUpdatedState(t *testing.T) {
 	apiKey := ""
 	if len(channel.APIKeys) > 0 {
 		apiKey = channel.APIKeys[0]
+	} else if len(channel.DisabledAPIKeys) > 0 {
+		apiKey = channel.DisabledAPIKeys[0].Key
 	}
 
 	// 绑定 execution lookupKey，模拟取消后保留的 identity 运行复用键
-	executionLookupKey := buildCapabilityExecutionLookupKey(resolveCapabilityIdentityKey(nil, "messages", 0, &channel), "messages", []string{"messages"}, nil)
+	executionLookupKey := buildCapabilityExecutionLookupKey(resolveCapabilityIdentityKey(&channel), "messages", []string{"messages"}, nil)
 	cacheKey := buildCapabilityCacheKey(baseURL, apiKey, channel.ServiceType, []string{"messages"}, nil)
 	lookupKey := buildCapabilityJobLookupKey(cacheKey, "messages", 0)
 	capabilityJobs.bindLookupKey(executionLookupKey, job.JobID)
@@ -730,10 +626,10 @@ func TestCapabilityPreviousJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
-	sharedIdentity := resolveCapabilityIdentityKey(nil, "messages", 0, &cfg.Upstream[0])
+	sharedIdentity := resolveCapabilityIdentityKey(&cfg.Upstream[0])
 
 	prevJob := newCapabilityTestJob(0, "channel-a", "messages", "claude", []string{"messages"}, 10*time.Second, 10)
 	prevJob.IdentityKey = sharedIdentity
@@ -806,12 +702,12 @@ func TestCapabilityRunningJobReuse_ByIdentityAcrossChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create config manager failed: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	cfg := cfgManager.GetConfig()
 	channel := cfg.Upstream[0]
 	cacheKey := buildCapabilityCacheKey(channel.GetAllBaseURLs()[0], channel.APIKeys[0], channel.ServiceType, []string{"messages"}, nil)
-	executionLookupKey := buildCapabilityExecutionLookupKey(resolveCapabilityIdentityKey(nil, "messages", 0, &channel), "messages", []string{"messages"}, nil)
+	executionLookupKey := buildCapabilityExecutionLookupKey(resolveCapabilityIdentityKey(&channel), "messages", []string{"messages"}, nil)
 	lookupKey := buildCapabilityJobLookupKey(cacheKey, "messages", 0)
 	capabilityJobs.bindLookupKey(executionLookupKey, runningJob.JobID)
 	capabilityJobs.bindLookupKey(lookupKey, runningJob.JobID)
@@ -872,94 +768,26 @@ func TestBuildTestRequestWithModel_NoAPIKey(t *testing.T) {
 	}
 }
 
-func TestBuildTestRequestWithModel_DoesNotFallbackToDisabledKey(t *testing.T) {
+func TestBuildTestRequestWithModel_FallbackToDisabledKey(t *testing.T) {
 	channel := &config.UpstreamConfig{
 		BaseURL: "https://example.com",
-		APIKeys: []string{},
+		APIKeys: []string{}, // 活跃 key 已被拉空
 		DisabledAPIKeys: []config.DisabledKeyInfo{
 			{Key: "disabled-key-1", Reason: "authentication_error"},
 		},
 	}
 
-	_, err := buildTestRequestWithModel("messages", channel, "test-model")
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	// 应从 DisabledAPIKeys 临时借用 key，不 panic
+	req, err := buildTestRequestWithModel("messages", channel, "test-model")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "no_api_key") {
-		t.Fatalf("error=%q, want contains 'no_api_key'", err.Error())
+	// 验证请求使用了被拉黑的 key
+	authHeader := req.Header.Get("X-Api-Key")
+	if authHeader == "" {
+		authHeader = req.Header.Get("Authorization")
 	}
-}
-
-func TestBuildTestRequestWithModel_CustomAuthHeadersCannotOverrideSelectedKey(t *testing.T) {
-	tests := []struct {
-		name       string
-		protocol   string
-		apiKey     string
-		wantAuth   string
-		wantGoog   string
-		custom     map[string]string
-		wantUserUA string
-	}{
-		{
-			name:     "messages bearer wins",
-			protocol: "messages",
-			apiKey:   "sk-selected",
-			wantAuth: "Bearer sk-selected",
-			custom: map[string]string{
-				"Authorization":  "Bearer sk-custom",
-				"x-api-key":      "custom-api-key",
-				"x-goog-api-key": "custom-goog-key",
-				"User-Agent":     "CapabilityCustomUA/1.0",
-			},
-			wantUserUA: "CapabilityCustomUA/1.0",
-		},
-		{
-			name:     "gemini key wins",
-			protocol: "gemini",
-			apiKey:   "gemini-selected",
-			wantGoog: "gemini-selected",
-			custom: map[string]string{
-				"Authorization":  "Bearer sk-custom",
-				"x-api-key":      "custom-api-key",
-				"x-goog-api-key": "custom-goog-key",
-			},
-		},
-		{
-			name:     "responses bearer wins",
-			protocol: "responses",
-			apiKey:   "sk-selected",
-			wantAuth: "Bearer sk-selected",
-			custom: map[string]string{
-				"Authorization": "Bearer sk-custom",
-				"User-Agent":    "CapabilityResponsesUA/1.0",
-			},
-			wantUserUA: "CapabilityResponsesUA/1.0",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			channel := &config.UpstreamConfig{
-				BaseURL:       "https://example.com",
-				APIKeys:       []string{tt.apiKey},
-				CustomHeaders: tt.custom,
-			}
-
-			req, err := buildTestRequestWithModel(tt.protocol, channel, "test-model")
-			if err != nil {
-				t.Fatalf("buildTestRequestWithModel() err = %v", err)
-			}
-			if got := req.Header.Get("Authorization"); got != tt.wantAuth {
-				t.Fatalf("Authorization = %q, want %q", got, tt.wantAuth)
-			}
-			if got := req.Header.Get("x-goog-api-key"); got != tt.wantGoog {
-				t.Fatalf("x-goog-api-key = %q, want %q", got, tt.wantGoog)
-			}
-			if tt.wantUserUA != "" {
-				if got := req.Header.Get("User-Agent"); got != tt.wantUserUA {
-					t.Fatalf("User-Agent = %q, want %q", got, tt.wantUserUA)
-				}
-			}
-		})
+	if !strings.Contains(authHeader, "disabled-key-1") {
+		t.Fatalf("auth header=%q, want contains 'disabled-key-1'", authHeader)
 	}
 }

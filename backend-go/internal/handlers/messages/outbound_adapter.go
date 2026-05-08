@@ -366,6 +366,19 @@ func crossFormatSSEStream(ctx context.Context, resp *http.Response, provider pro
 			case ev, ok := <-eventChan:
 				if !ok {
 					eventChan = nil
+					// errChan may not be closed; drain non-blocking and exit
+					select {
+					case e, ok2 := <-errChan:
+						if ok2 && e != nil {
+							streamErr = e
+						}
+					default:
+					}
+					if streamErr != nil {
+						cs.SetErr(streamErr)
+					}
+					finalizeStreamUsage(owner, collected)
+					return
 				} else if ev != "" {
 					collectStreamFrameUsage(ev, &collected)
 					select {

@@ -670,6 +670,7 @@ func TestProcessStreamEvent_MessageStopInjectsUsageWhenMessageDeltaMissing(t *te
 	ctx := &StreamContext{
 		ContentBlockTypes: make(map[int]string),
 		HasUsage:          true, // message_start 已经有 usage
+		LogBuffer:         NewLimitedLogBuffer(MaxUpstreamResponseLogBytes),
 	}
 	envCfg := &config.EnvConfig{LogLevel: "info"}
 
@@ -880,6 +881,24 @@ data: {"type":"error","message":"账户余额已用尽，请充值"}
 `,
 			wantReason:  "insufficient_balance",
 			wantMessage: "账户余额已用尽，请充值",
+		},
+		{
+			name: "nested daily limit exceeded code",
+			event: `event: error
+data: {"type":"error","error":{"code":"DAILY_LIMIT_EXCEEDED","message":"daily usage limit exceeded"}}
+
+`,
+			wantReason:  "insufficient_balance",
+			wantMessage: "daily usage limit exceeded",
+		},
+		{
+			name: "top level usage limit exceeded code",
+			event: `event: error
+data: {"type":"error","code":"USAGE_LIMIT_EXCEEDED","message":"error: code=429 reason=\"DAILY_LIMIT_EXCEEDED\" message=\"daily usage limit exceeded\" metadata=map[]"}
+
+`,
+			wantReason:  "insufficient_balance",
+			wantMessage: "error: code=429 reason=\"DAILY_LIMIT_EXCEEDED\" message=\"daily usage limit exceeded\" metadata=map[]",
 		},
 		{
 			name: "string error field invalid api key",

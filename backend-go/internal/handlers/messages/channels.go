@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
+	handlers "github.com/BenedictKing/ccx/internal/handlers"
 	"github.com/BenedictKing/ccx/internal/handlers/common"
 	"github.com/BenedictKing/ccx/internal/httpclient"
 	"github.com/BenedictKing/ccx/internal/scheduler"
@@ -26,42 +26,7 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 
 		upstreams := make([]gin.H, len(cfg.Upstream))
 		for i, up := range cfg.Upstream {
-			status := config.GetChannelStatus(&up)
-			priority := config.GetChannelPriority(&up, i)
-
-			upstreams[i] = gin.H{
-				"index":                            i,
-				"name":                             up.Name,
-				"serviceType":                      up.ServiceType,
-				"baseUrl":                          up.BaseURL,
-				"baseUrls":                         up.BaseURLs,
-				"apiKeys":                          up.APIKeys,
-				"description":                      up.Description,
-				"website":                          up.Website,
-				"insecureSkipVerify":               up.InsecureSkipVerify,
-				"modelMapping":                     up.ModelMapping,
-				"reasoningMapping":                 up.ReasoningMapping,
-				"textVerbosity":                    up.TextVerbosity,
-				"fastMode":                         up.FastMode,
-				"latency":                          nil,
-				"status":                           status,
-				"priority":                         priority,
-				"promotionUntil":                   up.PromotionUntil,
-				"lowQuality":                       up.LowQuality,
-				"customHeaders":                    up.CustomHeaders,
-				"proxyUrl":                         up.ProxyURL,
-				"supportedModels":                  up.SupportedModels,
-				"modelsResponseMode":               up.GetModelsResponseMode(),
-				"manualModels":                     up.ManualModels,
-				"routePrefix":                      up.RoutePrefix,
-				"disabledApiKeys":                  up.DisabledAPIKeys,
-				"cooldownApiKeys":                  cfgManager.GetCooldownKeys("Messages", i),
-				"autoBlacklistBalance":             up.IsAutoBlacklistBalanceEnabled(),
-				"keyAffinityEnabled":               up.IsKeyAffinityEnabled(),
-				"modelsHealthCheckEnabled":         up.IsModelsHealthCheckEnabled(),
-				"modelsHealthCheckIntervalMinutes": up.GetModelsHealthCheckIntervalMinutes(),
-				"failoverRules":                    up.GetEffectiveFailoverRules(),
-			}
+			upstreams[i] = common.BuildChannelView(up, i)
 		}
 
 		c.JSON(200, gin.H{
@@ -300,70 +265,13 @@ func ReorderChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 
 // SetChannelStatus 设置渠道状态
 func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			c.JSON(400, gin.H{"error": "Invalid channel ID"})
-			return
-		}
-
-		var req struct {
-			Status string `json:"status"`
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "Invalid request body"})
-			return
-		}
-
-		if err := cfgManager.SetChannelStatus(id, req.Status); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(200, gin.H{"message": "渠道状态已更新"})
-	}
+	return handlers.NamedChannelStatusHandler(cfgManager, "渠道状态已更新")
 }
 
 // SetChannelPromotion 设置渠道促销期
 // 促销期内的渠道会被优先选择，忽略 trace 亲和性
 func SetChannelPromotion(cfgManager *config.ConfigManager) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		idStr := c.Param("id")
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			c.JSON(400, gin.H{"error": "无效的渠道 ID"})
-			return
-		}
-
-		var req struct {
-			Duration int `json:"duration"` // 促销期时长（秒），0 表示清除
-		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			c.JSON(400, gin.H{"error": "无效的请求参数"})
-			return
-		}
-
-		// 调用配置管理器设置促销期
-		duration := time.Duration(req.Duration) * time.Second
-		if err := cfgManager.SetChannelPromotion(id, duration); err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
-
-		if req.Duration <= 0 {
-			c.JSON(200, gin.H{
-				"success": true,
-				"message": "渠道促销期已清除",
-			})
-		} else {
-			c.JSON(200, gin.H{
-				"success":  true,
-				"message":  "渠道促销期已设置",
-				"duration": req.Duration,
-			})
-		}
-	}
+	return handlers.SetChannelPromotion(cfgManager)
 }
 
 // PingChannel Ping单个渠道
@@ -382,133 +290,30 @@ func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			return
 		}
 
-		channel := cfg.Upstream[id]
-		result := pingChannelURLs(&channel)
-		c.JSON(http.StatusOK, result)
+		c.JSON(http.StatusOK, common.PingMultiBaseURLUpstream(cfg.Upstream[id], buildPingRequest))
 	}
-}
-
-// pingChannelURLs 测试渠道的所有 BaseURL，返回最快的延迟
-func pingChannelURLs(ch *config.UpstreamConfig) gin.H {
-	urls := ch.GetAllBaseURLs()
-	if len(urls) == 0 {
-		return gin.H{"success": false, "latency": 0, "status": "error", "error": "no_base_url"}
-	}
-
-	// 单个 URL 直接测试
-	if len(urls) == 1 {
-		return pingURL(urls[0], ch.InsecureSkipVerify, ch.ProxyURL)
-	}
-
-	// 多个 URL 并发测试，返回最快的
-	type pingResult struct {
-		url     string
-		latency int64
-		success bool
-		err     string
-	}
-
-	results := make(chan pingResult, len(urls))
-	for _, url := range urls {
-		go func(testURL string) {
-			startTime := time.Now()
-			testURL = strings.TrimSuffix(testURL, "/")
-			client := httpclient.GetManager().GetStandardClient(5*time.Second, ch.InsecureSkipVerify, ch.ProxyURL)
-			req, err := http.NewRequest("HEAD", testURL, nil)
-			if err != nil {
-				results <- pingResult{url: testURL, latency: 0, success: false, err: "req_creation_failed"}
-				return
-			}
-			resp, err := client.Do(req)
-			latency := time.Since(startTime).Milliseconds()
-			if err != nil {
-				results <- pingResult{url: testURL, latency: latency, success: false, err: err.Error()}
-				return
-			}
-			_ = resp.Body.Close()
-			results <- pingResult{url: testURL, latency: latency, success: true}
-		}(url)
-	}
-
-	// 收集结果，找最快的成功响应（成功结果始终优先于失败结果）
-	var bestResult *pingResult
-	for i := 0; i < len(urls); i++ {
-		r := <-results
-		if r.success {
-			// 成功结果：优先选择，或选择延迟更低的
-			if bestResult == nil || !bestResult.success || r.latency < bestResult.latency {
-				bestResult = &r
-			}
-		} else if bestResult == nil || !bestResult.success {
-			// 失败结果：仅当没有成功结果时保存
-			bestResult = &r
-		}
-	}
-
-	if bestResult == nil {
-		return gin.H{"success": false, "latency": 0, "status": "error", "error": "all_urls_failed"}
-	}
-
-	if bestResult.success {
-		return gin.H{"success": true, "latency": bestResult.latency, "status": "healthy"}
-	}
-	return gin.H{"success": false, "latency": bestResult.latency, "status": "error", "error": bestResult.err}
-}
-
-// pingURL 测试单个 URL
-func pingURL(testURL string, insecureSkipVerify bool, proxyURL string) gin.H {
-	startTime := time.Now()
-	testURL = strings.TrimSuffix(testURL, "/")
-	client := httpclient.GetManager().GetStandardClient(5*time.Second, insecureSkipVerify, proxyURL)
-	req, err := http.NewRequest("HEAD", testURL, nil)
-	if err != nil {
-		return gin.H{"success": false, "latency": 0, "status": "error", "error": "req_creation_failed"}
-	}
-	resp, err := client.Do(req)
-	latency := time.Since(startTime).Milliseconds()
-	if err != nil {
-		return gin.H{"success": false, "latency": latency, "status": "error", "error": err.Error()}
-	}
-	_ = resp.Body.Close()
-	return gin.H{"success": true, "latency": latency, "status": "healthy"}
 }
 
 // PingAllChannels Ping所有渠道
 func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg := cfgManager.GetConfig()
-		results := make(chan gin.H)
-		var wg sync.WaitGroup
-
-		for i, channel := range cfg.Upstream {
-			wg.Add(1)
-			go func(id int, ch config.UpstreamConfig) {
-				defer wg.Done()
-				result := pingChannelURLs(&ch)
-				result["id"] = id
-				result["name"] = ch.Name
-				results <- result
-			}(i, channel)
-		}
-
-		go func() {
-			wg.Wait()
-			close(results)
-		}()
-
-		var finalResults []gin.H
-		for res := range results {
-			finalResults = append(finalResults, res)
-		}
-
-		c.JSON(http.StatusOK, finalResults)
+		c.JSON(http.StatusOK, common.PingAllMultiBaseURLUpstreams(cfg.Upstream, buildPingRequest))
 	}
+}
+
+func buildPingRequest(_ config.UpstreamConfig, baseURL string) (*http.Request, error) {
+	return http.NewRequest(http.MethodHead, baseURL, nil)
 }
 
 // GetModelsRequest 获取模型列表的请求体
 type GetModelsRequest struct {
-	Key     string `json:"key"`
-	BaseURL string `json:"baseUrl"`
+	Key                string            `json:"key"`
+	BaseURL            string            `json:"baseUrl"`
+	BaseURLs           []string          `json:"baseUrls"`
+	ProxyURL           string            `json:"proxyUrl"`
+	InsecureSkipVerify *bool             `json:"insecureSkipVerify"`
+	CustomHeaders      map[string]string `json:"customHeaders"`
 }
 
 // GetChannelModels 获取指定渠道的模型列表（支持临时 Key）
@@ -534,8 +339,6 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		var channelName string
 		var insecureSkipVerify bool
 		var proxyURL string
-		var manualModels []string
-		var useManualModels bool
 
 		if req.BaseURL != "" {
 			// 新增模式：使用临时 baseUrl
@@ -549,6 +352,12 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			channelName = "临时渠道"
 			insecureSkipVerify = false
 			proxyURL = ""
+			if req.InsecureSkipVerify != nil {
+				insecureSkipVerify = *req.InsecureSkipVerify
+			}
+			if req.ProxyURL != "" {
+				proxyURL = req.ProxyURL
+			}
 			log.Printf("[Messages-Models] 使用临时 baseUrl: %s", baseURL)
 		} else {
 			// 编辑模式：从配置中读取渠道信息
@@ -563,19 +372,20 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			channelName = channel.Name
 			insecureSkipVerify = channel.InsecureSkipVerify
 			proxyURL = channel.ProxyURL
-			useManualModels = channel.UsesManualModels()
-			manualModels = append([]string(nil), channel.ManualModels...)
-		}
-
-		if useManualModels {
-			body, err := common.MarshalManualModelsResponse(manualModels)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to build manual models response: %v", err)})
-				return
+			if req.BaseURL != "" {
+				if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
+					log.Printf("[Messages-Models] SSRF 防护拦截: %v", err)
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
+					return
+				}
+				baseURL = req.BaseURL
 			}
-			log.Printf("[Messages-Models] 返回手工模型列表: channel=%s, count=%d", channelName, len(manualModels))
-			c.Data(http.StatusOK, "application/json", body)
-			return
+			if req.InsecureSkipVerify != nil {
+				insecureSkipVerify = *req.InsecureSkipVerify
+			}
+			if req.ProxyURL != "" {
+				proxyURL = req.ProxyURL
+			}
 		}
 
 		// 4. 验证 API Key
@@ -584,23 +394,15 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "No API key provided"})
 			return
 		}
-		if req.BaseURL == "" {
-			if err := cfgManager.ValidateAdminProbeKey("Messages", id, apiKey); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-		} else {
-			if err := cfgManager.ValidateAdminProbeKeyIfKnownChannel("Messages", id, apiKey); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-		}
 
 		log.Printf("[Messages-Models] 请求模型列表: channel=%s, key=%s", channelName, utils.MaskAPIKey(apiKey))
 
 		// 5. 发起请求
 		url := buildModelsURL(baseURL)
 		client := httpclient.GetManager().GetStandardClient(10*time.Second, insecureSkipVerify, proxyURL)
+		if req.BaseURL != "" && req.ProxyURL != "" {
+			client = httpclient.GetManager().NewStandardClient(10*time.Second, insecureSkipVerify, proxyURL)
+		}
 
 		httpReq, err := http.NewRequestWithContext(c.Request.Context(), "GET", url, nil)
 		if err != nil {
@@ -610,6 +412,7 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		httpReq.Header.Set("Content-Type", "application/json")
+		utils.ApplyCustomHeaders(httpReq.Header, req.CustomHeaders)
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
@@ -620,7 +423,7 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		resp.Body.Close()
 		if err != nil {
 			log.Printf("[Messages-Models] 读取响应失败: channel=%s, error=%v", channelName, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read response: %v", err)})

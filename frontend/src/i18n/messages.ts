@@ -48,7 +48,6 @@ export type MessageKey =
   | 'capability.addModelPlaceholder'
   | 'capability.startTest'
   | 'capability.loadingTitle'
-  | 'capability.loadingBody'
   | 'capability.notStarted'
   | 'capability.rpmLabel'
   | 'capability.compatibleProtocols'
@@ -145,6 +144,7 @@ export type MessageKey =
   | 'orchestration.resumeSuccess'
   | 'orchestration.resumeSuccessWithKeys'
   | 'orchestration.deleteActiveGuard'
+  | 'orchestration.blacklistedKeys'
   | 'addChannel.editTitle'
   | 'addChannel.createTitle'
   | 'addChannel.editSubtitle'
@@ -204,6 +204,10 @@ export type MessageKey =
   | 'addChannel.lowQualityHint'
   | 'addChannel.autoBlacklistBalanceLabel'
   | 'addChannel.autoBlacklistBalanceHint'
+  | 'addChannel.normalizeMetadataUserIdLabel'
+  | 'addChannel.normalizeMetadataUserIdHint'
+  | 'addChannel.normalizeNonstandardChatRolesLabel'
+  | 'addChannel.normalizeNonstandardChatRolesHint'
   | 'addChannel.injectDummyThoughtSignatureLabel'
   | 'addChannel.injectDummyThoughtSignatureHint'
   | 'addChannel.stripThoughtSignatureLabel'
@@ -273,6 +277,16 @@ export type MessageKey =
   | 'channelLogs.empty'
   | 'channelLogs.retry'
   | 'channelLogs.sourceCapabilityTest'
+  | 'channelLogs.duration.connect'
+  | 'channelLogs.duration.firstByte'
+  | 'channelLogs.duration.total'
+  | 'channelLogs.status.pending'
+  | 'channelLogs.status.connecting'
+  | 'channelLogs.status.firstByte'
+  | 'channelLogs.status.streaming'
+  | 'channelLogs.status.completed'
+  | 'channelLogs.status.failed'
+  | 'channelLogs.status.cancelled'
   | 'store.channel.updated'
   | 'store.channel.added'
   | 'store.channel.deleted'
@@ -294,10 +308,6 @@ export type MessageKey =
   | 'chart.successRate'
   | 'chart.inputTokens'
   | 'chart.outputTokens'
-  | 'chart.totalTokens'
-  | 'chart.cacheReadTokens'
-  | 'chart.cacheWriteTokens'
-  | 'chart.totalTokensTooltip'
   | 'chart.input'
   | 'chart.output'
   | 'chart.requestUnit'
@@ -417,7 +427,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.addModelPlaceholder': 'e.g. claude-sonnet-4-6',
     'capability.startTest': 'Start test',
     'capability.loadingTitle': 'Testing protocol compatibility...',
-    'capability.loadingBody': 'This may take a few seconds',
     'capability.notStarted': 'Not started',
     'capability.rpmLabel': 'Test RPM',
     'capability.compatibleProtocols': 'Compatible protocols',
@@ -466,7 +475,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.reasonCancelled': 'Cancelled before completion',
     'capability.reasonTimeout': 'Timed out',
     'capability.retryModel': 'Retry this model',
-    'capability.snapshotUpdated': 'Snapshot: {time}',
+    'capability.snapshotUpdated': 'Updated: {time}',
     'capability.noApiKeyError': 'This channel has no API key configured and cannot run capability tests.',
     'capability.genericJobError': 'Capability test failed: {message}',
     'orchestration.title': 'Channel orchestration',
@@ -514,6 +523,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.resumeSuccess': 'Channel resumed and metrics reset',
     'orchestration.resumeSuccessWithKeys': 'Channel resumed, metrics reset, and {count} blacklisted key(s) restored',
     'orchestration.deleteActiveGuard': 'Cannot delete: keep at least one active channel in the failover sequence',
+    'orchestration.blacklistedKeys': '{count} key(s) blacklisted',
     'addChannel.editTitle': 'Edit channel',
     'addChannel.createTitle': 'Add new channel',
     'addChannel.editSubtitle': 'Modify channel configuration',
@@ -553,8 +563,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.fastModeHint': 'When enabled, requests send service_tier=priority.',
     'addChannel.textVerbosityLabel': 'Output verbosity',
     'addChannel.supportedModelsLabel': 'Supported models (optional)',
-    'addChannel.supportedModelsPlaceholder': 'Press Enter after each model name, for example gpt-4o or claude-*',
-    'addChannel.supportedModelsHint': 'Matches the original model requested by the client before model redirect is applied. Leave empty to allow all models. Wildcards such as gpt-4* are supported.',
+    'addChannel.supportedModelsPlaceholder': 'Press Enter after each rule, for example gpt-4*, *image*, or !*image*',
+    'addChannel.supportedModelsHint': 'Matches the original model requested by the client before model redirect is applied. Leave empty to allow all models. Supported forms: exact, prefix*, *suffix, *contains*, and exclusion with !.',
     'addChannel.supportedModelsInvalidPattern': 'Invalid rule ignored. Only exact, prefix*, *suffix, *contains*, and ! exclusion are allowed.',
     'addChannel.commonFilters': 'Common filters',
     'addChannel.apiKeyRequired': 'At least one key is required',
@@ -573,6 +583,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': 'When enabled, token usage is force-estimated locally and the local value is used if the deviation exceeds 5%.',
     'addChannel.autoBlacklistBalanceLabel': 'Auto blacklist on insufficient balance',
     'addChannel.autoBlacklistBalanceHint': 'Automatically move the key to the blacklist when the upstream reports insufficient balance.',
+    'addChannel.normalizeMetadataUserIdLabel': 'Normalize metadata.user_id',
+    'addChannel.normalizeMetadataUserIdHint': 'Auto-convert JSON object user_id to a flat string for upstream compatibility.',
+    'addChannel.normalizeNonstandardChatRolesLabel': 'Normalize non-standard chat roles',
+    'addChannel.normalizeNonstandardChatRolesHint': 'When enabled, roles outside system/user/assistant/tool are sent upstream as user.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Inject dummy thought signature',
     'addChannel.injectDummyThoughtSignatureHint': 'Injects a dummy signature into functionCall for third-party APIs that require this field. Disable it for the official API.',
     'addChannel.stripThoughtSignatureLabel': 'Strip thought signature',
@@ -642,6 +656,16 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.empty': 'No logs yet',
     'channelLogs.retry': 'Retry',
     'channelLogs.sourceCapabilityTest': 'Capability Test',
+    'channelLogs.duration.connect': 'Connect',
+    'channelLogs.duration.firstByte': 'First Byte',
+    'channelLogs.duration.total': 'Total',
+    'channelLogs.status.pending': 'Pending',
+    'channelLogs.status.connecting': 'Connecting',
+    'channelLogs.status.firstByte': 'First Byte',
+    'channelLogs.status.streaming': 'Streaming',
+    'channelLogs.status.completed': 'Completed',
+    'channelLogs.status.failed': 'Failed',
+    'channelLogs.status.cancelled': 'Cancelled',
     'store.channel.updated': 'Channel updated successfully',
     'store.channel.added': 'Channel added successfully',
     'store.channel.deleted': 'Channel deleted successfully',
@@ -663,10 +687,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.successRate': 'Availability',
     'chart.inputTokens': 'Input tokens',
     'chart.outputTokens': 'Output tokens',
-    'chart.totalTokens': 'Total tokens',
-    'chart.cacheReadTokens': 'Read',
-    'chart.cacheWriteTokens': 'Write',
-    'chart.totalTokensTooltip': 'Total tokens are input plus output tokens. This is usage aggregation only and does not include price, balance, deductions, refunds, or a billing ledger.',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'requests',
@@ -785,7 +805,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.addModelPlaceholder': 'cth. claude-sonnet-4-6',
     'capability.startTest': 'Mulai tes',
     'capability.loadingTitle': 'Menguji kompatibilitas protokol...',
-    'capability.loadingBody': 'Ini mungkin butuh beberapa detik',
     'capability.notStarted': 'Belum dimulai',
     'capability.rpmLabel': 'RPM tes',
     'capability.compatibleProtocols': 'Protokol kompatibel',
@@ -834,7 +853,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.reasonCancelled': 'Dibatalkan sebelum selesai',
     'capability.reasonTimeout': 'Waktu habis',
     'capability.retryModel': 'Coba ulang model ini',
-    'capability.snapshotUpdated': 'Snapshot: {time}',
+    'capability.snapshotUpdated': 'Diperbarui: {time}',
     'capability.noApiKeyError': 'Channel ini tidak memiliki API key dan tidak dapat menjalankan tes kemampuan.',
     'capability.genericJobError': 'Tes kemampuan gagal: {message}',
     'orchestration.title': 'Orkestrasi channel',
@@ -882,6 +901,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.resumeSuccess': 'Channel dilanjutkan dan metrik direset',
     'orchestration.resumeSuccessWithKeys': 'Channel dilanjutkan, metrik direset, dan {count} key blacklist dipulihkan',
     'orchestration.deleteActiveGuard': 'Tidak bisa dihapus: urutan failover harus menyisakan minimal satu channel aktif',
+    'orchestration.blacklistedKeys': '{count} key diblokir',
     'addChannel.editTitle': 'Edit channel',
     'addChannel.createTitle': 'Tambah channel baru',
     'addChannel.editSubtitle': 'Ubah konfigurasi channel',
@@ -921,8 +941,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.fastModeHint': 'Jika aktif, request akan mengirim service_tier=priority.',
     'addChannel.textVerbosityLabel': 'Kepadatan output',
     'addChannel.supportedModelsLabel': 'Model yang didukung (opsional)',
-    'addChannel.supportedModelsPlaceholder': 'Masukkan nama model lalu tekan Enter, misalnya gpt-4o atau claude-*',
-    'addChannel.supportedModelsHint': 'Mencocokkan nama model asli yang diminta client sebelum model redirect diterapkan. Kosong berarti semua model didukung. Wildcard seperti gpt-4* didukung.',
+    'addChannel.supportedModelsPlaceholder': 'Masukkan rule lalu tekan Enter, misalnya gpt-4*、*image*、atau !*image*',
+    'addChannel.supportedModelsHint': 'Mencocokkan nama model asli yang diminta client sebelum model redirect diterapkan. Kosong berarti semua model didukung. Bentuk yang didukung: exact, prefix*, *suffix, *contains*, serta exclusion dengan !.',
     'addChannel.supportedModelsInvalidPattern': 'Rule tidak valid dan diabaikan. Hanya exact, prefix*, *suffix, *contains*, serta exclusion ! yang didukung.',
     'addChannel.commonFilters': 'Filter umum',
     'addChannel.apiKeyRequired': 'Minimal satu key diperlukan',
@@ -941,6 +961,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': 'Jika aktif, token akan diperkirakan secara lokal dan nilai lokal dipakai bila selisihnya lebih dari 5%.',
     'addChannel.autoBlacklistBalanceLabel': 'Blacklist otomatis saat saldo habis',
     'addChannel.autoBlacklistBalanceHint': 'Pindahkan key ke daftar blokir otomatis saat upstream melaporkan saldo tidak cukup.',
+    'addChannel.normalizeMetadataUserIdLabel': 'Normalisasi metadata.user_id',
+    'addChannel.normalizeMetadataUserIdHint': 'Otomatis ubah user_id objek JSON menjadi string datar untuk kompatibilitas upstream.',
+    'addChannel.normalizeNonstandardChatRolesLabel': 'Normalisasi role chat non-standar',
+    'addChannel.normalizeNonstandardChatRolesHint': 'Jika aktif, role di luar system/user/assistant/tool dikirim ke upstream sebagai user.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Sisipkan dummy thought signature',
     'addChannel.injectDummyThoughtSignatureHint': 'Menyisipkan dummy signature ke functionCall agar kompatibel dengan API pihak ketiga yang membutuhkan field ini. Matikan untuk API resmi.',
     'addChannel.stripThoughtSignatureLabel': 'Hapus thought signature',
@@ -1010,6 +1034,16 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.empty': 'Belum ada log',
     'channelLogs.retry': 'Retry',
     'channelLogs.sourceCapabilityTest': 'Tes Kemampuan',
+    'channelLogs.duration.connect': 'Koneksi',
+    'channelLogs.duration.firstByte': 'Byte Pertama',
+    'channelLogs.duration.total': 'Total',
+    'channelLogs.status.pending': 'Menunggu',
+    'channelLogs.status.connecting': 'Menghubungkan',
+    'channelLogs.status.firstByte': 'Byte Pertama',
+    'channelLogs.status.streaming': 'Streaming',
+    'channelLogs.status.completed': 'Selesai',
+    'channelLogs.status.failed': 'Gagal',
+    'channelLogs.status.cancelled': 'Dibatalkan',
     'store.channel.updated': 'Channel berhasil diperbarui',
     'store.channel.added': 'Channel berhasil ditambahkan',
     'store.channel.deleted': 'Channel berhasil dihapus',
@@ -1031,10 +1065,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.successRate': 'Ketersediaan',
     'chart.inputTokens': 'Input token',
     'chart.outputTokens': 'Output token',
-    'chart.totalTokens': 'Total token',
-    'chart.cacheReadTokens': 'Baca',
-    'chart.cacheWriteTokens': 'Tulis',
-    'chart.totalTokensTooltip': 'Total token adalah token input ditambah token output. Ini hanya agregasi usage dan tidak mencakup harga, saldo, potongan, refund, atau ledger billing.',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'request',
@@ -1153,7 +1183,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.addModelPlaceholder': '例如 claude-sonnet-4-6',
     'capability.startTest': '开始测试',
     'capability.loadingTitle': '正在测试协议兼容性...',
-    'capability.loadingBody': '这可能需要几秒钟',
     'capability.notStarted': '待测试',
     'capability.rpmLabel': '测试 RPM',
     'capability.compatibleProtocols': '兼容协议',
@@ -1202,7 +1231,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'capability.reasonCancelled': '完成前已取消',
     'capability.reasonTimeout': '请求超时',
     'capability.retryModel': '重测此模型',
-    'capability.snapshotUpdated': '快照：{time}',
+    'capability.snapshotUpdated': '更新时间：{time}',
     'capability.noApiKeyError': '该渠道未配置 API Key，无法执行能力测试。',
     'capability.genericJobError': '能力测试失败：{message}',
     'orchestration.title': '渠道编排',
@@ -1250,6 +1279,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.resumeSuccess': '渠道已恢复，熔断指标已重置',
     'orchestration.resumeSuccessWithKeys': '渠道已恢复，熔断指标已重置，并恢复了 {count} 个拉黑密钥',
     'orchestration.deleteActiveGuard': '无法删除：故障转移序列中至少需要保留一个活跃渠道',
+    'orchestration.blacklistedKeys': '{count} 个密钥已拉黑',
     'addChannel.editTitle': '编辑渠道',
     'addChannel.createTitle': '添加新渠道',
     'addChannel.editSubtitle': '修改渠道配置信息',
@@ -1289,8 +1319,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.fastModeHint': '开启后下发 service_tier=priority',
     'addChannel.textVerbosityLabel': '输出冗长度',
     'addChannel.supportedModelsLabel': '支持的模型 (可选)',
-    'addChannel.supportedModelsPlaceholder': '输入模型名称后按回车添加，如 gpt-4o、claude-*',
-    'addChannel.supportedModelsHint': '匹配客户端请求的原始模型名（模型重定向发生在渠道选中之后）。留空表示支持所有模型。支持通配符，如 gpt-4* 匹配 gpt-4o、gpt-4-turbo 等',
+    'addChannel.supportedModelsPlaceholder': '输入规则后按回车添加，如 gpt-4*、*image*、!*image*',
+    'addChannel.supportedModelsHint': '匹配客户端请求的原始模型名（模型重定向发生在渠道选中之后）。留空表示支持所有模型。支持精确匹配、prefix*、*suffix、*contains* 以及 ! 排除规则。',
     'addChannel.supportedModelsInvalidPattern': '已忽略非法规则。仅支持精确匹配、prefix*、*suffix、*contains* 和 ! 排除规则。',
     'addChannel.commonFilters': '常用过滤器',
     'addChannel.apiKeyRequired': '至少需要一个密钥',
@@ -1309,6 +1339,10 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': '启用后强制本地估算 token 数量，偏差超过 5% 时使用本地值',
     'addChannel.autoBlacklistBalanceLabel': '余额不足时自动拉黑',
     'addChannel.autoBlacklistBalanceHint': '当上游返回余额不足时，自动将该 Key 移入拉黑列表。',
+    'addChannel.normalizeMetadataUserIdLabel': '规范化 metadata.user_id',
+    'addChannel.normalizeMetadataUserIdHint': '自动将 JSON 对象格式的 user_id 转换为扁平字符串，确保上游兼容性。',
+    'addChannel.normalizeNonstandardChatRolesLabel': '规范化非常见 Chat role',
+    'addChannel.normalizeNonstandardChatRolesHint': '开启后将 system/user/assistant/tool 之外的 role 作为 user 转发给上游。',
     'addChannel.injectDummyThoughtSignatureLabel': '注入 Dummy Thought Signature',
     'addChannel.injectDummyThoughtSignatureHint': '为 functionCall 注入 dummy signature，兼容需要该字段的第三方 API（官方 API 请关闭）',
     'addChannel.stripThoughtSignatureLabel': '移除 Thought Signature',
@@ -1378,6 +1412,16 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'channelLogs.empty': '暂无日志记录',
     'channelLogs.retry': '重试',
     'channelLogs.sourceCapabilityTest': '能力测试',
+    'channelLogs.duration.connect': '连接',
+    'channelLogs.duration.firstByte': '首字',
+    'channelLogs.duration.total': '总计',
+    'channelLogs.status.pending': '等待中',
+    'channelLogs.status.connecting': '连接中',
+    'channelLogs.status.firstByte': '首字节',
+    'channelLogs.status.streaming': '传输中',
+    'channelLogs.status.completed': '已完成',
+    'channelLogs.status.failed': '失败',
+    'channelLogs.status.cancelled': '已取消',
     'store.channel.updated': '渠道更新成功',
     'store.channel.added': '渠道添加成功',
     'store.channel.deleted': '渠道删除成功',
@@ -1399,10 +1443,6 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.successRate': '可用率',
     'chart.inputTokens': '输入 Token',
     'chart.outputTokens': '输出 Token',
-    'chart.totalTokens': '总 Token',
-    'chart.cacheReadTokens': '读',
-    'chart.cacheWriteTokens': '写',
-    'chart.totalTokensTooltip': '总 Token = 输入 Token + 输出 Token。这里只是 usage 汇总，不包含价格、余额、扣费、退款或账务流水含义。',
     'chart.input': '输入',
     'chart.output': '输出',
     'chart.requestUnit': '请求',

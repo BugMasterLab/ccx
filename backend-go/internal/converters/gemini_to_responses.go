@@ -95,6 +95,16 @@ func geminiContentToResponsesItems(content *types.GeminiContent) []types.Respons
 	var textParts []string
 	for _, part := range content.Parts {
 		if part.Text != "" {
+			if part.Thought && role == "assistant" {
+				items = append(items, types.ResponsesItem{
+					Type: "reasoning",
+					Summary: []interface{}{map[string]interface{}{
+						"type": "summary_text",
+						"text": part.Text,
+					}},
+				})
+				continue
+			}
 			textParts = append(textParts, part.Text)
 		}
 	}
@@ -243,6 +253,11 @@ func ResponsesResponseToGemini(responsesResp map[string]interface{}) (*types.Gem
 		inputTokens, _ := getIntFromMap(usageRaw, "input_tokens")
 		outputTokens, _ := getIntFromMap(usageRaw, "output_tokens")
 		cachedTokens, _ := getIntFromMap(usageRaw, "cache_read_input_tokens")
+		if cachedTokens == 0 {
+			if details, ok := usageRaw["input_tokens_details"].(map[string]interface{}); ok {
+				cachedTokens, _ = getIntFromMap(details, "cached_tokens")
+			}
+		}
 
 		geminiResp.UsageMetadata = &types.GeminiUsageMetadata{
 			PromptTokenCount:        inputTokens + cachedTokens,
@@ -338,7 +353,15 @@ func ConvertResponsesToGeminiStream(ctx context.Context, modelName string, rawJS
 			st.TextBuf.WriteString(delta)
 
 			// 构建 Gemini 流式响应（发送增量，不是累计文本）
-			chunk := buildGeminiStreamChunk(delta, "", st.Seq)
+			chunk := buildGeminiStreamChunk(delta, "", false, st.Seq)
+			st.Seq++
+			out = append(out, chunk)
+		}
+
+	case "response.reasoning_summary_text.delta":
+		delta := root.Get("text").String()
+		if delta != "" {
+			chunk := buildGeminiStreamChunk(delta, "", true, st.Seq)
 			st.Seq++
 			out = append(out, chunk)
 		}
@@ -377,11 +400,14 @@ func ConvertResponsesToGeminiStream(ctx context.Context, modelName string, rawJS
 }
 
 // buildGeminiStreamChunk 构建 Gemini 流式 chunk
-func buildGeminiStreamChunk(text, finishReason string, seq int) string {
+func buildGeminiStreamChunk(text, finishReason string, thought bool, seq int) string {
 	chunk := `{"candidates":[{"content":{"parts":[{"text":""}],"role":"model"},"finishReason":"","index":0}]}`
 
 	if text != "" {
 		chunk, _ = sjson.Set(chunk, "candidates.0.content.parts.0.text", text)
+	}
+	if thought {
+		chunk, _ = sjson.Set(chunk, "candidates.0.content.parts.0.thought", true)
 	}
 	if finishReason != "" {
 		chunk, _ = sjson.Set(chunk, "candidates.0.finishReason", finishReason)

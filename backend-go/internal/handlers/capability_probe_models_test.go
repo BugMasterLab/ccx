@@ -15,10 +15,10 @@ func TestGetCapabilityProbeModel(t *testing.T) {
 		want     string
 		wantErr  bool
 	}{
-		{protocol: "messages", want: "claude-opus-4-6"},
-		{protocol: "chat", want: "gpt-5.4"},
+		{protocol: "messages", want: "claude-opus-4-7"},
+		{protocol: "chat", want: "gpt-5.5"},
 		{protocol: "gemini", want: "gemini-3.1-pro-preview"},
-		{protocol: "responses", want: "gpt-5.4"},
+		{protocol: "responses", want: "gpt-5.5"},
 		{protocol: "unknown", wantErr: true},
 	}
 
@@ -54,12 +54,12 @@ func TestBuildTestRequest_UsesCentralizedProbeModels(t *testing.T) {
 		{
 			protocol:      "messages",
 			expectedURL:   "https://api.example.com/v1/messages",
-			expectedModel: "claude-opus-4-6",
+			expectedModel: "claude-opus-4-7",
 		},
 		{
 			protocol:      "chat",
 			expectedURL:   "https://api.example.com/v1/chat/completions",
-			expectedModel: "gpt-5.4",
+			expectedModel: "gpt-5.5",
 		},
 		{
 			protocol:      "gemini",
@@ -70,7 +70,7 @@ func TestBuildTestRequest_UsesCentralizedProbeModels(t *testing.T) {
 		{
 			protocol:      "responses",
 			expectedURL:   "https://api.example.com/v1/responses",
-			expectedModel: "gpt-5.4",
+			expectedModel: "gpt-5.5",
 		},
 	}
 

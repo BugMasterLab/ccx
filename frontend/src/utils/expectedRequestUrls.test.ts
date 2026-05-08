@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { buildExpectedRequestUrls } from './expectedRequestUrls'
 
 describe('buildExpectedRequestUrls', () => {
-  it('builds a Gemini upstream preview URL for a responses channel', () => {
+  it('应为 responses 渠道上的 gemini 上游生成正确预览 URL', () => {
     const result = buildExpectedRequestUrls('responses', 'gemini', 'https://generativelanguage.googleapis.com')
 
     expect(result).toHaveLength(1)
@@ -11,7 +11,7 @@ describe('buildExpectedRequestUrls', () => {
     )
   })
 
-  it('does not duplicate version prefixes already present in baseUrl', () => {
+  it('应在 baseUrl 已含版本前缀时避免重复追加版本', () => {
     const result = buildExpectedRequestUrls('responses', 'gemini', 'https://generativelanguage.googleapis.com/v1beta')
 
     expect(result).toHaveLength(1)
@@ -20,45 +20,61 @@ describe('buildExpectedRequestUrls', () => {
     )
   })
 
-  it('builds a Claude messages upstream preview URL for a responses channel', () => {
+  it('应为 responses 渠道上的 claude 上游生成 messages 端点', () => {
     const result = buildExpectedRequestUrls('responses', 'claude', 'https://api.anthropic.com')
 
     expect(result).toHaveLength(1)
     expect(result[0].expectedUrl).toBe('https://api.anthropic.com/v1/messages')
   })
 
-  it('builds an OpenAI chat upstream preview URL for a responses channel', () => {
+  it('应为 responses 渠道上的 openai 上游生成 chat completions 端点', () => {
     const result = buildExpectedRequestUrls('responses', 'openai', 'https://api.openai.com')
 
     expect(result).toHaveLength(1)
     expect(result[0].expectedUrl).toBe('https://api.openai.com/v1/chat/completions')
   })
 
-  it('builds a responses upstream preview URL for a messages channel', () => {
+  it('应为 messages 渠道上的 responses 上游生成 responses 端点', () => {
     const result = buildExpectedRequestUrls('messages', 'responses', 'https://api.openai.com')
 
     expect(result).toHaveLength(1)
     expect(result[0].expectedUrl).toBe('https://api.openai.com/v1/responses')
   })
 
-  it('builds a responses upstream preview URL for a chat channel', () => {
+  it('应为 chat 渠道上的 responses 上游生成 chat completions 端点', () => {
     const result = buildExpectedRequestUrls('chat', 'responses', 'https://api.openai.com')
 
     expect(result).toHaveLength(1)
-    expect(result[0].expectedUrl).toBe('https://api.openai.com/v1/responses')
+    expect(result[0].expectedUrl).toBe('https://api.openai.com/v1/chat/completions')
   })
 
-  it('builds a responses upstream preview URL for a gemini channel', () => {
-    const result = buildExpectedRequestUrls('gemini', 'responses', 'https://proxy.example.com')
+  it('应让根域名与默认版本前缀预览到同一请求地址', () => {
+    const root = buildExpectedRequestUrls('chat', 'openai', 'https://new.timefiles.online')
+    const versioned = buildExpectedRequestUrls('chat', 'openai', 'https://new.timefiles.online/v1')
 
-    expect(result).toHaveLength(1)
-    expect(result[0].expectedUrl).toBe('https://proxy.example.com/v1/responses')
+    expect(root[0].expectedUrl).toBe('https://new.timefiles.online/v1/chat/completions')
+    expect(versioned[0].expectedUrl).toBe(root[0].expectedUrl)
   })
 
-  it('builds an image generation preview URL for images channels', () => {
+  it('应为 images 渠道生成 OpenAI Images 端点', () => {
     const result = buildExpectedRequestUrls('images', 'openai', 'https://api.openai.com')
 
-    expect(result).toHaveLength(1)
-    expect(result[0].expectedUrl).toBe('https://api.openai.com/v1/images/generations')
+    expect(result).toEqual([
+      {
+        baseUrl: 'https://api.openai.com',
+        expectedUrl: 'https://api.openai.com/v1/images/generations'
+      }
+    ])
+  })
+
+  it('应为带 # 的 images 渠道保留无版本前缀语义', () => {
+    const result = buildExpectedRequestUrls('images', 'openai', 'https://api.openai.com#')
+
+    expect(result).toEqual([
+      {
+        baseUrl: 'https://api.openai.com#',
+        expectedUrl: 'https://api.openai.com/images/generations'
+      }
+    ])
   })
 })

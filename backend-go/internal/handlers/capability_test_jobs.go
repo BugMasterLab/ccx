@@ -692,7 +692,7 @@ func GetCapabilityTestJobStatus(cfgManager *config.ConfigManager, channelKind st
 
 		channel, getErr := getCapabilityTestChannel(cfgManager, channelKind, id)
 		if getErr != nil {
-			if !capabilityJobMatchesChannel(cfgManager, job, nil, channelKind, id) {
+			if !capabilityJobMatchesChannel(job, nil, channelKind, id) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
 				return
 			}
@@ -700,7 +700,7 @@ func GetCapabilityTestJobStatus(cfgManager *config.ConfigManager, channelKind st
 			return
 		}
 
-		if !capabilityJobMatchesChannel(cfgManager, job, channel, channelKind, id) {
+		if !capabilityJobMatchesChannel(job, channel, channelKind, id) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Capability test job not found"})
 			return
 		}
@@ -765,6 +765,22 @@ func capabilityProtocolOutcomeFromLegacy(status CapabilityProtocolStatus, succes
 	return CapabilityOutcomeFailed
 }
 
+func getCapabilityDisplayMode(job *CapabilityTestJob) CapabilityRunMode {
+	if job == nil {
+		return CapabilityRunModeFresh
+	}
+	if job.CacheHit {
+		return CapabilityRunModeCacheHit
+	}
+	if job.IsResumed && job.RunMode != "" {
+		return job.RunMode
+	}
+	if job.RunMode != "" {
+		return job.RunMode
+	}
+	return CapabilityRunModeFresh
+}
+
 func deriveCapabilityJobStatus(lifecycle CapabilityLifecycle, outcome CapabilityOutcome) CapabilityJobStatus {
 	switch lifecycle {
 	case CapabilityLifecyclePending:
@@ -803,6 +819,27 @@ func deriveCapabilityProtocolStatus(lifecycle CapabilityLifecycle, outcome Capab
 		}
 	}
 	return CapabilityProtocolStatusFailed
+}
+
+func deriveCapabilityModelStatus(lifecycle CapabilityLifecycle, outcome CapabilityOutcome) CapabilityModelStatus {
+	switch lifecycle {
+	case CapabilityLifecyclePending:
+		return CapabilityModelStatusQueued
+	case CapabilityLifecycleActive:
+		return CapabilityModelStatusRunning
+	case CapabilityLifecycleCancelled:
+		return CapabilityModelStatusSkipped
+	case CapabilityLifecycleDone:
+		switch outcome {
+		case CapabilityOutcomeSuccess:
+			return CapabilityModelStatusSuccess
+		case CapabilityOutcomeFailed:
+			return CapabilityModelStatusFailed
+		default:
+			return CapabilityModelStatusSkipped
+		}
+	}
+	return CapabilityModelStatusFailed
 }
 
 func parseCapabilityChannelID(c *gin.Context) (int, error) {

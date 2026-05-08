@@ -153,6 +153,12 @@ func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath
 		providerReq = convertedReq
 	}
 
+	if upstream.NormalizeNonstandardChatRoles {
+		if reqMap, ok := providerReq.(map[string]interface{}); ok {
+			converters.NormalizeNonstandardChatRolesInRequest(reqMap)
+		}
+	}
+
 	return providerReq, bodyBytes, nil
 }
 
@@ -192,6 +198,17 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(c *gin.Context, body
 					continue
 				}
 				switch block["type"] {
+				case "thinking":
+					if thinking, ok := block["thinking"].(string); ok && thinking != "" {
+						flushMessage()
+						input = append(input, map[string]interface{}{
+							"type": "reasoning",
+							"summary": []map[string]interface{}{{
+								"type": "summary_text",
+								"text": thinking,
+							}},
+						})
+					}
 				case "text":
 					if text, ok := block["text"].(string); ok && text != "" {
 						contentBlocks = append(contentBlocks, map[string]interface{}{
@@ -264,16 +281,6 @@ func (p *ResponsesProvider) buildResponsesRequestFromClaude(c *gin.Context, body
 			responsesReq["parallel_tool_calls"] = *claudeReq.ParallelToolCalls
 		} else {
 			responsesReq["parallel_tool_calls"] = true
-		}
-	}
-	if claudeReq.Metadata != nil {
-		if userID, ok := claudeReq.Metadata["user_id"].(string); ok && userID != "" {
-			responsesReq["user"] = userID
-		}
-	}
-	if _, exists := responsesReq["user"]; !exists {
-		if sessionID := utils.ExtractUnifiedSessionID(c, bodyBytes); sessionID != "" {
-			responsesReq["user"] = sessionID
 		}
 	}
 	if cacheKey := utils.ExtractUnifiedSessionID(c, bodyBytes); cacheKey != "" {
@@ -384,6 +391,10 @@ func (p *ResponsesProvider) ConvertToClaudeResponse(providerResp *types.Provider
 				continue
 			}
 			switch item["type"] {
+			case "reasoning":
+				if thinking := responsesReasoningText(item); thinking != "" {
+					claudeResp.Content = append(claudeResp.Content, types.ClaudeContent{Type: "thinking", Thinking: thinking})
+				}
 			case "message":
 				if content, ok := item["content"].([]interface{}); ok {
 					for _, rawBlock := range content {
@@ -728,6 +739,38 @@ func extractResponsesCacheReadTokens(usage map[string]interface{}) int {
 	return 0
 }
 
+func responsesReasoningText(item map[string]interface{}) string {
+	return reasoningTextFromRaw(firstNonNil(item["summary"], item["content"]))
+}
+
+func firstNonNil(values ...interface{}) interface{} {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func reasoningTextFromRaw(raw interface{}) string {
+	switch v := raw.(type) {
+	case string:
+		return v
+	case []interface{}:
+		parts := make([]string, 0, len(v))
+		for _, rawPart := range v {
+			if part, ok := rawPart.(map[string]interface{}); ok {
+				if text, ok := part["text"].(string); ok && text != "" {
+					parts = append(parts, text)
+				}
+			}
+		}
+		return strings.Join(parts, "\n")
+	default:
+		return ""
+	}
+}
+
 func toString(v interface{}) string {
 	if s, ok := v.(string); ok {
 		return s
@@ -743,7 +786,13 @@ func normalizeResponsesInputForPassthrough(reqMap map[string]interface{}) {
 
 	for _, rawItem := range input {
 		item, ok := rawItem.(map[string]interface{})
-		if !ok || toString(item["type"]) != "message" {
+		if !ok {
+			continue
+		}
+
+		delete(item, "status")
+
+		if toString(item["type"]) != "message" {
 			continue
 		}
 

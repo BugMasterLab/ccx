@@ -1,4 +1,4 @@
-﻿// API服务模块
+// API服务模块
 import { normalizeLocale, translate } from '@/i18n/core'
 import { useAuthStore } from '@/stores/auth'
 import { usePreferencesStore } from '@/stores/preferences'
@@ -35,57 +35,6 @@ const getApiBase = () => {
 }
 
 const API_BASE = getApiBase()
-export const API_REQUEST_TIMEOUT_MS = 10000
-
-function createTimeoutError(timeoutMs: number): Error {
-  const error = new Error(`Request timed out after ${timeoutMs}ms`)
-  error.name = 'TimeoutError'
-  return error
-}
-
-function createTimeoutSignal(timeoutMs: number): AbortSignal {
-  if (typeof AbortSignal.timeout === 'function') {
-    return AbortSignal.timeout(timeoutMs)
-  }
-
-  const controller = new AbortController()
-  setTimeout(() => controller.abort(createTimeoutError(timeoutMs)), timeoutMs)
-  return controller.signal
-}
-
-function mergeRequestSignals(signal?: AbortSignal | null, timeoutMs: number = API_REQUEST_TIMEOUT_MS): AbortSignal {
-  const timeoutSignal = createTimeoutSignal(timeoutMs)
-  if (!signal) {
-    return timeoutSignal
-  }
-
-  if (typeof AbortSignal.any === 'function') {
-    return AbortSignal.any([signal, timeoutSignal])
-  }
-
-  const controller = new AbortController()
-  const abort = (source: AbortSignal) => {
-    controller.abort(source.reason)
-    signal.removeEventListener('abort', abortFromSignal)
-    timeoutSignal.removeEventListener('abort', abortFromTimeout)
-  }
-  const abortFromSignal = () => abort(signal)
-  const abortFromTimeout = () => abort(timeoutSignal)
-
-  if (signal.aborted) {
-    abort(signal)
-    return controller.signal
-  }
-
-  if (timeoutSignal.aborted) {
-    abort(timeoutSignal)
-    return controller.signal
-  }
-
-  signal.addEventListener('abort', abortFromSignal, { once: true })
-  timeoutSignal.addEventListener('abort', abortFromTimeout, { once: true })
-  return controller.signal
-}
 
 // 打印当前API配置（仅开发环境）
 if (import.meta.env.DEV) {
@@ -132,13 +81,13 @@ export interface ChannelMetrics {
   breakerFailureRate?: number
   lastSuccessAt?: string
   lastFailureAt?: string
-  // PR3 T9: cost / token 总量（自进程启动累积）
+  // PR3 billing & token fields
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
   cacheReadInputTokens?: number
   cacheCreationInputTokens?: number
-  totalCost?: string  // decimal 序列化为 string，与 T6/T7 usage record 一致
+  totalCost?: string           // decimal as string, e.g. "0.1234"
   // 分时段统计 (15m, 1h, 6h, 24h)
   timeWindows?: {
     '15m': TimeWindowStats
@@ -155,23 +104,6 @@ export interface DisabledKeyInfo {
   disabledAt: string  // ISO8601 时间戳
 }
 
-export interface CooldownKeyInfo {
-  key: string
-  failureCount: number
-  cooldownUntil: string
-  remainingSeconds: number
-  fixedDurationSeconds?: number
-}
-
-export interface FailoverRule {
-  description?: string
-  action: 'cooldown' | 'blacklist'
-  statusCodes?: number[]
-  errorCodes?: string[]
-  keywords?: string[]
-  durationMinutes?: number
-}
-
 export interface Channel {
   name: string
   serviceType: 'openai' | 'gemini' | 'claude' | 'responses'
@@ -179,7 +111,6 @@ export interface Channel {
   baseUrls?: string[]                // 多 BaseURL 支持（failover 模式）
   apiKeys: string[]
   disabledApiKeys?: DisabledKeyInfo[]  // 被拉黑的 API Key
-  cooldownApiKeys?: CooldownKeyInfo[]  // 处于冷却期的 API Key
   historicalApiKeys?: string[]
   description?: string
   website?: string
@@ -191,13 +122,9 @@ export interface Channel {
   customHeaders?: Record<string, string>  // 自定义请求头
   proxyUrl?: string                        // HTTP/HTTPS/SOCKS5 代理 URL
   routePrefix?: string                     // 路由前缀（如 "kimi"，访问 /kimi/v1/messages）
-  modelsResponseMode?: 'upstream' | 'manual'
-  manualModels?: string[]
-  autoBlacklistBalance?: boolean
-  keyAffinityEnabled?: boolean
-  modelsHealthCheckEnabled?: boolean
-  modelsHealthCheckIntervalMinutes?: number
-  failoverRules?: FailoverRule[]
+  autoBlacklistBalance?: boolean           // 余额不足自动拉黑（默认 true）
+  normalizeMetadataUserId?: boolean        // 规范化 metadata.user_id（默认 true）
+  normalizeNonstandardChatRoles?: boolean  // OpenAI Chat 上游：将非标准 role 改写为 user（默认 false）
   latency?: number
   status?: ChannelStatus | 'healthy' | 'error' | 'unknown' | ''
   index: number
@@ -212,6 +139,7 @@ export interface Channel {
   injectDummyThoughtSignature?: boolean  // Gemini 特定：为 functionCall 注入 dummy thought_signature（兼容第三方 API）
   stripThoughtSignature?: boolean        // Gemini 特定：移除 thought_signature 字段（兼容旧版 Gemini API）
   supportedModels?: string[]  // 支持的模型白名单（空=全部），支持通配符如 gpt-4*
+  rpm?: number                // 能力测试发送速率（仅影响能力测试）
 }
 
 export interface ChannelsResponse {
@@ -502,6 +430,7 @@ export interface ChannelLogEntry {
   timestamp: string
   model: string
   originalModel?: string
+  operation?: string
   statusCode: number
   durationMs: number
   success: boolean
@@ -627,7 +556,7 @@ export async function fetchUpstreamModels(
     headers: {
       'Authorization': `Bearer ${apiKey}`
     },
-    signal: createTimeoutSignal(API_REQUEST_TIMEOUT_MS)
+    signal: AbortSignal.timeout(10000) // 10秒超时
   })
 
   if (!response.ok) {
@@ -664,20 +593,6 @@ export interface ChannelModelsRequest {
   insecureSkipVerify?: boolean
   customHeaders?: Record<string, string>
   baseUrls?: string[]
-  routePrefix?: string
-  supportedModels?: string[]
-}
-
-export type ApiChannelType = 'messages' | 'chat' | 'gemini' | 'responses' | 'images'
-
-function buildChannelModelsRequest(requestOrKey: ChannelModelsRequest | string, baseUrl?: string): ChannelModelsRequest {
-  if (typeof requestOrKey === 'string') {
-    return {
-      key: requestOrKey,
-      baseUrl
-    }
-  }
-  return requestOrKey
 }
 
 export class ApiService {
@@ -717,8 +632,7 @@ export class ApiService {
 
     const response = await fetch(`${API_BASE}${url}`, {
       ...options,
-      headers,
-      signal: mergeRequestSignals(options.signal)
+      headers
     })
 
     if (!response.ok) {
@@ -802,23 +716,20 @@ export class ApiService {
     return this.request('/messages/ping')
   }
 
-  async getChannelModels(id: number, request: ChannelModelsRequest | string, baseUrl?: string): Promise<ModelsResponse> {
+  async getChannelModels(id: number, request: ChannelModelsRequest): Promise<ModelsResponse> {
     return this.request(`/messages/channels/${id}/models`, {
       method: 'POST',
-      body: JSON.stringify(buildChannelModelsRequest(request, baseUrl))
+      body: JSON.stringify(request)
     })
   }
 
   // ============== 能力测试 API ==============
 
   async startChannelCapabilityTest(
-    type: ApiChannelType,
+    type: 'messages' | 'chat' | 'gemini' | 'responses',
     id: number,
-    optionsOrPreviousJobId: StartCapabilityTestOptions | string = {}
+    options: StartCapabilityTestOptions = {}
   ): Promise<CapabilityTestJobStartResponse> {
-    const options = typeof optionsOrPreviousJobId === 'string'
-      ? { previousJobId: optionsOrPreviousJobId }
-      : optionsOrPreviousJobId
     const body: { targetProtocols: string[]; timeout: number; previousJobId?: string; rpm?: number } = {
       targetProtocols: options.targetProtocols?.length ? options.targetProtocols : ['messages', 'responses', 'chat', 'gemini'],
       timeout: 10000,
@@ -833,28 +744,28 @@ export class ApiService {
     })
   }
 
-  async getChannelCapabilitySnapshot(type: ApiChannelType, id: number): Promise<CapabilitySnapshot> {
+  async getChannelCapabilitySnapshot(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number): Promise<CapabilitySnapshot> {
     return this.request(`/${type}/channels/${id}/capability-snapshot`)
   }
 
-  async getChannelCapabilityTestStatus(type: ApiChannelType, id: number, jobId: string): Promise<CapabilityTestJob> {
+  async getChannelCapabilityTestStatus(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number, jobId: string): Promise<CapabilityTestJob> {
     return this.request(`/${type}/channels/${id}/capability-test/${jobId}`)
   }
 
-  async cancelCapabilityTest(type: ApiChannelType, id: number, jobId: string): Promise<void> {
+  async cancelCapabilityTest(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number, jobId: string): Promise<void> {
     await this.request(`/${type}/channels/${id}/capability-test/${jobId}`, {
       method: 'DELETE'
     })
   }
 
-  async retryCapabilityTestModel(type: ApiChannelType, id: number, jobId: string, protocol: string, model: string): Promise<void> {
+  async retryCapabilityTestModel(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number, jobId: string, protocol: string, model: string): Promise<void> {
     await this.request(`/${type}/channels/${id}/capability-test/${jobId}/retry`, {
       method: 'POST',
       body: JSON.stringify({ protocol, model })
     })
   }
 
-  async testChannelCapability(type: ApiChannelType, id: number): Promise<CapabilityTestResult> {
+  async testChannelCapability(type: 'messages' | 'chat' | 'gemini' | 'responses', id: number): Promise<CapabilityTestResult> {
     return this.request(`/${type}/channels/${id}/capability-test`, {
       method: 'POST',
       body: JSON.stringify({
@@ -930,10 +841,10 @@ export class ApiService {
     })
   }
 
-  async getResponsesChannelModels(id: number, request: ChannelModelsRequest | string, baseUrl?: string): Promise<ModelsResponse> {
+  async getResponsesChannelModels(id: number, request: ChannelModelsRequest): Promise<ModelsResponse> {
     return this.request(`/responses/channels/${id}/models`, {
       method: 'POST',
-      body: JSON.stringify(buildChannelModelsRequest(request, baseUrl))
+      body: JSON.stringify(request)
     })
   }
 
@@ -1240,10 +1151,10 @@ export class ApiService {
     return this.request('/chat/ping')
   }
 
-  async getChatChannelModels(id: number, request: ChannelModelsRequest | string, baseUrl?: string): Promise<ModelsResponse> {
+  async getChatChannelModels(id: number, request: ChannelModelsRequest): Promise<ModelsResponse> {
     return this.request(`/chat/channels/${id}/models`, {
       method: 'POST',
-      body: JSON.stringify(buildChannelModelsRequest(request, baseUrl))
+      body: JSON.stringify(request)
     })
   }
 
@@ -1493,10 +1404,10 @@ export class ApiService {
     }))
   }
 
-  async getGeminiChannelModels(id: number, request: ChannelModelsRequest | string, baseUrl?: string): Promise<ModelsResponse> {
+  async getGeminiChannelModels(id: number, request: ChannelModelsRequest): Promise<ModelsResponse> {
     return this.request(`/gemini/channels/${id}/models`, {
       method: 'POST',
-      body: JSON.stringify(buildChannelModelsRequest(request, baseUrl))
+      body: JSON.stringify(request)
     })
   }
 }

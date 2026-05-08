@@ -26,32 +26,35 @@ func deduplicateStrings(items []string) []string {
 	return result
 }
 
-// deduplicateBaseURLs 去重 BaseURLs，忽略末尾 / 和 # 差异
+func normalizeUpstreamServiceType(serviceType, fallback string) string {
+	trimmed := strings.TrimSpace(serviceType)
+	if trimmed != "" {
+		return trimmed
+	}
+	return fallback
+}
+
+// deduplicateBaseURLs 去重 BaseURLs，忽略尾部 / 和默认版本前缀差异，保留 # 语义。
 func deduplicateBaseURLs(urls []string, serviceType string) []string {
-	if len(urls) <= 1 {
+	if len(urls) == 0 {
 		return urls
 	}
 	seen := make(map[string]struct{}, len(urls))
 	result := make([]string, 0, len(urls))
-	for _, url := range urls {
-		normalized := utils.CanonicalBaseURL(url, serviceType)
-		if _, exists := seen[normalized]; !exists {
-			seen[normalized] = struct{}{}
-			result = append(result, normalized)
+	for _, rawURL := range urls {
+		canonical := utils.CanonicalBaseURL(rawURL, serviceType)
+		if canonical == "" {
+			continue
+		}
+		if _, exists := seen[canonical]; !exists {
+			seen[canonical] = struct{}{}
+			result = append(result, canonical)
 		}
 	}
 	return result
 }
 
 // ConfigError 配置错误
-func normalizeUpstreamServiceType(serviceType, fallback string) string {
-	normalized := strings.ToLower(strings.TrimSpace(serviceType))
-	if normalized == "" {
-		return fallback
-	}
-	return normalized
-}
-
 type ConfigError struct {
 	Message string
 }
@@ -64,7 +67,7 @@ func (e *ConfigError) Error() string {
 
 // RedirectModel 模型重定向
 func RedirectModel(model string, upstream *UpstreamConfig) string {
-	if len(upstream.ModelMapping) == 0 {
+	if upstream.ModelMapping == nil || len(upstream.ModelMapping) == 0 {
 		return model
 	}
 
@@ -132,10 +135,12 @@ func GetChannelStatus(upstream *UpstreamConfig) string {
 	return upstream.Status
 }
 
+// GetChannelAdminState 获取渠道管理员配置状态。
 func GetChannelAdminState(upstream *UpstreamConfig) string {
 	return GetChannelStatus(upstream)
 }
 
+// GetChannelRuntimeState 获取渠道运行时状态视图（不依赖 metrics，仅反映配置侧可观察状态）。
 func GetChannelRuntimeState(upstream *UpstreamConfig) string {
 	if upstream == nil {
 		return "unknown"
@@ -149,6 +154,7 @@ func GetChannelRuntimeState(upstream *UpstreamConfig) string {
 	return "ready"
 }
 
+// GetChannelEffectiveState 获取渠道当前有效状态视图。
 func GetChannelEffectiveState(upstream *UpstreamConfig) string {
 	if upstream == nil {
 		return "unknown"
@@ -163,7 +169,8 @@ func GetChannelEffectiveState(upstream *UpstreamConfig) string {
 	return "active"
 }
 
-func applySingleKeyReplacementTransition(upstream *UpstreamConfig, newKeys []string) bool {
+// applySingleKeyReplacementTransition 统一处理“单 key 更换”带来的自动激活与熔断重置判定。
+func applySingleKeyReplacementTransition(upstream *UpstreamConfig, newKeys []string) (shouldResetMetrics bool) {
 	if upstream == nil {
 		return false
 	}
@@ -233,10 +240,6 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		cloned.SupportedModels = make([]string, len(u.SupportedModels))
 		copy(cloned.SupportedModels, u.SupportedModels)
 	}
-	if u.ManualModels != nil {
-		cloned.ManualModels = make([]string, len(u.ManualModels))
-		copy(cloned.ManualModels, u.ManualModels)
-	}
 	if u.DisabledAPIKeys != nil {
 		cloned.DisabledAPIKeys = make([]DisabledKeyInfo, len(u.DisabledAPIKeys))
 		copy(cloned.DisabledAPIKeys, u.DisabledAPIKeys)
@@ -245,32 +248,22 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		v := *u.AutoBlacklistBalance
 		cloned.AutoBlacklistBalance = &v
 	}
-	if u.KeyAffinityEnabled != nil {
-		v := *u.KeyAffinityEnabled
-		cloned.KeyAffinityEnabled = &v
-	}
-	if u.ModelsHealthCheckEnabled != nil {
-		v := *u.ModelsHealthCheckEnabled
-		cloned.ModelsHealthCheckEnabled = &v
-	}
-	if u.ModelsHealthCheckIntervalMinutes != nil {
-		v := *u.ModelsHealthCheckIntervalMinutes
-		cloned.ModelsHealthCheckIntervalMinutes = &v
-	}
-	if len(u.FailoverRules) > 0 {
-		cloned.FailoverRules = CloneFailoverRules(u.FailoverRules)
+	if u.NormalizeMetadataUserID != nil {
+		v := *u.NormalizeMetadataUserID
+		cloned.NormalizeMetadataUserID = &v
 	}
 
 	return &cloned
 }
 
 // SupportsModel 检查渠道是否支持指定模型
-// 空列表表示支持所有模型，支持通配符前缀匹配（如 gpt-4* 匹配 gpt-4o）
+// 空列表表示支持所有模型；支持精确匹配，以及 prefix* / *suffix / *contains* 形式的包含与排除规则。
 func (u *UpstreamConfig) SupportsModel(model string) bool {
 	supported, _ := u.ExplainModelSupport(model)
 	return supported
 }
 
+// ExplainModelSupport 返回渠道是否支持指定模型，以及不支持时的原因。
 func (u *UpstreamConfig) ExplainModelSupport(model string) (bool, string) {
 	if len(u.SupportedModels) == 0 {
 		return true, ""
@@ -394,10 +387,14 @@ func (u *UpstreamConfig) GetEffectiveBaseURL() string {
 // GetAllBaseURLs 获取所有 BaseURL（用于延迟测试）
 func (u *UpstreamConfig) GetAllBaseURLs() []string {
 	if len(u.BaseURLs) > 0 {
-		return u.BaseURLs
+		return deduplicateBaseURLs(u.BaseURLs, u.ServiceType)
 	}
 	if u.BaseURL != "" {
-		return []string{u.BaseURL}
+		canonical := utils.CanonicalBaseURL(u.BaseURL, u.ServiceType)
+		if canonical == "" {
+			return nil
+		}
+		return []string{canonical}
 	}
 	return nil
 }

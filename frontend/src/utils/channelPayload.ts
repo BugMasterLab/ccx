@@ -22,35 +22,14 @@ export interface ChannelFormLike {
   proxyUrl: string
   routePrefix: string
   supportedModels: string[]
-  modelsResponseMode?: 'upstream' | 'manual'
-  manualModels?: string[]
   autoBlacklistBalance: boolean
-  keyAffinityEnabled?: boolean
-  modelsHealthCheckEnabled?: boolean
-  modelsHealthCheckIntervalMinutes?: number
-  failoverRules: NonNullable<Channel['failoverRules']>
+  normalizeMetadataUserId: boolean
+  normalizeNonstandardChatRoles?: boolean
+
 }
 
 export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index' | 'latency' | 'status'> {
-  const modelsHealthCheckEnabled = !!form.modelsHealthCheckEnabled
-  const modelsHealthCheckIntervalMinutes = form.modelsHealthCheckIntervalMinutes && form.modelsHealthCheckIntervalMinutes > 0
-    ? Math.floor(form.modelsHealthCheckIntervalMinutes)
-    : 60
-  const modelsResponseMode = form.modelsResponseMode === 'manual' ? 'manual' : 'upstream'
-  const manualModels = (form.manualModels || []).map(model => model.trim()).filter(Boolean)
-
   const processedApiKeys = form.apiKeys.filter(key => key.trim())
-  const normalizedFailoverRules = (form.serviceType === 'claude' ? (form.failoverRules || []) : [])
-    .map(rule => ({
-      description: (rule.description || '').trim(),
-      action: rule.action,
-      statusCodes: (rule.statusCodes || []).filter(code => Number.isInteger(code) && code >= 100 && code <= 599),
-      errorCodes: (rule.errorCodes || []).map(code => code.trim()).filter(Boolean),
-      keywords: (rule.keywords || []).map(keyword => keyword.trim()).filter(Boolean),
-      durationMinutes: rule.durationMinutes && rule.durationMinutes > 0 ? Math.floor(rule.durationMinutes) : undefined
-    }))
-    .filter(rule => rule.action && (rule.statusCodes.length > 0 || rule.errorCodes.length > 0 || rule.keywords.length > 0))
-
   const advancedOptions = normalizeAdvancedChannelOptions(form.serviceType, {
     reasoningMapping: form.reasoningMapping,
     textVerbosity: form.textVerbosity,
@@ -79,13 +58,9 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     proxyUrl: form.proxyUrl.trim(),
     routePrefix: form.routePrefix.trim(),
     supportedModels: form.supportedModels,
-    modelsResponseMode,
-    manualModels,
     autoBlacklistBalance: form.autoBlacklistBalance,
-    keyAffinityEnabled: form.serviceType === 'claude' ? (form.keyAffinityEnabled ?? true) : !!form.keyAffinityEnabled,
-    modelsHealthCheckEnabled,
-    modelsHealthCheckIntervalMinutes,
-    failoverRules: normalizedFailoverRules
+    normalizeMetadataUserId: form.normalizeMetadataUserId,
+    normalizeNonstandardChatRoles: !!form.normalizeNonstandardChatRoles,
   }
 
   if (deduplicatedUrls.length > 1) {

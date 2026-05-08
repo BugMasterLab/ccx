@@ -37,7 +37,7 @@ func TestRestoreDisabledKeysAndActivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new config manager: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	metricsManager := metrics.NewMetricsManager()
 	defer metricsManager.Stop()

@@ -126,7 +126,7 @@ func pingBaseURL(upstream config.UpstreamConfig, baseURL string, timeout time.Du
 	if err != nil {
 		return gin.H{"success": false, "error": err.Error(), "latency": latency, "status": "error"}
 	}
-	defer func() { _ = resp.Body.Close() }()
+	defer resp.Body.Close()
 
 	status := "error"
 	if resp.StatusCode >= 200 && resp.StatusCode < 400 {

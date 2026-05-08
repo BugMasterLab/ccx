@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptrace"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,10 +17,79 @@ import (
 	"github.com/BenedictKing/ccx/internal/config"
 	"github.com/BenedictKing/ccx/internal/httpclient"
 	"github.com/BenedictKing/ccx/internal/metrics"
-	"github.com/BenedictKing/ccx/internal/types"
 	"github.com/BenedictKing/ccx/internal/utils"
 	"github.com/gin-gonic/gin"
 )
+
+const MaxUpstreamResponseLogBytes = 1024 * 1024
+
+type LimitedLogBuffer struct {
+	buf       bytes.Buffer
+	limit     int
+	truncated bool
+	total     int
+}
+
+func NewLimitedLogBuffer(limit int) *LimitedLogBuffer {
+	if limit <= 0 {
+		limit = MaxUpstreamResponseLogBytes
+	}
+	return &LimitedLogBuffer{limit: limit}
+}
+
+func (b *LimitedLogBuffer) Write(p []byte) (int, error) {
+	if b == nil {
+		return len(p), nil
+	}
+	b.total += len(p)
+	remaining := b.limit - b.buf.Len()
+	if remaining <= 0 {
+		b.truncated = true
+		return len(p), nil
+	}
+	if len(p) > remaining {
+		b.buf.Write(p[:remaining])
+		b.truncated = true
+		return len(p), nil
+	}
+	b.buf.Write(p)
+	return len(p), nil
+}
+
+func (b *LimitedLogBuffer) WriteString(s string) (int, error) {
+	return b.Write([]byte(s))
+}
+
+func (b *LimitedLogBuffer) Len() int {
+	if b == nil {
+		return 0
+	}
+	return b.buf.Len()
+}
+
+func (b *LimitedLogBuffer) Bytes() []byte {
+	if b == nil {
+		return nil
+	}
+	return b.buf.Bytes()
+}
+
+func (b *LimitedLogBuffer) String() string {
+	if b == nil {
+		return ""
+	}
+	result := b.buf.String()
+	if b.truncated {
+		result += fmt.Sprintf("\n...[truncated upstream stream log at %d/%d bytes]", b.limit, b.total)
+	}
+	return result
+}
+
+// RequestLifecycleTrace 用于记录上游 HTTP 请求生命周期关键节点。
+type RequestLifecycleTrace struct {
+	OnConnected         func()
+	OnFirstResponseByte func()
+}
 
 // ReadRequestBody 读取并验证请求体大小
 // 返回: (bodyBytes, error)
@@ -34,7 +104,7 @@ func ReadRequestBody(c *gin.Context, maxBodySize int64) ([]byte, error) {
 
 	if int64(len(bodyBytes)) > maxBodySize {
 		// 排空剩余请求体，避免 keep-alive 连接污染
-		_, _ = io.Copy(io.Discard, c.Request.Body)
+		io.Copy(io.Discard, c.Request.Body)
 		c.JSON(413, gin.H{"error": fmt.Sprintf("Request body too large, maximum size is %d MB", maxBodySize/1024/1024)})
 		return nil, fmt.Errorf("request body too large")
 	}
@@ -55,44 +125,6 @@ func PassthroughResponse(c *gin.Context, resp *http.Response) error {
 	c.Status(resp.StatusCode)
 	_, err := io.Copy(c.Writer, resp.Body)
 	return err
-}
-
-// PassthroughUsageOptions controls metrics-only usage normalization for
-// passthrough responses. The client response is still forwarded unchanged.
-type PassthroughUsageOptions struct {
-	RequestBody []byte
-	LowQuality  bool
-	EnableLog   bool
-}
-
-// PassthroughJSONResponseWithUsage forwards a JSON response unchanged while
-// best-effort decoding usage for internal metrics.
-func PassthroughJSONResponseWithUsage(c *gin.Context, resp *http.Response, opts ...PassthroughUsageOptions) (*types.Usage, error) {
-	utils.ForwardResponseHeaders(resp.Header, c.Writer)
-	c.Status(resp.StatusCode)
-
-	var payload map[string]interface{}
-	tee := io.TeeReader(resp.Body, c.Writer)
-	decodeErr := json.NewDecoder(tee).Decode(&payload)
-	if _, copyErr := io.Copy(c.Writer, resp.Body); copyErr != nil {
-		return nil, copyErr
-	}
-	if decodeErr != nil {
-		return nil, nil
-	}
-
-	usage := extractUsageFromJSONPayload(payload)
-	if len(opts) == 0 {
-		return usage, nil
-	}
-
-	return normalizeUsageForMetrics(
-		usage,
-		opts[0].RequestBody,
-		extractOutputTextFromJSONPayload(payload),
-		opts[0].LowQuality,
-		opts[0].EnableLog,
-	), nil
 }
 
 // PassthroughJSONResponse 在透传响应给客户端的同时，用流式 Decoder 尝试解析 JSON。
@@ -118,10 +150,54 @@ func PassthroughJSONResponse(c *gin.Context, resp *http.Response, target interfa
 	return err
 }
 
+func LogUpstreamResponseHeaders(resp *http.Response, envCfg *config.EnvConfig, apiType string) {
+	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() || resp == nil {
+		return
+	}
+
+	respHeaders := make(map[string]string)
+	for key, values := range resp.Header {
+		if len(values) > 0 {
+			respHeaders[key] = values[0]
+		}
+	}
+	var respHeadersJSON []byte
+	if envCfg.RawLogOutput {
+		respHeadersJSON, _ = json.Marshal(respHeaders)
+	} else {
+		respHeadersJSON, _ = json.MarshalIndent(respHeaders, "", "  ")
+	}
+	log.Printf("[%s-Response] 响应头:\n%s", apiType, string(respHeadersJSON))
+}
+
+func LogUpstreamResponseBody(bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+	if !envCfg.EnableResponseLogs || !envCfg.IsDevelopment() {
+		return
+	}
+
+	var formattedBody string
+	if envCfg.RawLogOutput {
+		formattedBody = utils.FormatJSONBytesRaw(bodyBytes)
+	} else {
+		formattedBody = utils.FormatJSONBytesForLog(bodyBytes, 500)
+	}
+	log.Printf("[%s-Response] 响应体:\n%s", apiType, formattedBody)
+}
+
+func LogUpstreamResponse(resp *http.Response, bodyBytes []byte, envCfg *config.EnvConfig, apiType string) {
+	LogUpstreamResponseHeaders(resp, envCfg, apiType)
+	LogUpstreamResponseBody(bodyBytes, envCfg, apiType)
+}
+
 // SendRequest 发送 HTTP 请求到上游
 // isStream: 是否为流式请求（流式请求使用无超时客户端）
 // apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
 func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string) (*http.Response, error) {
+	return SendRequestWithLifecycleTrace(req, upstream, envCfg, isStream, apiType, nil)
+}
+
+// SendRequestWithLifecycleTrace 发送 HTTP 请求到上游，并可记录连接取得与首个响应字节时间。
+func SendRequestWithLifecycleTrace(req *http.Request, upstream *config.UpstreamConfig, envCfg *config.EnvConfig, isStream bool, apiType string, lifecycleTrace *RequestLifecycleTrace) (*http.Response, error) {
 	clientManager := httpclient.GetManager()
 
 	var client *http.Client
@@ -149,7 +225,28 @@ func SendRequest(req *http.Request, upstream *config.UpstreamConfig, envCfg *con
 		}
 	}
 
+	req = withLifecycleTrace(req, lifecycleTrace)
 	return client.Do(req)
+}
+
+func withLifecycleTrace(req *http.Request, lifecycleTrace *RequestLifecycleTrace) *http.Request {
+	if lifecycleTrace == nil || (lifecycleTrace.OnConnected == nil && lifecycleTrace.OnFirstResponseByte == nil) {
+		return req
+	}
+
+	trace := &httptrace.ClientTrace{
+		GotConn: func(_ httptrace.GotConnInfo) {
+			if lifecycleTrace.OnConnected != nil {
+				lifecycleTrace.OnConnected()
+			}
+		},
+		GotFirstResponseByte: func() {
+			if lifecycleTrace.OnFirstResponseByte != nil {
+				lifecycleTrace.OnFirstResponseByte()
+			}
+		},
+	}
+	return req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
 }
 
 // logRequestDetails 记录请求详情（仅开发模式）
@@ -172,6 +269,11 @@ func logRequestDetails(req *http.Request, envCfg *config.EnvConfig, apiType stri
 	log.Printf("[%s-Request-Headers] 实际请求头:\n%s", apiType, string(reqHeadersJSON))
 
 	if req.Body != nil {
+		contentType := req.Header.Get("Content-Type")
+		if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+			log.Printf("[%s-Request-Body] 实际请求体: [multipart/form-data omitted]", apiType)
+			return
+		}
 		bodyBytes, err := io.ReadAll(req.Body)
 		if err == nil {
 			req.Body = io.NopCloser(bytes.NewReader(bodyBytes))
@@ -195,13 +297,18 @@ func LogOriginalRequest(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConf
 	log.Printf("[Request-Receive] 收到%s请求: %s %s", apiType, c.Request.Method, c.Request.URL.Path)
 
 	if envCfg.IsDevelopment() {
-		var formattedBody string
-		if envCfg.RawLogOutput {
-			formattedBody = utils.FormatJSONBytesRaw(bodyBytes)
+		contentType := c.GetHeader("Content-Type")
+		if strings.HasPrefix(strings.ToLower(contentType), "multipart/form-data") {
+			log.Printf("[Request-OriginalBody] 原始请求体: [multipart/form-data omitted]")
 		} else {
-			formattedBody = utils.FormatJSONBytesForLog(bodyBytes, 500)
+			var formattedBody string
+			if envCfg.RawLogOutput {
+				formattedBody = utils.FormatJSONBytesRaw(bodyBytes)
+			} else {
+				formattedBody = utils.FormatJSONBytesForLog(bodyBytes, 500)
+			}
+			log.Printf("[Request-OriginalBody] 原始请求体:\n%s", formattedBody)
 		}
-		log.Printf("[Request-OriginalBody] 原始请求体:\n%s", formattedBody)
 
 		sanitizedHeaders := make(map[string]string)
 		for key, values := range c.Request.Header {
@@ -222,13 +329,13 @@ func LogOriginalRequest(c *gin.Context, bodyBytes []byte, envCfg *config.EnvConf
 
 // AreAllKeysSuspended 检查渠道的所有 Key 是否都处于熔断状态
 // 用于判断是否需要启用强制探测模式
-func AreAllKeysSuspended(metricsManager *metrics.MetricsManager, baseURL string, apiKeys []string) bool {
+func AreAllKeysSuspended(metricsManager *metrics.MetricsManager, baseURL string, apiKeys []string, serviceType string) bool {
 	if len(apiKeys) == 0 {
 		return false
 	}
 
 	for _, apiKey := range apiKeys {
-		if !metricsManager.ShouldSuspendKey(baseURL, apiKey, "claude") {
+		if !metricsManager.ShouldSuspendKey(baseURL, apiKey, serviceType) {
 			return false
 		}
 	}
@@ -313,8 +420,9 @@ func removeEmptySignaturesInMessages(data map[string]interface{}) (bool, int) {
 
 // SanitizeMalformedThinkingBlocks 清理 messages[*].content[*] 中的 thinking 相关字段
 // 策略：
-// 1) 一律移除 type=thinking 的内容块（避免上游严格校验导致 400）
-// 2) 移除非 thinking 块里的残留 thinking 字段
+// 1) 仅移除畸形的 type=thinking 内容块（避免上游严格校验导致 400）
+// 2) 保留合法的 thinking 内容块（兼容 Claude extended thinking 回传）
+// 3) 移除非 thinking 块里的残留 thinking 字段
 // 返回 (新字节, 是否修改)
 func SanitizeMalformedThinkingBlocks(bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
@@ -430,9 +538,20 @@ func sanitizeMalformedThinkingBlocksInMessages(data map[string]interface{}) (boo
 func sanitizeThinkingInContentBlock(block map[string]interface{}) (modified bool, removeBlock bool) {
 	blockType, _ := block["type"].(string)
 	if blockType == "thinking" {
-		// 无论完整与否，一律移除 thinking block。
-		// 原因：历史 thinking 内容对续写价值很低，但容易触发上游严格校验（如 thinking.thinking 必填）。
-		return true, true
+		// 仅移除畸形 thinking block：
+		// - 缺少 thinking 字段
+		// - thinking 不是非空字符串
+		thinking, hasThinking := block["thinking"]
+		if !hasThinking {
+			return true, true
+		}
+		thinkingText, ok := thinking.(string)
+		if !ok || strings.TrimSpace(thinkingText) == "" {
+			return true, true
+		}
+
+		// 保留合法 thinking block（含 signature 与否都透传）
+		return false, false
 	}
 
 	if _, hasThinking := block["thinking"]; hasThinking {

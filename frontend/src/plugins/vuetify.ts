@@ -70,7 +70,6 @@ import {
   mdiOpenInNew,
   mdiKey,
   mdiRefresh,
-  mdiAutorenew,
   mdiDotsVertical,
   mdiPencil,
   mdiSpeedometer,
@@ -148,8 +147,6 @@ import {
   mdiPaperclip,
   mdiEyedropper,
   mdiShieldRefresh,
-  mdiShieldCheck,
-  mdiShieldOutline,
   mdiShieldOffOutline,
   mdiAlertCircleOutline,
   mdiChartLineVariant,
@@ -178,11 +175,7 @@ import {
   mdiKeyRemove,
   mdiKeyAlert,
   mdiCashRemove,
-  mdiTransitConnectionVariant,
-  mdiTransitConnectionHorizontal,
-  mdiWaveform,
-  mdiAccountKey,
-  mdiAccountOff,
+  mdiAccountSwitch,
 } from '@mdi/js'
 
 // 图标名称到 SVG path 的映射 (使用 kebab-case)
@@ -245,7 +238,6 @@ const iconMap: Record<string, string> = {
   // 操作按钮
   'pencil': mdiPencil,
   'refresh': mdiRefresh,
-  'autorenew': mdiAutorenew,
   'check': mdiCheck,
   'check-bold': mdiCheckBold,
   'content-copy': mdiContentCopy,
@@ -270,8 +262,6 @@ const iconMap: Record<string, string> = {
 
   // 防护盾牌图标
   'shield-refresh': mdiShieldRefresh,
-  'shield-check': mdiShieldCheck,
-  'shield-outline': mdiShieldOutline,
   'shield-off-outline': mdiShieldOffOutline,
   'shield-lock-outline': mdiShieldLockOutline,
 
@@ -371,26 +361,16 @@ const iconMap: Record<string, string> = {
   'key-remove': mdiKeyRemove,
   'key-alert': mdiKeyAlert,
   'cash-remove': mdiCashRemove,
-  'transit-connection-variant': mdiTransitConnectionVariant,
-  'transit-connection-horizontal': mdiTransitConnectionHorizontal,
-  'waveform': mdiWaveform,
-  'account-key': mdiAccountKey,
-  'account-off': mdiAccountOff,
+
+  // 渠道配置
+  'account-switch': mdiAccountSwitch,
 }
 
 // 自定义 SVG iconset - 处理 mdi-xxx 字符串格式
 const customSvgIconSet: IconSet = {
   component: (props: IconProps) => {
     // 获取图标名称，去掉 mdi- 前缀
-    const rawIcon = props.icon
-    let iconName: string
-    if (typeof rawIcon === 'string') {
-      iconName = rawIcon.trim()
-    } else if (Array.isArray(rawIcon) && typeof rawIcon[0] === 'string') {
-      iconName = rawIcon[0].trim()
-    } else {
-      return h('span')
-    }
+    let iconName = props.icon as string
     if (iconName.startsWith('mdi-')) {
       iconName = iconName.substring(4)
     }

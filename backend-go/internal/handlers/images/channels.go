@@ -1,4 +1,4 @@
-// Package images ?? Images API ?????
+// Package images 提供 Images API 的渠道管理
 package images
 
 import (
@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
@@ -21,7 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// GetUpstreams ?? Images ????
+// GetUpstreams 获取 Images 上游列表
 func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg := cfgManager.GetConfig()
@@ -37,7 +36,7 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	}
 }
 
-// AddUpstream ?? Images ??
+// AddUpstream 添加 Images 上游
 func AddUpstream(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var upstream config.UpstreamConfig
@@ -47,7 +46,7 @@ func AddUpstream(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		if err := cfgManager.AddImagesUpstream(upstream); err != nil {
-			if strings.Contains(err.Error(), "openai serviceType") {
+			if strings.Contains(err.Error(), "仅支持 openai serviceType") {
 				c.JSON(400, gin.H{"error": err.Error()})
 			} else {
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -59,7 +58,7 @@ func AddUpstream(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	}
 }
 
-// UpdateUpstream ?? Images ??
+// UpdateUpstream 更新 Images 上游
 func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelScheduler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -77,7 +76,7 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 
 		shouldResetMetrics, err := cfgManager.UpdateImagesUpstream(id, updates)
 		if err != nil {
-			if strings.Contains(err.Error(), "openai serviceType") {
+			if strings.Contains(err.Error(), "仅支持 openai serviceType") {
 				c.JSON(400, gin.H{"error": err.Error()})
 			} else {
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -85,7 +84,7 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 			return
 		}
 
-		// ? key ?????????
+		// 单 key 更换时重置熔断状态
 		if shouldResetMetrics {
 			sch.ResetChannelMetrics(id, scheduler.ChannelKindImages)
 		}
@@ -94,7 +93,7 @@ func UpdateUpstream(cfgManager *config.ConfigManager, sch *scheduler.ChannelSche
 	}
 }
 
-// DeleteUpstream ?? Images ??
+// DeleteUpstream 删除 Images 上游
 func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *scheduler.ChannelScheduler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -106,7 +105,7 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 
 		removed, err := cfgManager.RemoveImagesUpstream(id)
 		if err != nil {
-			if strings.Contains(err.Error(), "???") {
+			if strings.Contains(err.Error(), "无效的") {
 				c.JSON(404, gin.H{"error": "Upstream not found"})
 			} else {
 				c.JSON(500, gin.H{"error": err.Error()})
@@ -121,7 +120,7 @@ func DeleteUpstream(cfgManager *config.ConfigManager, channelScheduler *schedule
 	}
 }
 
-// AddApiKey ?? Images ?? API ??
+// AddApiKey 添加 Images 渠道 API 密钥
 func AddApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -140,10 +139,10 @@ func AddApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		if err := cfgManager.AddImagesAPIKey(id, req.APIKey); err != nil {
-			if strings.Contains(err.Error(), "???????") {
+			if strings.Contains(err.Error(), "无效的上游索引") {
 				c.JSON(404, gin.H{"error": "Upstream not found"})
-			} else if strings.Contains(err.Error(), "API?????") {
-				c.JSON(400, gin.H{"error": "API?????"})
+			} else if strings.Contains(err.Error(), "API密钥已存在") {
+				c.JSON(400, gin.H{"error": "API密钥已存在"})
 			} else {
 				c.JSON(500, gin.H{"error": "Failed to save config"})
 			}
@@ -151,13 +150,13 @@ func AddApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		c.JSON(200, gin.H{
-			"message": "API?????",
+			"message": "API密钥已添加",
 			"success": true,
 		})
 	}
 }
 
-// DeleteApiKey ?? Images ?? API ??
+// DeleteApiKey 删除 Images 渠道 API 密钥
 func DeleteApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -174,9 +173,9 @@ func DeleteApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		if err := cfgManager.RemoveImagesAPIKey(id, apiKey); err != nil {
-			if strings.Contains(err.Error(), "???????") {
+			if strings.Contains(err.Error(), "无效的上游索引") {
 				c.JSON(404, gin.H{"error": "Upstream not found"})
-			} else if strings.Contains(err.Error(), "API?????") {
+			} else if strings.Contains(err.Error(), "API密钥不存在") {
 				c.JSON(404, gin.H{"error": "API key not found"})
 			} else {
 				c.JSON(500, gin.H{"error": "Failed to save config"})
@@ -185,12 +184,12 @@ func DeleteApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
 		}
 
 		c.JSON(200, gin.H{
-			"message": "API?????",
+			"message": "API密钥已删除",
 		})
 	}
 }
 
-// MoveApiKeyToTop ? Images ?? API ???????
+// MoveApiKeyToTop 将 Images 渠道 API 密钥移到最前面
 func MoveApiKeyToTop(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
@@ -204,11 +203,11 @@ func MoveApiKeyToTop(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, gin.H{"message": "API?????"})
+		c.JSON(200, gin.H{"message": "API密钥已置顶"})
 	}
 }
 
-// MoveApiKeyToBottom ? Images ?? API ???????
+// MoveApiKeyToBottom 将 Images 渠道 API 密钥移到最后面
 func MoveApiKeyToBottom(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := strconv.Atoi(c.Param("id"))
@@ -222,11 +221,11 @@ func MoveApiKeyToBottom(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(200, gin.H{"message": "API?????"})
+		c.JSON(200, gin.H{"message": "API密钥已置底"})
 	}
 }
 
-// ReorderChannels ???? Images ?????
+// ReorderChannels 重新排序 Images 渠道优先级
 func ReorderChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
@@ -244,28 +243,28 @@ func ReorderChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 
 		c.JSON(200, gin.H{
 			"success": true,
-			"message": "Images ????????",
+			"message": "Images 渠道优先级已更新",
 		})
 	}
 }
 
-// SetChannelStatus ?? Images ????
+// SetChannelStatus 设置 Images 渠道状态
 func SetChannelStatus(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	adapter := handlers.ChannelStatusConfigManagerFunc(func(index int, status string) error {
 		return cfgManager.SetImagesChannelStatus(index, status)
 	})
-	return handlers.NamedChannelStatusHandler(adapter, "Images ???????")
+	return handlers.NamedChannelStatusHandler(adapter, "Images 渠道状态已更新")
 }
 
-// SetChannelPromotion ?? Images ?????
+// SetChannelPromotion 设置 Images 渠道促销期
 func SetChannelPromotion(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	adapter := handlers.PromotionConfigManagerFunc(func(index int, duration time.Duration) error {
 		return cfgManager.SetImagesChannelPromotion(index, duration)
 	})
-	return handlers.NamedChannelPromotionHandler(adapter, "Invalid channel ID", "Invalid request body", "Images ????????", "Images ????????")
+	return handlers.NamedChannelPromotionHandler(adapter, "Invalid channel ID", "Invalid request body", "Images 渠道促销期已清除", "Images 渠道促销期已设置")
 }
 
-// PingChannel ?? Images ?????
+// PingChannel 测试 Images 渠道连通性
 func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idStr := c.Param("id")
@@ -281,48 +280,15 @@ func PingChannel(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			return
 		}
 
-		upstream := cfg.ImagesUpstream[id]
-		apiKey, err := cfgManager.GetUsableAPIKeyForChannel("Images", id)
-		if err != nil {
-			c.JSON(400, gin.H{"error": err.Error()})
-			return
-		}
-		upstream.APIKeys = []string{apiKey}
-		c.JSON(200, common.PingSingleBaseURLUpstream(upstream, buildPingRequest))
+		c.JSON(200, common.PingSingleBaseURLUpstream(cfg.ImagesUpstream[id], buildPingRequest))
 	}
 }
 
-// PingAllChannels ???? Images ?????
+// PingAllChannels 测试所有 Images 渠道连通性
 func PingAllChannels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg := cfgManager.GetConfig()
-		results := make([]gin.H, len(cfg.ImagesUpstream))
-		var wg sync.WaitGroup
-		for i, upstream := range cfg.ImagesUpstream {
-			wg.Add(1)
-			go func(index int, up config.UpstreamConfig) {
-				defer wg.Done()
-				apiKey, err := cfgManager.GetUsableAPIKeyForChannel("Images", index)
-				if err != nil {
-					results[index] = gin.H{
-						"id":      index,
-						"index":   index,
-						"name":    up.Name,
-						"success": false,
-						"error":   err.Error(),
-					}
-					return
-				}
-				up.APIKeys = []string{apiKey}
-				result := common.PingSingleBaseURLUpstream(up, buildPingRequest)
-				result["id"] = index
-				result["index"] = index
-				result["name"] = up.Name
-				results[index] = result
-			}(i, upstream)
-		}
-		wg.Wait()
-		c.JSON(200, gin.H{"channels": results})
+		c.JSON(200, gin.H{"channels": common.PingAllSingleBaseURLUpstreams(cfg.ImagesUpstream, buildPingRequest, true)["channels"]})
 	}
 }
 
@@ -344,7 +310,7 @@ func buildPingRequest(upstream config.UpstreamConfig, baseURL string) (*http.Req
 	return req, nil
 }
 
-// buildEndpointURL ?????????? URL
+// buildEndpointURL 构建带版本前缀的端点 URL
 func buildEndpointURL(baseURL, versionPrefix, endpoint string) string {
 	skipVersionPrefix := strings.HasSuffix(baseURL, "#")
 	if skipVersionPrefix {
@@ -366,12 +332,12 @@ func buildMessagesURL(baseURL string) string {
 	return buildEndpointURL(baseURL, "/v1", "/messages")
 }
 
-// buildModelsURL ?? models ??? URL
+// buildModelsURL 构建 models 端点的 URL
 func buildModelsURL(baseURL string) string {
 	return buildEndpointURL(baseURL, "/v1", "/models")
 }
 
-// GetModelsRequest ??????????
+// GetModelsRequest 获取模型列表的请求体
 type GetModelsRequest struct {
 	Key                string            `json:"key"`
 	BaseURL            string            `json:"baseUrl"`
@@ -381,10 +347,10 @@ type GetModelsRequest struct {
 	CustomHeaders      map[string]string `json:"customHeaders"`
 }
 
-// GetChannelModels ???????????????? Key?
+// GetChannelModels 获取指定渠道的模型列表（支持临时 Key）
 func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. ???? ID
+		// 1. 解析渠道 ID
 		idStr := c.Param("id")
 		id, err := strconv.Atoi(idStr)
 		if err != nil {
@@ -392,29 +358,29 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			return
 		}
 
-		// 2. ????????
+		// 2. 从请求体读取参数
 		var req GetModelsRequest
 		if err := c.ShouldBindJSON(&req); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 			return
 		}
 
-		// 3. ?? baseUrl???????????? baseUrl??????????
+		// 3. 获取 baseUrl（优先使用请求体中的临时 baseUrl，用于新增渠道场景）
 		var baseURL string
 		var channelName string
 		var insecureSkipVerify bool
 		var proxyURL string
 
 		if req.BaseURL != "" {
-			// ????????? baseUrl
-			// SSRF ?????????? baseURL
+			// 新增模式：使用临时 baseUrl
+			// SSRF 防护：验证用户提供的 baseURL
 			if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
-				log.Printf("[Images-Models] SSRF ????: %v", err)
-				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("??? baseUrl: %v", err)})
+				log.Printf("[Images-Models] SSRF 防护拦截: %v", err)
+				c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
 				return
 			}
 			baseURL = req.BaseURL
-			channelName = "????"
+			channelName = "临时渠道"
 			insecureSkipVerify = false
 			proxyURL = ""
 			if req.InsecureSkipVerify != nil {
@@ -423,9 +389,9 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			if req.ProxyURL != "" {
 				proxyURL = req.ProxyURL
 			}
-			log.Printf("[Images-Models] ???? baseUrl: %s", baseURL)
+			log.Printf("[Images-Models] 使用临时 baseUrl: %s", baseURL)
 		} else {
-			// ???????????????
+			// 编辑模式：从配置中读取渠道信息
 			cfg := cfgManager.GetConfig()
 			if id < 0 || id >= len(cfg.ImagesUpstream) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
@@ -439,8 +405,8 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			proxyURL = channel.ProxyURL
 			if req.BaseURL != "" {
 				if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
-					log.Printf("[Images-Models] SSRF ????: %v", err)
-					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("??? baseUrl: %v", err)})
+					log.Printf("[Images-Models] SSRF 防护拦截: %v", err)
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("无效的 baseUrl: %v", err)})
 					return
 				}
 				baseURL = req.BaseURL
@@ -453,61 +419,54 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			}
 		}
 
-		// 4. ?? API Key
+		// 4. 验证 API Key
 		apiKey := req.Key
 		if apiKey == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "No API key provided"})
 			return
 		}
-		if req.BaseURL == "" {
-			if err := cfgManager.ValidateAdminProbeKey("Images", id, apiKey); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-		} else {
-			if err := cfgManager.ValidateAdminProbeKeyIfKnownChannel("Images", id, apiKey); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
-			}
-		}
 
-		log.Printf("[Images-Models] ??????: channel=%s, key=%s", channelName, utils.MaskAPIKey(apiKey))
+		log.Printf("[Images-Models] 请求模型列表: channel=%s, key=%s", channelName, utils.MaskAPIKey(apiKey))
 
-		// 5. ????
+		// 5. 发起请求
 		url := buildModelsURL(baseURL)
 		client := httpclient.GetManager().GetStandardClient(10*time.Second, insecureSkipVerify, proxyURL)
+		if req.BaseURL != "" && req.ProxyURL != "" {
+			client = httpclient.GetManager().NewStandardClient(10*time.Second, insecureSkipVerify, proxyURL)
+		}
+
 		httpReq, err := http.NewRequestWithContext(c.Request.Context(), "GET", url, nil)
 		if err != nil {
-			log.Printf("[Images-Models] ??????: channel=%s, url=%s, error=%v", channelName, url, err)
+			log.Printf("[Images-Models] 创建请求失败: channel=%s, url=%s, error=%v", channelName, url, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to create request: %v", err)})
 			return
 		}
+		httpReq.Header.Set("Authorization", "Bearer "+apiKey)
 		httpReq.Header.Set("Content-Type", "application/json")
 		utils.ApplyCustomHeaders(httpReq.Header, req.CustomHeaders)
-		utils.SetAuthenticationHeader(httpReq.Header, apiKey)
 
 		resp, err := client.Do(httpReq)
 		if err != nil {
-			log.Printf("[Images-Models] ????: channel=%s, key=%s, url=%s, error=%v",
+			log.Printf("[Images-Models] 请求失败: channel=%s, key=%s, url=%s, error=%v",
 				channelName, utils.MaskAPIKey(apiKey), url, err)
 			c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("Failed to fetch models: %v", err)})
 			return
 		}
 
 		body, err := io.ReadAll(resp.Body)
-		_ = resp.Body.Close()
+		resp.Body.Close()
 		if err != nil {
-			log.Printf("[Images-Models] ??????: channel=%s, error=%v", channelName, err)
+			log.Printf("[Images-Models] 读取响应失败: channel=%s, error=%v", channelName, err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to read response: %v", err)})
 			return
 		}
 
-		log.Printf("[Images-Models] ????: channel=%s, key=%s, status=%d, url=%s",
+		log.Printf("[Images-Models] 上游响应: channel=%s, key=%s, status=%d, url=%s",
 			channelName, utils.MaskAPIKey(apiKey), resp.StatusCode, url)
-		// ???? 401 ???????????? API ????
+		// 包装上游 401 错误，避免前端误判为管理 API 认证失败
 		if resp.StatusCode == 401 {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error":      "?? API Key ??",
+				"error":      "上游 API Key 无效",
 				"statusCode": 401,
 				"details":    string(body),
 			})

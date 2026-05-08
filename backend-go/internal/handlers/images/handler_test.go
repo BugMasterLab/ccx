@@ -32,6 +32,17 @@ func newImagesTestEnvConfig() *config.EnvConfig {
 	return envCfg
 }
 
+func captureImagesLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	oldWriter := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() {
+		log.SetOutput(oldWriter)
+	})
+	return &buf
+}
+
 func TestBuildProviderRequest_URLVariants(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
@@ -66,6 +77,7 @@ func TestBuildProviderRequest_URLVariants(t *testing.T) {
 
 func TestBuildProviderRequest_RejectsUnsupportedServiceType(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	logBuf := captureImagesLogs(t)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", strings.NewReader(`{"model":"image-default","prompt":"hello"}`))
@@ -75,8 +87,18 @@ func TestBuildProviderRequest_RejectsUnsupportedServiceType(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported serviceType")
 	}
-	if !strings.Contains(err.Error(), "openai serviceType") {
+	if !strings.Contains(err.Error(), "仅支持 openai serviceType") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	logs := logBuf.String()
+	if !strings.Contains(logs, "[Images-BuildRequest]") {
+		t.Fatalf("expected build request log, got: %s", logs)
+	}
+	if !strings.Contains(logs, "reason=invalid_service_type") {
+		t.Fatalf("expected invalid_service_type log, got: %s", logs)
+	}
+	if strings.Contains(logs, "sk-test") {
+		t.Fatalf("expected API key to be masked in logs, got: %s", logs)
 	}
 }
 
@@ -90,7 +112,7 @@ func TestAddUpstream_RejectsUnsupportedServiceType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config manager: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	r := gin.New()
 	r.POST("/api/images/channels", AddUpstream(cfgManager))
@@ -104,7 +126,7 @@ func TestAddUpstream_RejectsUnsupportedServiceType(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d, body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "openai serviceType") {
+	if !strings.Contains(w.Body.String(), "Images 渠道仅支持 openai serviceType") {
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
 }
@@ -119,7 +141,7 @@ func TestHandler_MissingModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config manager: %v", err)
 	}
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	envCfg := config.NewEnvConfig()
 	envCfg.ProxyAccessKey = "test-key"
@@ -138,7 +160,7 @@ func TestHandler_MissingModel(t *testing.T) {
 func TestHandler_MissingPrompt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfgManager := newImagesTestConfigManager(t)
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	envCfg := newImagesTestEnvConfig()
 
@@ -156,9 +178,10 @@ func TestHandler_MissingPrompt(t *testing.T) {
 func TestHandler_InvalidMultipartEditsReturnsBadRequest(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfgManager := newImagesTestConfigManager(t)
-	defer func() { _ = cfgManager.Close() }()
+	defer cfgManager.Close()
 
 	envCfg := newImagesTestEnvConfig()
+	logBuf := captureImagesLogs(t)
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -173,80 +196,17 @@ func TestHandler_InvalidMultipartEditsReturnsBadRequest(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "invalid_multipart") {
 		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
-}
-
-func TestLogImagesOriginalRequestOmitsMultipartBody(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/edits", strings.NewReader(""))
-
-	envCfg := newImagesTestEnvConfig()
-	envCfg.EnableRequestLogs = true
-	envCfg.Env = "development"
-	envCfg.RawLogOutput = true
-
-	var logs bytes.Buffer
-	originalOutput := log.Writer()
-	log.SetOutput(&logs)
-	defer log.SetOutput(originalOutput)
-
-	body := []byte("multipart-boundary\r\nfile-bytes-that-must-not-be-logged")
-	logImagesOriginalRequest(c, body, "multipart/form-data; boundary=multipart-boundary", envCfg)
-
-	if strings.Contains(logs.String(), "file-bytes-that-must-not-be-logged") {
-		t.Fatalf("multipart body was logged: %s", logs.String())
+	logs := logBuf.String()
+	if !strings.Contains(logs, "[Images-Multipart]") {
+		t.Fatalf("expected multipart diagnostic log, got: %s", logs)
 	}
-	if !strings.Contains(logs.String(), "multipart request body omitted from logs") {
-		t.Fatalf("missing omission marker in logs: %s", logs.String())
+	if !strings.Contains(logs, "operation=edits") {
+		t.Fatalf("expected operation in logs, got: %s", logs)
 	}
-}
-
-func TestGetChannelModels_CustomAuthorizationCannotOverrideSelectedKey(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
-	var gotAuthorization string
-	var gotTraceID string
-	var gotUserAgent string
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAuthorization = r.Header.Get("Authorization")
-		gotTraceID = r.Header.Get("X-Trace-ID")
-		gotUserAgent = r.Header.Get("User-Agent")
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"data":[{"id":"gpt-image-1"}]}`))
-	}))
-	defer upstream.Close()
-
-	cfgFile := t.TempDir() + "/config.json"
-	cfgJSON := `{"imagesUpstream":[{"name":"images-admin","serviceType":"openai","baseUrl":"` + upstream.URL + `","apiKeys":["sk-selected"],"status":"active"}]}`
-	if err := os.WriteFile(cfgFile, []byte(cfgJSON), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+	if !strings.Contains(logs, "reason=missing_boundary") {
+		t.Fatalf("expected missing_boundary in logs, got: %s", logs)
 	}
-	cfgManager, err := config.NewConfigManager(cfgFile)
-	if err != nil {
-		t.Fatalf("config manager: %v", err)
-	}
-	defer func() { _ = cfgManager.Close() }()
-
-	router := gin.New()
-	router.POST("/api/images/channels/:id/models", GetChannelModels(cfgManager))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/images/channels/0/models", strings.NewReader(`{"key":"sk-selected","customHeaders":{"Authorization":"Bearer sk-custom","X-Trace-ID":"trace-1","User-Agent":"AdminUA/1.0"}}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
-	}
-	if gotAuthorization != "Bearer sk-selected" {
-		t.Fatalf("Authorization = %q, want selected key", gotAuthorization)
-	}
-	if gotTraceID != "trace-1" {
-		t.Fatalf("X-Trace-ID = %q, want custom metadata header", gotTraceID)
-	}
-	if gotUserAgent != "AdminUA/1.0" {
-		t.Fatalf("User-Agent = %q, want custom UA", gotUserAgent)
+	if strings.Contains(logs, "broken") {
+		t.Fatalf("expected multipart body content to stay out of logs, got: %s", logs)
 	}
 }

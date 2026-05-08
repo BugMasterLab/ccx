@@ -1,37 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import { buildChannelPayload } from './channelPayload'
 
-const baseForm = {
-  name: 'test-channel',
-  serviceType: 'openai' as const,
-  baseUrl: 'https://api.example.com/v1',
-  baseUrls: [] as string[],
-  website: '',
-  insecureSkipVerify: false,
-  lowQuality: false,
-  injectDummyThoughtSignature: false,
-  stripThoughtSignature: false,
-  description: '',
-  apiKeys: ['sk-1'],
-  modelMapping: {},
-  reasoningMapping: {},
-  textVerbosity: '' as const,
-  fastMode: false,
-  customHeaders: {},
-  proxyUrl: '',
-  routePrefix: '',
-  supportedModels: [] as string[],
-  autoBlacklistBalance: true,
-  failoverRules: []
-}
-
 describe('buildChannelPayload', () => {
-  it('serializes reasoning mapping and channel advanced options', () => {
+  it('应序列化 reasoningMapping 与渠道级 verbosity/fastMode', () => {
     const result = buildChannelPayload({
-      ...baseForm,
       name: '  test-channel  ',
+      serviceType: 'openai',
       baseUrl: 'https://api.example.com/v1#',
+      baseUrls: [],
       website: ' https://platform.openai.com ',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
       description: '  desc  ',
       apiKeys: ['sk-1', '  ', 'sk-2'],
       modelMapping: { 'gpt-5': 'gpt-5.2' },
@@ -40,7 +21,10 @@ describe('buildChannelPayload', () => {
       fastMode: true,
       customHeaders: { 'x-test': '1' },
       proxyUrl: ' http://127.0.0.1:7890 ',
-      supportedModels: ['gpt-5']
+      routePrefix: '',
+      supportedModels: ['gpt-5'],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
     })
 
     expect(result.name).toBe('test-channel')
@@ -53,18 +37,31 @@ describe('buildChannelPayload', () => {
     expect(result.textVerbosity).toBe('medium')
     expect(result.fastMode).toBe(true)
     expect(result.proxyUrl).toBe('http://127.0.0.1:7890')
-    expect(result).not.toHaveProperty('normalizeMetadataUserId')
-    expect(result).not.toHaveProperty('streamPassthroughEnabled')
-    expect(result).not.toHaveProperty('sub2apiPassthroughEnabled')
-    expect(result).not.toHaveProperty('strictRequestPassthroughEnabled')
   })
 
-  it('deduplicates default version baseUrls and keeps hash variants separate', () => {
+  it('应对多个 baseUrls 去重并保留 baseUrls 输出', () => {
     const result = buildChannelPayload({
-      ...baseForm,
+      name: 'multi',
       serviceType: 'responses',
       baseUrl: '',
-      baseUrls: ['https://api.example.com/v1/', 'https://api.example.com/v1#', 'https://backup.example.com/v1']
+      baseUrls: ['https://api.example.com/v1/', 'https://api.example.com/v1#', 'https://backup.example.com/v1'],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
     })
 
     expect(result.baseUrl).toBe('https://api.example.com')
@@ -75,43 +72,87 @@ describe('buildChannelPayload', () => {
     ])
   })
 
-  it('keeps images-compatible fields without capability-test payload leakage', () => {
+  it('应将根域名与默认版本前缀 URL 去重为最短形式', () => {
     const result = buildChannelPayload({
-      ...baseForm,
-      name: 'images-channel',
+      name: 'multi',
       serviceType: 'openai',
-      baseUrl: 'https://api.openai.com/v1',
-      insecureSkipVerify: true,
-      apiKeys: ['sk-image'],
-      modelMapping: { 'gpt-image-1': 'gpt-image-1' },
-      customHeaders: { 'x-image': '1' },
-      proxyUrl: 'http://127.0.0.1:7890',
-      routePrefix: 'images',
-      supportedModels: ['gpt-image-1', 'dall-e-*']
+      baseUrl: '',
+      baseUrls: ['https://new.timefiles.online/v1', 'https://new.timefiles.online'],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
     })
 
-    expect(result.serviceType).toBe('openai')
-    expect(result.baseUrl).toBe('https://api.openai.com')
-    expect(result.supportedModels).toEqual(['gpt-image-1', 'dall-e-*'])
-    expect(result.customHeaders).toEqual({ 'x-image': '1' })
-    expect(result.proxyUrl).toBe('http://127.0.0.1:7890')
-    expect(result.routePrefix).toBe('images')
-    expect(result.failoverRules).toEqual([])
-    expect(result).not.toHaveProperty('rpm')
+    expect(result.baseUrl).toBe('https://new.timefiles.online')
+    expect(result.baseUrls).toBeUndefined()
   })
 
-  it('removes unsupported advanced options for claude channel', () => {
+  it('应保留带 # 的 URL 与普通 URL 分离', () => {
     const result = buildChannelPayload({
-      ...baseForm,
+      name: 'multi',
+      serviceType: 'openai',
+      baseUrl: '',
+      baseUrls: ['https://new.timefiles.online/v1', 'https://new.timefiles.online#'],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
+    })
+
+    expect(result.baseUrl).toBe('https://new.timefiles.online')
+    expect(result.baseUrls).toEqual(['https://new.timefiles.online', 'https://new.timefiles.online#'])
+  })
+
+  it('应清空 claude 渠道不支持的高级参数', () => {
+    const result = buildChannelPayload({
       name: 'claude-channel',
       serviceType: 'claude',
       baseUrl: 'https://api.anthropic.com/v1',
+      baseUrls: [],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
       apiKeys: ['sk-ant'],
       modelMapping: { opus: 'claude-3-7-sonnet' },
       reasoningMapping: { opus: 'high' },
       textVerbosity: 'high',
       fastMode: true,
-      supportedModels: ['opus']
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: ['opus'],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true
     })
 
     expect(result.modelMapping).toEqual({ opus: 'claude-3-7-sonnet' })
@@ -120,66 +161,88 @@ describe('buildChannelPayload', () => {
     expect(result.fastMode).toBe(false)
   })
 
-  it('keeps autoBlacklistBalance switch', () => {
+  it('应携带 autoBlacklistBalance 开关', () => {
     const result = buildChannelPayload({
-      ...baseForm,
+      name: 'balance-guard',
       serviceType: 'responses',
-      autoBlacklistBalance: false
+      baseUrl: 'https://api.example.com/v1',
+      baseUrls: [],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: false,
+      normalizeMetadataUserId: true
     })
 
     expect(result.autoBlacklistBalance).toBe(false)
   })
 
-  it('normalizes claude failover rules and removes invalid rules', () => {
+  it('应携带 normalizeMetadataUserId 开关', () => {
     const result = buildChannelPayload({
-      ...baseForm,
-      name: 'claude-rules',
-      serviceType: 'claude',
-      baseUrl: 'https://api.anthropic.com/v1',
-      apiKeys: ['sk-ant'],
-      failoverRules: [
-        {
-          action: 'cooldown',
-          description: '  429 cooldown  ',
-          statusCodes: [429, 99, 600],
-          errorCodes: ['  invalid_request_error  ', ''],
-          keywords: ['  usage limits ', ''],
-          durationMinutes: 61.8
-        },
-        {
-          action: 'blacklist',
-          description: 'invalid: no condition',
-          statusCodes: [],
-          errorCodes: [],
-          keywords: []
-        }
-      ]
+      name: 'metadata-guard',
+      serviceType: 'responses',
+      baseUrl: 'https://api.example.com/v1',
+      baseUrls: [],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: false
     })
 
-    expect(result.failoverRules).toEqual([
-      {
-        action: 'cooldown',
-        description: '429 cooldown',
-        statusCodes: [429],
-        errorCodes: ['invalid_request_error'],
-        keywords: ['usage limits'],
-        durationMinutes: 61
-      }
-    ])
+    expect(result.normalizeMetadataUserId).toBe(false)
   })
 
-  it('keeps models health check options and falls back to default interval', () => {
+  it('应携带 normalizeNonstandardChatRoles 开关', () => {
     const result = buildChannelPayload({
-      ...baseForm,
-      name: 'models-health',
-      serviceType: 'claude',
-      baseUrl: 'https://api.anthropic.com/v1',
-      apiKeys: ['sk-ant'],
-      modelsHealthCheckEnabled: true,
-      modelsHealthCheckIntervalMinutes: 0
+      name: 'chat-role-guard',
+      serviceType: 'openai',
+      baseUrl: 'https://api.example.com/v1',
+      baseUrls: [],
+      website: '',
+      insecureSkipVerify: false,
+      lowQuality: false,
+      injectDummyThoughtSignature: false,
+      stripThoughtSignature: false,
+      description: '',
+      apiKeys: ['sk-1'],
+      modelMapping: {},
+      reasoningMapping: {},
+      textVerbosity: '',
+      fastMode: false,
+      customHeaders: {},
+      proxyUrl: '',
+      routePrefix: '',
+      supportedModels: [],
+      autoBlacklistBalance: true,
+      normalizeMetadataUserId: true,
+      normalizeNonstandardChatRoles: true
     })
 
-    expect(result.modelsHealthCheckEnabled).toBe(true)
-    expect(result.modelsHealthCheckIntervalMinutes).toBe(60)
+    expect(result.normalizeNonstandardChatRoles).toBe(true)
   })
 })

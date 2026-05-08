@@ -13,27 +13,27 @@ const sampleChannel: Channel = {
   name: 'existing-channel',
   serviceType: 'openai',
   baseUrl: 'https://example.com/v1',
-  apiKeys: ['sk-test']
+  apiKeys: ['sk-test'],
 }
 
 describe('resolveChannelWatcherAction', () => {
-  it('resets the draft when opening in create mode', () => {
+  it('新增模式打开时返回重置表单动作', () => {
     expect(resolveChannelWatcherAction({
       show: true,
       newChannel: null,
-      oldChannel: null
+      oldChannel: null,
     })).toBe('reset-new-form')
   })
 
-  it('loads channel data when entering edit mode', () => {
+  it('编辑模式切入时返回回填动作', () => {
     expect(resolveChannelWatcherAction({
       show: true,
       newChannel: sampleChannel,
-      oldChannel: null
+      oldChannel: null,
     })).toBe('load-edit-channel')
   })
 
-  it('keeps the local draft when the same edited channel is silently refreshed', () => {
+  it('同一渠道静默保存后仅更新基线，不重置本地草稿', () => {
     expect(resolveChannelWatcherAction({
       show: true,
       newChannel: {
@@ -41,36 +41,41 @@ describe('resolveChannelWatcherAction', () => {
         name: 'existing-channel-updated',
         baseUrl: 'https://example.com/v2'
       },
-      oldChannel: sampleChannel
+      oldChannel: sampleChannel,
     })).toBe('noop')
   })
 
-  it('keeps noop when edit channel is cleared while dialog is open', () => {
+  it('编辑态 channel 被清空时保持 noop，避免误切快速添加', () => {
     expect(resolveChannelWatcherAction({
       show: true,
       newChannel: null,
-      oldChannel: sampleChannel
+      oldChannel: sampleChannel,
     })).toBe('noop')
   })
 
-  it('ignores channel changes while dialog is closed', () => {
+  it('弹窗关闭时始终忽略 channel 变化', () => {
     expect(resolveChannelWatcherAction({
       show: false,
       newChannel: sampleChannel,
-      oldChannel: null
+      oldChannel: null,
     })).toBe('noop')
   })
 })
 
 describe('syncBaseUrlsFormState', () => {
-  it('deduplicates default-version URLs for the active service type', () => {
+  it('应在当前 serviceType 语义下去重，但不要求回写原始文本', () => {
     expect(syncBaseUrlsFormState('https://host\nhttps://host/v1', 'openai')).toEqual({
       baseUrl: 'https://host',
       baseUrls: []
     })
   })
 
-  it('keeps service-specific default-version semantics separate', () => {
+  it('应保留原始文本，便于后续按最终 serviceType 重算', () => {
+    expect(syncBaseUrlsFormState('https://host/v1\nhttps://host', 'openai')).toEqual({
+      baseUrl: 'https://host',
+      baseUrls: []
+    })
+
     expect(syncBaseUrlsFormState('https://host/v1\nhttps://host', 'gemini')).toEqual({
       baseUrl: 'https://host/v1',
       baseUrls: ['https://host/v1', 'https://host']
@@ -79,7 +84,7 @@ describe('syncBaseUrlsFormState', () => {
 })
 
 describe('isValidSupportedModelPattern', () => {
-  it('accepts exact, wildcard, contains, and exclusion rules', () => {
+  it('支持精确、前缀、后缀、包含和排除规则', () => {
     expect(isValidSupportedModelPattern('gpt-4o')).toBe(true)
     expect(isValidSupportedModelPattern('gpt-4*')).toBe(true)
     expect(isValidSupportedModelPattern('*image')).toBe(true)
@@ -87,7 +92,7 @@ describe('isValidSupportedModelPattern', () => {
     expect(isValidSupportedModelPattern('!*image*')).toBe(true)
   })
 
-  it('rejects invalid wildcard and empty rules', () => {
+  it('拒绝非法中间通配和空规则', () => {
     expect(isValidSupportedModelPattern('foo*bar')).toBe(false)
     expect(isValidSupportedModelPattern('**')).toBe(false)
     expect(isValidSupportedModelPattern('')).toBe(false)
@@ -98,14 +103,14 @@ describe('isValidSupportedModelPattern', () => {
 })
 
 describe('filterValidSupportedModelPatterns', () => {
-  it('filters invalid rules while preserving valid rule order', () => {
+  it('过滤非法规则并保留合法规则顺序', () => {
     expect(filterValidSupportedModelPatterns([' gpt-4* ', 'foo*bar', '!*image*'])).toEqual({
       validPatterns: ['gpt-4*', '!*image*'],
       hasInvalidPatterns: true
     })
   })
 
-  it('does not mark all-valid rules as invalid', () => {
+  it('全部合法时不标记错误', () => {
     expect(filterValidSupportedModelPatterns(['gpt-4*', '*image*'])).toEqual({
       validPatterns: ['gpt-4*', '*image*'],
       hasInvalidPatterns: false

@@ -9,34 +9,10 @@ import (
 	"github.com/BenedictKing/ccx/internal/utils"
 )
 
-func firstActiveUpstreamIndex(upstreams []UpstreamConfig) int {
-	for i := range upstreams {
-		status := upstreams[i].Status
-		if status == "" || status == "active" {
-			return i
-		}
-	}
-
-	return -1
-}
-
-func validateUniqueUpstreamName(upstreams []UpstreamConfig, excludeIndex int, name string) error {
-	for i := range upstreams {
-		if i == excludeIndex {
-			continue
-		}
-		if upstreams[i].Name == name {
-			return fmt.Errorf("渠道名称 '%s' 已存在", name)
-		}
-	}
-
-	return nil
-}
-
 // ============== Messages 渠道方法 ==============
 
 // GetCurrentUpstream 获取当前上游配置
-// 优先选择第一个 active 状态的渠道，若无则返回显式错误
+// 优先选择第一个 active 状态的渠道，若无则回退到第一个渠道
 func (cm *ConfigManager) GetCurrentUpstream() (*UpstreamConfig, error) {
 	cm.mu.RLock()
 	defer cm.mu.RUnlock()
@@ -45,12 +21,16 @@ func (cm *ConfigManager) GetCurrentUpstream() (*UpstreamConfig, error) {
 		return nil, fmt.Errorf("未配置任何上游渠道")
 	}
 
-	activeIndex := firstActiveUpstreamIndex(cm.config.Upstream)
-	if activeIndex < 0 {
-		return nil, fmt.Errorf("没有可用的 active 上游渠道")
+	// 优先选择第一个 active 状态的渠道
+	for i := range cm.config.Upstream {
+		status := cm.config.Upstream[i].Status
+		if status == "" || status == "active" {
+			return &cm.config.Upstream[i], nil
+		}
 	}
 
-	return &cm.config.Upstream[activeIndex], nil
+	// 没有 active 渠道，回退到第一个渠道
+	return &cm.config.Upstream[0], nil
 }
 
 // GetCurrentUpstreamWithIndex 获取当前上游配置及其索引
@@ -62,12 +42,14 @@ func (cm *ConfigManager) GetCurrentUpstreamWithIndex() (*UpstreamConfig, int, er
 		return nil, 0, fmt.Errorf("未配置任何上游渠道")
 	}
 
-	activeIndex := firstActiveUpstreamIndex(cm.config.Upstream)
-	if activeIndex < 0 {
-		return nil, -1, fmt.Errorf("没有可用的 active 上游渠道")
+	for i := range cm.config.Upstream {
+		status := cm.config.Upstream[i].Status
+		if status == "" || status == "active" {
+			return &cm.config.Upstream[i], i, nil
+		}
 	}
 
-	return &cm.config.Upstream[activeIndex], activeIndex, nil
+	return &cm.config.Upstream[0], 0, nil
 }
 
 // AddUpstream 添加上游
@@ -87,12 +69,12 @@ func (cm *ConfigManager) AddUpstream(upstream UpstreamConfig) error {
 		upstream.Status = "active"
 	}
 
+	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, "claude")
+
 	// 去重 API Keys 和 Base URLs
 	upstream.APIKeys = deduplicateStrings(upstream.APIKeys)
 	upstream.BaseURL = utils.CanonicalBaseURL(upstream.BaseURL, upstream.ServiceType)
 	upstream.BaseURLs = deduplicateBaseURLs(upstream.BaseURLs, upstream.ServiceType)
-	upstream.NormalizeModelsHealthCheckOptions()
-	upstream.NormalizeModelsResponseMode()
 
 	cm.config.Upstream = append(cm.config.Upstream, upstream)
 
@@ -115,21 +97,17 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 	}
 
 	upstream := &cm.config.Upstream[index]
+	upstream.ServiceType = normalizeUpstreamServiceType(upstream.ServiceType, "claude")
 	serviceType := upstream.ServiceType
 	if updates.ServiceType != nil {
-		serviceType = *updates.ServiceType
+		serviceType = normalizeUpstreamServiceType(*updates.ServiceType, "claude")
 	}
 
 	if updates.Name != nil {
-		if err := validateUniqueUpstreamName(cm.config.Upstream, index, *updates.Name); err != nil {
-			return false, err
-		}
 		upstream.Name = *updates.Name
 	}
 	if updates.BaseURL != nil {
 		upstream.BaseURL = utils.CanonicalBaseURL(*updates.BaseURL, serviceType)
-		// 当 BaseURL 被更新且 BaseURLs 未被显式设置时，清空 BaseURLs 保持一致性
-		// 避免出现 baseUrl 和 baseUrls[0] 不一致的情况
 		if updates.BaseURLs == nil {
 			upstream.BaseURLs = nil
 		}
@@ -147,16 +125,13 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 		upstream.Website = *updates.Website
 	}
 	if updates.APIKeys != nil {
-		// 记录被移除的 Key 到历史列表（用于统计聚合）
 		newKeys := make(map[string]bool)
 		for _, key := range updates.APIKeys {
 			newKeys[key] = true
 		}
 
-		// 找出被移除的 Key（在旧列表中但不在新列表中）
 		for _, key := range upstream.APIKeys {
 			if !newKeys[key] {
-				// 检查是否已在历史列表中
 				alreadyInHistory := false
 				for _, hk := range upstream.HistoricalAPIKeys {
 					if hk == key {
@@ -171,7 +146,6 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 			}
 		}
 
-		// 如果新 Key 在历史列表中，从历史列表移除（换回来了）
 		var newHistoricalKeys []string
 		for _, hk := range upstream.HistoricalAPIKeys {
 			if !newKeys[hk] {
@@ -182,12 +156,10 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 		}
 		upstream.HistoricalAPIKeys = newHistoricalKeys
 
-		// 只有单 key 场景且 key 被更换时，才自动激活并重置熔断
-		if len(upstream.APIKeys) == 1 && len(updates.APIKeys) == 1 &&
-			upstream.APIKeys[0] != updates.APIKeys[0] {
+		wasSuspended := upstream.Status == "suspended"
+		if applySingleKeyReplacementTransition(upstream, updates.APIKeys) {
 			shouldResetMetrics = true
-			if upstream.Status == "suspended" {
-				upstream.Status = "active"
+			if wasSuspended {
 				log.Printf("[Config-Upstream] 渠道 [%d] %s 已从暂停状态自动激活（单 key 更换）", index, upstream.Name)
 			}
 		}
@@ -204,6 +176,9 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 	}
 	if updates.FastMode != nil {
 		upstream.FastMode = *updates.FastMode
+	}
+	if updates.NormalizeNonstandardChatRoles != nil {
+		upstream.NormalizeNonstandardChatRoles = *updates.NormalizeNonstandardChatRoles
 	}
 	if updates.InsecureSkipVerify != nil {
 		upstream.InsecureSkipVerify = *updates.InsecureSkipVerify
@@ -224,23 +199,9 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 		v := *updates.AutoBlacklistBalance
 		upstream.AutoBlacklistBalance = &v
 	}
-	if updates.KeyAffinityEnabled != nil {
-		v := *updates.KeyAffinityEnabled
-		upstream.KeyAffinityEnabled = &v
-	}
-	if updates.ModelsHealthCheckEnabled != nil {
-		v := *updates.ModelsHealthCheckEnabled
-		upstream.ModelsHealthCheckEnabled = &v
-	}
-	if updates.ModelsHealthCheckIntervalMinutes != nil {
-		v := *updates.ModelsHealthCheckIntervalMinutes
-		if v <= 0 {
-			v = 60
-		}
-		upstream.ModelsHealthCheckIntervalMinutes = &v
-	}
-	if updates.FailoverRules != nil {
-		upstream.FailoverRules = CloneFailoverRules(updates.FailoverRules)
+	if updates.NormalizeMetadataUserID != nil {
+		v := *updates.NormalizeMetadataUserID
+		upstream.NormalizeMetadataUserID = &v
 	}
 	if updates.InjectDummyThoughtSignature != nil {
 		upstream.InjectDummyThoughtSignature = *updates.InjectDummyThoughtSignature
@@ -254,17 +215,9 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 	if updates.SupportedModels != nil {
 		upstream.SupportedModels = updates.SupportedModels
 	}
-	if updates.ModelsResponseMode != nil {
-		upstream.ModelsResponseMode = *updates.ModelsResponseMode
-	}
-	if updates.ManualModels != nil {
-		upstream.ManualModels = updates.ManualModels
-	}
 	if updates.RoutePrefix != nil {
 		upstream.RoutePrefix = *updates.RoutePrefix
 	}
-	upstream.NormalizeModelsHealthCheckOptions()
-	upstream.NormalizeModelsResponseMode()
 
 	if err := cm.saveConfigLocked(cm.config); err != nil {
 		return false, err
@@ -286,7 +239,6 @@ func (cm *ConfigManager) RemoveUpstream(index int) (*UpstreamConfig, error) {
 	removed := cm.config.Upstream[index]
 	cm.config.Upstream = append(cm.config.Upstream[:index], cm.config.Upstream[index+1:]...)
 
-	// 清理被删除渠道的失败 key 冷却记录
 	cm.clearFailedKeysForUpstream(&removed, "Messages")
 
 	if err := cm.saveConfigLocked(cm.config); err != nil {
@@ -615,6 +567,7 @@ func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
 		}
 	}
 
+	// 同样遍历 Images 渠道
 	for upstreamIdx := range cm.config.ImagesUpstream {
 		upstream := &cm.config.ImagesUpstream[upstreamIdx]
 		index := -1
@@ -626,6 +579,7 @@ func (cm *ConfigManager) DeprioritizeAPIKey(apiKey string) error {
 		}
 
 		if index != -1 && index != len(upstream.APIKeys)-1 {
+			// 移动到末尾
 			upstream.APIKeys = append(upstream.APIKeys[:index], upstream.APIKeys[index+1:]...)
 			upstream.APIKeys = append(upstream.APIKeys, apiKey)
 			log.Printf("[Images-Key] 已将API密钥移动到末尾以降低优先级: %s (Images渠道: %s)", utils.MaskAPIKey(apiKey), upstream.Name)

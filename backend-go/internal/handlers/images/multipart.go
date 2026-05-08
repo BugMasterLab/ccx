@@ -3,6 +3,7 @@ package images
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -67,6 +68,59 @@ func jsonValueIsTrue(value interface{}) bool {
 	}
 }
 
+type multipartDiagnosticError struct {
+	stage  string
+	reason string
+	err    error
+}
+
+func (e *multipartDiagnosticError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.err == nil {
+		return e.reason
+	}
+	return e.err.Error()
+}
+
+func (e *multipartDiagnosticError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.err
+}
+
+func newMultipartDiagnosticError(stage string, reason string, err error) error {
+	return &multipartDiagnosticError{
+		stage:  stage,
+		reason: reason,
+		err:    err,
+	}
+}
+
+func describeMultipartDiagnostic(err error) (string, string) {
+	if err == nil {
+		return "", ""
+	}
+	var diagErr *multipartDiagnosticError
+	if errors.As(err, &diagErr) {
+		return diagErr.stage, diagErr.reason
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected eof") {
+		return "read_part", "unexpected_eof"
+	}
+	return "read_part", "part_read_failed"
+}
+
+func hasMultipartBoundary(contentType string) bool {
+	_, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(params["boundary"]) != ""
+}
+
 func extractMultipartField(bodyBytes []byte, contentType string, fieldName string) (string, bool) {
 	reader, err := newMultipartReader(bodyBytes, contentType)
 	if err != nil {
@@ -82,11 +136,11 @@ func extractMultipartField(bodyBytes []byte, contentType string, fieldName strin
 			return "", false
 		}
 		if part.FormName() != fieldName || part.FileName() != "" {
-			_ = part.Close()
+			part.Close()
 			continue
 		}
 		valueBytes, err := io.ReadAll(part)
-		_ = part.Close()
+		part.Close()
 		if err != nil {
 			return "", false
 		}
@@ -105,12 +159,20 @@ func validateMultipartBody(bodyBytes []byte, contentType string) error {
 			return nil
 		}
 		if err != nil {
-			return err
+			reason := "malformed_multipart"
+			if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected eof") {
+				reason = "unexpected_eof"
+			}
+			return newMultipartDiagnosticError("next_part", reason, err)
 		}
 		_, readErr := io.Copy(io.Discard, part)
-		_ = part.Close()
+		part.Close()
 		if readErr != nil {
-			return readErr
+			reason := "part_read_failed"
+			if errors.Is(readErr, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(readErr.Error()), "unexpected eof") {
+				reason = "unexpected_eof"
+			}
+			return newMultipartDiagnosticError("read_part", reason, readErr)
 		}
 	}
 }
@@ -131,7 +193,11 @@ func rewriteMultipartFormField(bodyBytes []byte, contentType string, fieldName s
 			break
 		}
 		if err != nil {
-			return nil, "", err
+			reason := "malformed_multipart"
+			if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected eof") {
+				reason = "unexpected_eof"
+			}
+			return nil, "", newMultipartDiagnosticError("rewrite_field", reason, err)
 		}
 
 		formName := part.FormName()
@@ -139,29 +205,33 @@ func rewriteMultipartFormField(bodyBytes []byte, contentType string, fieldName s
 		if formName == fieldName && fileName == "" {
 			if !fieldWritten {
 				if err := writer.WriteField(fieldName, fieldValue); err != nil {
-					_ = part.Close()
-					return nil, "", err
+					part.Close()
+					return nil, "", newMultipartDiagnosticError("rewrite_field", "part_read_failed", err)
 				}
 				fieldWritten = true
 			}
-			_ = part.Close()
+			part.Close()
 			continue
 		}
 
 		if err := copyMultipartPart(writer, part); err != nil {
-			_ = part.Close()
-			return nil, "", err
+			part.Close()
+			reason := "part_read_failed"
+			if errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(strings.ToLower(err.Error()), "unexpected eof") {
+				reason = "unexpected_eof"
+			}
+			return nil, "", newMultipartDiagnosticError("rewrite_field", reason, err)
 		}
-		_ = part.Close()
+		part.Close()
 	}
 
 	if !fieldWritten {
 		if err := writer.WriteField(fieldName, fieldValue); err != nil {
-			return nil, "", err
+			return nil, "", newMultipartDiagnosticError("rewrite_field", "part_read_failed", err)
 		}
 	}
 	if err := writer.Close(); err != nil {
-		return nil, "", err
+		return nil, "", newMultipartDiagnosticError("rewrite_field", "part_read_failed", err)
 	}
 
 	return buf.Bytes(), writer.FormDataContentType(), nil
@@ -170,11 +240,11 @@ func rewriteMultipartFormField(bodyBytes []byte, contentType string, fieldName s
 func newMultipartReader(bodyBytes []byte, contentType string) (*multipart.Reader, error) {
 	_, params, err := mime.ParseMediaType(contentType)
 	if err != nil {
-		return nil, err
+		return nil, newMultipartDiagnosticError("parse_media_type", "invalid_content_type", err)
 	}
 	boundary := params["boundary"]
 	if boundary == "" {
-		return nil, fmt.Errorf("missing multipart boundary")
+		return nil, newMultipartDiagnosticError("missing_boundary", "missing_boundary", fmt.Errorf("missing multipart boundary"))
 	}
 	return multipart.NewReader(bytes.NewReader(bodyBytes), boundary), nil
 }
