@@ -114,7 +114,7 @@ func handleMultiChannel(
 	userID string,
 	startTime time.Time,
 ) {
-	processViaPipeline(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, isStream, userID, "", startTime)
+	processViaPipeline(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, isStream, userID, c.Param("routePrefix"), startTime)
 }
 
 // handleSingleChannel 处理单渠道 Chat 请求
@@ -143,7 +143,7 @@ func handleSingleChannel(
 	}
 
 	// userID 在单渠道场景下并不参与亲和性，但 Finalize 落账仍需要传一份 ""。
-	processViaPipeline(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, isStream, "", "", startTime)
+	processViaPipeline(c, envCfg, cfgManager, channelScheduler, bodyBytes, model, isStream, "", c.Param("routePrefix"), startTime)
 }
 
 // buildProviderRequest 构建上游请求

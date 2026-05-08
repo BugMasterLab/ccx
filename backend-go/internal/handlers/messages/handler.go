@@ -104,7 +104,7 @@ func handleMultiChannel(
 	userID string,
 	startTime time.Time,
 ) {
-	processViaPipeline(c, envCfg, cfgManager, channelScheduler, &claudeReq, bodyBytes, userID, claudeReq.Model, "", startTime)
+	processViaPipeline(c, envCfg, cfgManager, channelScheduler, &claudeReq, bodyBytes, userID, claudeReq.Model, c.Param("routePrefix"), startTime)
 }
 
 // handleSingleChannel 处理单渠道代理请求
@@ -141,7 +141,7 @@ func handleSingleChannel(
 		return
 	}
 
-	processViaPipeline(c, envCfg, cfgManager, channelScheduler, &claudeReq, bodyBytes, userID, claudeReq.Model, "", startTime)
+	processViaPipeline(c, envCfg, cfgManager, channelScheduler, &claudeReq, bodyBytes, userID, claudeReq.Model, c.Param("routePrefix"), startTime)
 }
 
 // CountTokensHandler 处理 /v1/messages/count_tokens 请求

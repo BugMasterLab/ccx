@@ -135,7 +135,7 @@ func handleMultiChannel(
 	userID string,
 	startTime time.Time,
 ) {
-	processViaPipeline(c, envCfg, cfgManager, channelScheduler, geminiReq, bodyBytes, userID, model, isStream, "", startTime)
+	processViaPipeline(c, envCfg, cfgManager, channelScheduler, geminiReq, bodyBytes, userID, model, isStream, c.Param("routePrefix"), startTime)
 }
 
 // handleSingleChannel 处理单渠道 Gemini 请求

@@ -104,7 +104,7 @@ func handleMultiChannel(
 	userID string,
 	startTime time.Time,
 ) {
-	processViaPipeline(c, envCfg, cfgManager, channelScheduler, sessionManager, &responsesReq, bodyBytes, userID, responsesReq.Model, "", startTime)
+	processViaPipeline(c, envCfg, cfgManager, channelScheduler, sessionManager, &responsesReq, bodyBytes, userID, responsesReq.Model, c.Param("routePrefix"), startTime)
 }
 
 // handleSingleChannel 处理单渠道 Responses 请求
@@ -143,7 +143,7 @@ func handleSingleChannel(
 		return
 	}
 
-	processViaPipeline(c, envCfg, cfgManager, channelScheduler, sessionManager, &responsesReq, bodyBytes, userID, responsesReq.Model, "", startTime)
+	processViaPipeline(c, envCfg, cfgManager, channelScheduler, sessionManager, &responsesReq, bodyBytes, userID, responsesReq.Model, c.Param("routePrefix"), startTime)
 }
 
 // handleSuccess 处理成功的 Responses 响应
