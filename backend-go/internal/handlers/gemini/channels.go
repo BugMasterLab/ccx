@@ -60,6 +60,7 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				"disabledApiKeys":                  up.DisabledAPIKeys,
 				"cooldownApiKeys":                  cfgManager.GetCooldownKeys("Gemini", i),
 				"autoBlacklistBalance":             up.IsAutoBlacklistBalanceEnabled(),
+				"autoBlacklistEmptyStream":         up.IsAutoBlacklistEmptyStreamEnabled(),
 				"normalizeMetadataUserId":          up.IsNormalizeMetadataUserIDEnabled(),
 				"streamPassthroughEnabled":         up.IsStreamPassthroughEnabled(),
 				"sub2apiPassthroughEnabled":        up.IsSub2APIPassthroughEnabled(),

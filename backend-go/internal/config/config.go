@@ -39,7 +39,8 @@ type UpstreamConfig struct {
 	PromotionUntil *time.Time `json:"promotionUntil,omitempty"` // 促销期截止时间，在此期间内优先使用此渠道（忽略trace亲和）
 	LowQuality     bool       `json:"lowQuality,omitempty"`     // 低质量渠道标记：启用后强制本地估算 token，偏差>5%时使用本地值
 	// 自动拉黑开关
-	AutoBlacklistBalance *bool `json:"autoBlacklistBalance,omitempty"` // 余额不足时自动拉黑 Key（默认 true）
+	AutoBlacklistBalance     *bool `json:"autoBlacklistBalance,omitempty"`     // 余额不足时自动拉黑 Key（默认 true）
+	AutoBlacklistEmptyStream *bool `json:"autoBlacklistEmptyStream,omitempty"` // 流式空响应时自动拉黑 Key（默认 true，关闭后仅冷却）
 	// metadata.user_id 规范化开关
 	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"` // 规范化 metadata.user_id（默认 true）
 	// Gemini 特定配置
@@ -103,6 +104,14 @@ func (u *UpstreamConfig) IsAutoBlacklistBalanceEnabled() bool {
 		return true
 	}
 	return *u.AutoBlacklistBalance
+}
+
+// IsAutoBlacklistEmptyStreamEnabled 检查流式空响应自动拉黑是否启用（默认 true）
+func (u *UpstreamConfig) IsAutoBlacklistEmptyStreamEnabled() bool {
+	if u.AutoBlacklistEmptyStream == nil {
+		return true
+	}
+	return *u.AutoBlacklistEmptyStream
 }
 
 // IsNormalizeMetadataUserIDEnabled 检查 metadata.user_id 规范化是否启用（默认 true）
@@ -363,6 +372,7 @@ type UpstreamUpdate struct {
 	PromotionUntil                   *time.Time     `json:"promotionUntil"`
 	LowQuality                       *bool          `json:"lowQuality"`
 	AutoBlacklistBalance             *bool          `json:"autoBlacklistBalance"`
+	AutoBlacklistEmptyStream         *bool          `json:"autoBlacklistEmptyStream"`
 	NormalizeMetadataUserID          *bool          `json:"normalizeMetadataUserId"`
 	StreamPassthroughEnabled         *bool          `json:"streamPassthroughEnabled"`
 	Sub2APIPassthroughEnabled        *bool          `json:"sub2apiPassthroughEnabled"`

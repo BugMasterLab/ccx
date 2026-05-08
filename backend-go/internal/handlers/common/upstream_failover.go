@@ -435,8 +435,53 @@ func TryUpstreamWithAllKeys(
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
 					log.Printf("[%s-Cancel] 请求已取消，停止渠道 failover", apiType)
 					CompleteLog(channelLogStore, channelIndex, logRequestID, http.StatusOK, false, "client canceled", attempt > 0 || urlIdx > 0)
-				} else if errors.Is(err, ErrEmptyStreamResponse) || errors.Is(err, ErrInvalidResponseBody) {
-					// 空响应或无效响应体（如 HTML）：Header 未发送，可安全 failover
+				} else if errors.Is(err, ErrEmptyStreamResponse) {
+					// 流式空响应（零事件/零字节）：先做一次同 key 原位重试，
+					// 重试仍空才按渠道开关拉黑/冷却。
+					retryUsage, retryErr := retryEmptyStreamOnce(c, upstreamCopy, apiKey, attemptBody, upstream, envCfg, isStream, apiType, buildRequest, handleSuccess)
+					if retryErr == nil {
+						// 重试成功：走 success 收尾
+						log.Printf("[%s-EmptyResponse] 上游流式空响应，原位重试成功 (Key: %s)", apiType, utils.MaskAPIKey(apiKey))
+						metricsManager.RecordRequestFinalizeSuccess(currentBaseURL, apiKey, metricsServiceType, requestID, retryUsage)
+						channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
+						if probeKey := currentBaseURL + "|" + apiKey + "|" + metricsServiceType; probeAcquired[probeKey] {
+							metricsManager.ReleaseProbe(currentBaseURL, apiKey, metricsServiceType)
+							delete(probeAcquired, probeKey)
+						}
+						if markURLSuccess != nil {
+							markURLSuccess(currentBaseURL)
+						}
+						CompleteLog(channelLogStore, channelIndex, logRequestID, http.StatusOK, true, "retried after empty stream", attempt > 0 || urlIdx > 0)
+						return true, apiKey, originalIdx, nil, retryUsage, nil
+					}
+					// 重试结果：仍是空响应 → 走拉黑/冷却；其他错误 → 通用 MarkKeyAsFailed
+					failedKeys[apiKey] = true
+					stillEmpty := errors.Is(retryErr, ErrEmptyStreamResponse)
+					autoBlacklist := stillEmpty && upstream.IsAutoBlacklistEmptyStreamEnabled()
+					if autoBlacklist {
+						if blacklistErr := cfgManager.BlacklistKey(apiType, channelIndex, apiKey, "empty_response", "upstream returned empty stream response (after retry)"); blacklistErr != nil {
+							log.Printf("[%s-Blacklist] 拉黑 Key 失败: %v", apiType, blacklistErr)
+						}
+					} else {
+						cfgManager.MarkKeyAsFailed(apiKey, apiType)
+					}
+					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
+					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
+					if markURLFailure != nil {
+						markURLFailure(currentBaseURL)
+					}
+					CompleteLog(channelLogStore, channelIndex, logRequestID, http.StatusOK, false, retryErr.Error(), attempt > 0 || urlIdx > 0)
+					switch {
+					case autoBlacklist:
+						log.Printf("[%s-Blacklist] 上游流式空响应（重试后仍空）触发拉黑 (Key: %s)，尝试下一个密钥", apiType, utils.MaskAPIKey(apiKey))
+					case stillEmpty:
+						log.Printf("[%s-EmptyResponse] 上游流式空响应（重试后仍空），仅冷却，尝试下一个密钥 (Key: %s)", apiType, utils.MaskAPIKey(apiKey))
+					default:
+						log.Printf("[%s-EmptyResponse] 上游流式空响应，重试触发其他错误 (Key: %s): %v，尝试下一个密钥", apiType, utils.MaskAPIKey(apiKey), retryErr)
+					}
+					continue
+				} else if errors.Is(err, ErrInvalidResponseBody) {
+					// 无效响应体（如 HTML）：Header 未发送，可安全 failover；保持冷却语义
 					failedKeys[apiKey] = true
 					cfgManager.MarkKeyAsFailed(apiKey, apiType)
 					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
@@ -444,7 +489,6 @@ func TryUpstreamWithAllKeys(
 					if markURLFailure != nil {
 						markURLFailure(currentBaseURL)
 					}
-					// 记录渠道日志
 					CompleteLog(channelLogStore, channelIndex, logRequestID, http.StatusOK, false, err.Error(), attempt > 0 || urlIdx > 0)
 					log.Printf("[%s-InvalidResponse] 上游返回无效响应 (Key: %s): %v，尝试下一个密钥", apiType, utils.MaskAPIKey(apiKey), err)
 					continue
@@ -522,4 +566,40 @@ func BuildDefaultURLResults(urls []string) []warmup.URLLatencyResult {
 		}
 	}
 	return results
+}
+
+// retryEmptyStreamOnce 对同一 baseURL+apiKey 做一次原位重试，仅用于 ErrEmptyStreamResponse 兜底。
+// 重试不参与 metrics 指标记录，由调用方根据返回结果决定如何收尾。
+// 返回 nil error 表示重试成功；返回 ErrEmptyStreamResponse 表示再次空响应；其它错误为重试过程中的故障。
+func retryEmptyStreamOnce(
+	c *gin.Context,
+	upstreamCopy *config.UpstreamConfig,
+	apiKey string,
+	attemptBody []byte,
+	upstream *config.UpstreamConfig,
+	envCfg *config.EnvConfig,
+	isStream bool,
+	apiType string,
+	buildRequest BuildRequestFunc,
+	handleSuccess HandleSuccessFunc,
+) (*types.Usage, error) {
+	RestoreRequestBody(c, attemptBody)
+	c.Set("requestBodyBytes", attemptBody)
+
+	req, err := buildRequest(c, upstreamCopy, apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("retry build request failed: %w", err)
+	}
+
+	resp, err := SendRequest(req, upstream, envCfg, isStream, apiType)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("retry upstream returned status %d", resp.StatusCode)
+	}
+
+	return handleSuccess(c, resp, upstreamCopy, apiKey, attemptBody)
 }

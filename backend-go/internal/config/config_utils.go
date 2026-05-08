@@ -245,6 +245,10 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		v := *u.AutoBlacklistBalance
 		cloned.AutoBlacklistBalance = &v
 	}
+	if u.AutoBlacklistEmptyStream != nil {
+		v := *u.AutoBlacklistEmptyStream
+		cloned.AutoBlacklistEmptyStream = &v
+	}
 	if u.NormalizeMetadataUserID != nil {
 		v := *u.NormalizeMetadataUserID
 		cloned.NormalizeMetadataUserID = &v

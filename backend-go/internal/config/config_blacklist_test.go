@@ -276,6 +276,46 @@ func TestUpdateUpstreamCanSetAutoBlacklistBalance(t *testing.T) {
 	}
 }
 
+func TestUpdateUpstreamCanSetAutoBlacklistEmptyStream(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "config.json")
+	initialConfig := `{
+		"upstream": [{
+			"name": "test-channel",
+			"baseUrl": "https://example.com",
+			"apiKeys": ["sk-active"],
+			"serviceType": "claude"
+		}]
+	}`
+	if err := os.WriteFile(configPath, []byte(initialConfig), 0644); err != nil {
+		t.Fatalf("写入初始配置失败: %v", err)
+	}
+
+	cm, err := NewConfigManager(configPath)
+	if err != nil {
+		t.Fatalf("NewConfigManager() error = %v", err)
+	}
+	defer cm.Close()
+
+	// 默认未设置时应启用（true）
+	if !cm.GetConfig().Upstream[0].IsAutoBlacklistEmptyStreamEnabled() {
+		t.Fatalf("IsAutoBlacklistEmptyStreamEnabled() default = false, want true")
+	}
+
+	disabled := false
+	if _, err := cm.UpdateUpstream(0, UpstreamUpdate{AutoBlacklistEmptyStream: &disabled}); err != nil {
+		t.Fatalf("UpdateUpstream() error = %v", err)
+	}
+
+	cfg := cm.GetConfig()
+	if cfg.Upstream[0].AutoBlacklistEmptyStream == nil || *cfg.Upstream[0].AutoBlacklistEmptyStream != false {
+		t.Fatalf("AutoBlacklistEmptyStream = %v, want false", cfg.Upstream[0].AutoBlacklistEmptyStream)
+	}
+	if cfg.Upstream[0].IsAutoBlacklistEmptyStreamEnabled() {
+		t.Fatalf("IsAutoBlacklistEmptyStreamEnabled() after disable = true, want false")
+	}
+}
+
 func TestNormalizeMetadataUserIDDefaultsAndUpdate(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "config.json")

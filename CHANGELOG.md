@@ -1,3 +1,10 @@
+## [v2.6.71] - 2026-05-08
+
+### Added
+
+- **流式空响应支持原位重试 + 渠道级拉黑开关** - 上游流式响应零事件/零字节时，先在同 baseURL+apiKey 上原位重试一次；重试成功直接成功收尾，重试仍空则按新增的 `autoBlacklistEmptyStream` 渠道开关决定拉黑或仅冷却（默认 true，关闭后仅冷却）。重试不计入 metrics 指标，避免误伤指标统计。
+- **AddChannelModal 流式空响应拉黑开关** - 新建/编辑渠道弹窗新增 `autoBlacklistEmptyStream` 开关，覆盖中文/英文/印尼文 i18n 文案，并在 API 类型中补充 `Channel.autoBlacklistEmptyStream` 字段与对应的回归测试。
+
 ## [v2.6.70] - 2026-05-03
 
 ### Fixed

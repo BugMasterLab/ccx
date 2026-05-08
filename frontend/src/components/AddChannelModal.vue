@@ -807,6 +807,19 @@
               </div>
             </v-col>
 
+            <v-col cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="warning">mdi-playlist-remove</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.autoBlacklistEmptyStreamLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.autoBlacklistEmptyStreamHint') }}</div>
+                  </div>
+                </div>
+                <v-switch v-model="form.autoBlacklistEmptyStream" inset color="warning" hide-details />
+              </div>
+            </v-col>
+
             <v-col v-if="props.channelType === 'messages' || props.channelType === 'responses'" cols="12">
               <div class="d-flex align-center justify-space-between">
                 <div class="d-flex align-center ga-2">
@@ -1861,6 +1874,7 @@ const form = reactive({
   modelsResponseMode: 'upstream' as 'upstream' | 'manual',
   manualModels: [] as string[],
   autoBlacklistBalance: true,
+  autoBlacklistEmptyStream: true,
   normalizeMetadataUserId: true,
   keyAffinityEnabled: true,
   streamPassthroughEnabled: false,
@@ -2223,6 +2237,7 @@ const resetForm = () => {
   form.modelsResponseMode = 'upstream'
   form.manualModels = []
   form.autoBlacklistBalance = true
+  form.autoBlacklistEmptyStream = true
   form.normalizeMetadataUserId = true
   form.keyAffinityEnabled = true
   form.streamPassthroughEnabled = false
@@ -2306,6 +2321,7 @@ const loadChannelData = (channel: Channel) => {
   form.modelsResponseMode = channel.modelsResponseMode === 'manual' ? 'manual' : 'upstream'
   form.manualModels = channel.manualModels || []
   form.autoBlacklistBalance = channel.autoBlacklistBalance ?? true
+  form.autoBlacklistEmptyStream = channel.autoBlacklistEmptyStream ?? true
   form.normalizeMetadataUserId = channel.normalizeMetadataUserId ?? true
   form.keyAffinityEnabled = channel.keyAffinityEnabled ?? (channel.serviceType === 'claude')
   form.streamPassthroughEnabled = channel.streamPassthroughEnabled ?? true

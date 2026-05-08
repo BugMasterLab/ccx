@@ -204,6 +204,8 @@ export type MessageKey =
   | 'addChannel.lowQualityHint'
   | 'addChannel.autoBlacklistBalanceLabel'
   | 'addChannel.autoBlacklistBalanceHint'
+  | 'addChannel.autoBlacklistEmptyStreamLabel'
+  | 'addChannel.autoBlacklistEmptyStreamHint'
   | 'addChannel.normalizeMetadataUserIdLabel'
   | 'addChannel.normalizeMetadataUserIdHint'
   | 'addChannel.injectDummyThoughtSignatureLabel'
@@ -571,6 +573,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': 'When enabled, token usage is force-estimated locally and the local value is used if the deviation exceeds 5%.',
     'addChannel.autoBlacklistBalanceLabel': 'Auto blacklist on insufficient balance',
     'addChannel.autoBlacklistBalanceHint': 'Automatically move the key to the blacklist when the upstream reports insufficient balance.',
+    'addChannel.autoBlacklistEmptyStreamLabel': 'Auto blacklist on empty stream response',
+    'addChannel.autoBlacklistEmptyStreamHint': 'Automatically blacklist the key when the upstream returns an empty stream (zero events). When off, only cooldown is applied.',
     'addChannel.normalizeMetadataUserIdLabel': 'Normalize metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': 'Auto-convert JSON object user_id to a flat string for upstream compatibility.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Inject dummy thought signature',
@@ -937,6 +941,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': 'Jika aktif, token akan diperkirakan secara lokal dan nilai lokal dipakai bila selisihnya lebih dari 5%.',
     'addChannel.autoBlacklistBalanceLabel': 'Blacklist otomatis saat saldo habis',
     'addChannel.autoBlacklistBalanceHint': 'Pindahkan key ke daftar blokir otomatis saat upstream melaporkan saldo tidak cukup.',
+    'addChannel.autoBlacklistEmptyStreamLabel': 'Blacklist otomatis saat respons stream kosong',
+    'addChannel.autoBlacklistEmptyStreamHint': 'Pindahkan key ke daftar blokir otomatis saat upstream mengembalikan stream kosong (tanpa event). Bila dimatikan, hanya cooldown yang diterapkan.',
     'addChannel.normalizeMetadataUserIdLabel': 'Normalisasi metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': 'Otomatis ubah user_id objek JSON menjadi string datar untuk kompatibilitas upstream.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Sisipkan dummy thought signature',
@@ -1303,6 +1309,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.lowQualityHint': '启用后强制本地估算 token 数量，偏差超过 5% 时使用本地值',
     'addChannel.autoBlacklistBalanceLabel': '余额不足时自动拉黑',
     'addChannel.autoBlacklistBalanceHint': '当上游返回余额不足时，自动将该 Key 移入拉黑列表。',
+    'addChannel.autoBlacklistEmptyStreamLabel': '流式空响应时自动拉黑',
+    'addChannel.autoBlacklistEmptyStreamHint': '当上游流式响应零事件时，自动将该 Key 移入拉黑列表（关闭后仅冷却）。',
     'addChannel.normalizeMetadataUserIdLabel': '规范化 metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': '自动将 JSON 对象格式的 user_id 转换为扁平字符串，确保上游兼容性。',
     'addChannel.injectDummyThoughtSignatureLabel': '注入 Dummy Thought Signature',
