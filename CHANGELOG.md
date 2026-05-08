@@ -1,3 +1,25 @@
+## [v2.7.0] - 2026-05-08
+
+### 新增
+
+- **AxonHub 风格处理管道** - 引入 `pipeline` 包，统一 LLM 中间格式（`llm.Request` / `llm.Response`），实现空响应检测与 raw-passthrough fan-out 桥接，支持跨格式响应分发
+- **四对 Handler 入/出站适配器** - 为 messages / chat / responses / gemini 四类渠道实现 inbound/outbound adapter pairs，完成 Handler 向 `pipeline.Process` 的全面切换
+- **负载均衡器** - 引入 `loadbalance` 包，实现 6 种调度策略（含基于 FTTL/TPS/ActiveConn 的数据面指标），并接入 `SelectChannel` 实现渠道选择排序
+- **定价包** - 新增 `pricing` 包，支持 `embed.FS` 嵌入价格表并热重载，为费用统计提供基础
+- **使用量存储** - 新增 NDJSON 格式的每日轮转 usage store，持久化记录每次请求的 token 消耗与费用
+- **SSE 首字延迟指标** - 在流式传输层记录首个 SSE token 到达延迟，用于负载均衡评分
+- **渠道内 Key 轮转重试** - 实现 `ChannelRetryable`，支持同渠道内多 API Key 的自动轮转重试；`wire` 层在 Finalize 时记录每个 Key 的成功/失败状态
+- **Pipeline 中间件** - 将 CCX 现有的 key 黑名单与暂停规则迁移至 `RawResponse` hook，保持原有熔断语义
+- **渠道看板费用与缓存指标** - 后端暴露每渠道的费用与缓存 token 数据，前端新增 `ChannelDashboardCard` 展示
+
+### 修复
+
+- **Pipeline 重试前正确释放资源** - 修复重试前未取消上下文、未关闭响应体、未排空 fan-out 的问题，避免资源泄漏
+
+### 重构
+
+- **移除 Pipeline 切换后的死代码** - 清理 messages / chat / gemini 三类 handler 在切换到 `pipeline.Process` 后遗留的冗余辅助函数
+
 ## [v2.6.77] - 2026-05-05
 
 ### 修复
