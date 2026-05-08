@@ -13,12 +13,15 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/BenedictKing/ccx/internal/config"
 	"github.com/BenedictKing/ccx/internal/httpclient"
 	"github.com/BenedictKing/ccx/internal/metrics"
 	"github.com/BenedictKing/ccx/internal/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 const MaxUpstreamResponseLogBytes = 1024 * 1024
@@ -343,79 +346,68 @@ func AreAllKeysSuspended(metricsManager *metrics.MetricsManager, baseURL string,
 }
 
 // RemoveEmptySignatures 移除请求体中 messages[*].content[*].signature 的空值
-// 用于预防 Claude API 返回 400 错误
-// 仅处理已知路径：messages 数组中各消息的 content 数组中的 signature 字段
-// enableLog: 是否输出日志（由 envCfg.EnableRequestLogs 控制）
-// apiType: 接口类型（Messages/Responses/Gemini），用于日志标签前缀
+// 使用 gjson/sjson 路径级操作，避免全量 JSON 反序列化→序列化，
+// 防止 thinking block 的 signature 字节被重新编码破坏（导致 Claude API 400）。
+// 参考 sub2api PR#1310 的修复策略。
 func RemoveEmptySignatures(bodyBytes []byte, enableLog bool, apiType string) ([]byte, bool) {
-	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
-	decoder.UseNumber() // 保留数字精度
-
-	var data map[string]interface{}
-	if err := decoder.Decode(&data); err != nil {
+	// Fast path: check if body even has a "signature" key
+	if !bytes.Contains(bodyBytes, []byte(`"signature"`)) {
 		return bodyBytes, false
 	}
 
-	modified, removedCount := removeEmptySignaturesInMessages(data)
-	if !modified {
+	// Collect paths of empty/null signature fields using gjson (read-only traversal)
+	paths := collectEmptySignaturePaths(bodyBytes)
+	if len(paths) == 0 {
 		return bodyBytes, false
 	}
 
-	if enableLog && removedCount > 0 {
-		log.Printf("[%s-Preprocess] 已移除 %d 个空 signature 字段", apiType, removedCount)
+	if enableLog {
+		log.Printf("[%s-Preprocess] 已移除 %d 个空 signature 字段", apiType, len(paths))
 	}
 
-	// 使用 Encoder 并禁用 HTML 转义，保持原始格式
-	newBytes, err := utils.MarshalJSONNoEscape(data)
-	if err != nil {
-		return bodyBytes, false
+	// Delete in reverse order so earlier array indices remain valid
+	sort.Sort(sort.Reverse(sort.StringSlice(paths)))
+
+	out := bodyBytes
+	for _, path := range paths {
+		next, err := sjson.DeleteBytes(out, path)
+		if err != nil {
+			continue
+		}
+		out = next
 	}
-	return newBytes, true
+	return out, true
 }
 
-// removeEmptySignaturesInMessages 仅处理 messages[*].content[*].signature 路径
-// 返回 (是否有修改, 移除的字段数)
-func removeEmptySignaturesInMessages(data map[string]interface{}) (bool, int) {
-	modified := false
-	removedCount := 0
+// collectEmptySignaturePaths returns gjson-style dot-paths for null/"" signature fields
+// under messages[*].content[*]. Uses gjson read-only traversal — body bytes are untouched.
+func collectEmptySignaturePaths(body []byte) []string {
+	var paths []string
+	jsonStr := unsafe.String(unsafe.SliceData(body), len(body))
 
-	messages, ok := data["messages"].([]interface{})
-	if !ok {
-		return false, 0
+	messages := gjson.Get(jsonStr, "messages")
+	if !messages.Exists() || !messages.IsArray() {
+		return nil
 	}
 
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		content, ok := msgMap["content"].([]interface{})
-		if !ok {
-			continue
-		}
-
-		for _, block := range content {
-			blockMap, ok := block.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			if sig, exists := blockMap["signature"]; exists {
-				if sig == nil {
-					delete(blockMap, "signature")
-					modified = true
-					removedCount++
-				} else if str, isStr := sig.(string); isStr && str == "" {
-					delete(blockMap, "signature")
-					modified = true
-					removedCount++
+	msgIdx := 0
+	messages.ForEach(func(_, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if content.IsArray() {
+			blockIdx := 0
+			content.ForEach(func(_, block gjson.Result) bool {
+				sig := block.Get("signature")
+				if sig.Exists() && (sig.Type == gjson.Null || (sig.Type == gjson.String && sig.String() == "")) {
+					paths = append(paths, fmt.Sprintf("messages.%d.content.%d.signature", msgIdx, blockIdx))
 				}
-			}
+				blockIdx++
+				return true
+			})
 		}
-	}
-
-	return modified, removedCount
+		msgIdx++
+		return true
+	})
+	return paths
 }
 
 // SanitizeMalformedThinkingBlocks 清理 messages[*].content[*] 中的 thinking 相关字段
