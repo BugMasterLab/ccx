@@ -24,10 +24,11 @@ import (
 
 // compactError 封装 compact 请求错误
 type compactError struct {
-	status         int
-	body           []byte
-	shouldFailover bool
-	err            error
+	status                 int
+	body                   []byte
+	shouldFailover         bool
+	skipCooldownAndBreaker bool
+	err                    error
 }
 
 func (e *compactError) errorInfo() string {
@@ -127,8 +128,10 @@ func handleSingleChannelCompact(
 			lastErr = compactErr
 			if compactErr.shouldFailover {
 				failedKeys[apiKey] = true
-				cfgManager.MarkKeyAsFailed(apiKey, "Responses")
-				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, metricsServiceType, scheduler.ChannelKindResponses)
+				if !compactErr.skipCooldownAndBreaker {
+					cfgManager.MarkKeyAsFailed(apiKey, "Responses")
+					channelScheduler.RecordFailure(upstream.BaseURL, apiKey, metricsServiceType, scheduler.ChannelKindResponses)
+				}
 				common.RecordChannelLog(channelLogStore, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0)
 				continue
 			}
@@ -287,8 +290,10 @@ func tryCompactChannelWithAllKeys(
 			lastErr = compactErr
 			if compactErr.shouldFailover {
 				failedKeys[apiKey] = true
-				cfgManager.MarkKeyAsFailed(apiKey, "Responses")
-				channelScheduler.RecordFailure(upstream.BaseURL, apiKey, metricsServiceType, scheduler.ChannelKindResponses)
+				if !compactErr.skipCooldownAndBreaker {
+					cfgManager.MarkKeyAsFailed(apiKey, "Responses")
+					channelScheduler.RecordFailure(upstream.BaseURL, apiKey, metricsServiceType, scheduler.ChannelKindResponses)
+				}
 				common.RecordChannelLog(channelLogStore, channelIndex, requestModel, "", compactErr.status, time.Since(attemptStart).Milliseconds(), false, apiKey, upstream.BaseURL, compactErr.errorInfo(), "Responses", attempt > 0)
 				// 释放探针
 				probeKey := upstream.BaseURL + "|" + apiKey
@@ -347,6 +352,9 @@ func tryCompactWithKey(
 
 	// 判断是否需要故障转移
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if common.IsModelRouteUnavailableError(respBody) {
+			return false, &compactError{status: resp.StatusCode, body: respBody, shouldFailover: true, skipCooldownAndBreaker: true}
+		}
 		shouldFailover, _ := common.ShouldRetryWithNextKey(resp.StatusCode, respBody, cfgManager.GetFuzzyModeEnabled(), "Responses")
 		return false, &compactError{status: resp.StatusCode, body: respBody, shouldFailover: shouldFailover}
 	}

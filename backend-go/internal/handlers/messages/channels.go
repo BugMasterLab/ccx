@@ -359,6 +359,22 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				proxyURL = req.ProxyURL
 			}
 			log.Printf("[Messages-Models] 使用临时 baseUrl: %s", baseURL)
+			// 即使使用临时 baseUrl，仍检查 key 是否被禁用/冷却（针对已有渠道的 key）
+			if req.Key != "" && id >= 0 {
+				cfg := cfgManager.GetConfig()
+				if id < len(cfg.Upstream) {
+					for _, dk := range cfg.Upstream[id].DisabledAPIKeys {
+						if dk.Key == req.Key {
+							c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("key %s is disabled", utils.MaskAPIKey(req.Key))})
+							return
+						}
+					}
+					if cfgManager.IsKeyFailed(req.Key, "Messages") {
+						c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("key %s is in cooldown", utils.MaskAPIKey(req.Key))})
+						return
+					}
+				}
+			}
 		} else {
 			// 编辑模式：从配置中读取渠道信息
 			cfg := cfgManager.GetConfig()
@@ -368,10 +384,36 @@ func GetChannelModels(cfgManager *config.ConfigManager) gin.HandlerFunc {
 			}
 
 			channel := cfg.Upstream[id]
+
+			// 手工模型模式：直接返回配置的模型列表，无需 API Key
+			if channel.UsesManualModels() {
+				data := make([]map[string]interface{}, 0, len(channel.ManualModels))
+				for _, m := range channel.ManualModels {
+					data = append(data, map[string]interface{}{"id": m, "object": "model"})
+				}
+				c.JSON(http.StatusOK, gin.H{"object": "list", "data": data})
+				return
+			}
+
 			baseURL = channel.BaseURL
 			channelName = channel.Name
 			insecureSkipVerify = channel.InsecureSkipVerify
 			proxyURL = channel.ProxyURL
+
+			// 检查请求中的 key 是否在禁用列表或冷却中
+			if req.Key != "" {
+				for _, dk := range channel.DisabledAPIKeys {
+					if dk.Key == req.Key {
+						c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("key %s is disabled", utils.MaskAPIKey(req.Key))})
+						return
+					}
+				}
+				if cfgManager.IsKeyFailed(req.Key, "Messages") {
+					c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("key %s is in cooldown", utils.MaskAPIKey(req.Key))})
+					return
+				}
+			}
+
 			if req.BaseURL != "" {
 				if err := utils.ValidateBaseURL(req.BaseURL); err != nil {
 					log.Printf("[Messages-Models] SSRF 防护拦截: %v", err)

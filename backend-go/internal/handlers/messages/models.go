@@ -289,6 +289,11 @@ func selectChannelWithDisabledKeys(cfgManager *config.ConfigManager, failedChann
 
 	selected := candidates[0]
 	upstreamCopy := selected.upstream
+	// For model listing, temporarily promote the first disabled key so GetAdminAPIKey can return it
+	if len(upstreamCopy.DisabledAPIKeys) > 0 && len(upstreamCopy.APIKeys) == 0 {
+		upstreamCopy.APIKeys = []string{upstreamCopy.DisabledAPIKeys[0].Key}
+		upstreamCopy.DisabledAPIKeys = nil // prevent getAvailableKeys from filtering the key out
+	}
 	return &scheduler.SelectionResult{
 		Upstream:     &upstreamCopy,
 		ChannelIndex: selected.index,
