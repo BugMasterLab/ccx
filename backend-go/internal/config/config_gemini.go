@@ -29,8 +29,8 @@ func (cm *ConfigManager) GetCurrentGeminiUpstream() (*UpstreamConfig, error) {
 		}
 	}
 
-	// 没有 active 渠道，回退到第一个渠道
-	return &cm.config.GeminiUpstream[0], nil
+	// 没有 active 渠道，返回错误
+	return nil, fmt.Errorf("未找到 active 渠道: Gemini")
 }
 
 // GetCurrentGeminiUpstreamWithIndex 获取当前 Gemini 上游配置及其索引
@@ -49,7 +49,7 @@ func (cm *ConfigManager) GetCurrentGeminiUpstreamWithIndex() (*UpstreamConfig, i
 		}
 	}
 
-	return &cm.config.GeminiUpstream[0], 0, nil
+	return nil, -1, fmt.Errorf("未找到 active 渠道: Gemini")
 }
 
 // AddGeminiUpstream 添加 Gemini 上游
@@ -104,7 +104,13 @@ func (cm *ConfigManager) UpdateGeminiUpstream(index int, updates UpstreamUpdate)
 	}
 
 	if updates.Name != nil {
-		upstream.Name = *updates.Name
+		newName := *updates.Name
+		for i, u := range cm.config.GeminiUpstream {
+			if i != index && u.Name == newName {
+				return false, fmt.Errorf("渠道名称已存在: %s", newName)
+			}
+		}
+		upstream.Name = newName
 	}
 	if updates.BaseURL != nil {
 		upstream.BaseURL = utils.CanonicalBaseURL(*updates.BaseURL, serviceType)

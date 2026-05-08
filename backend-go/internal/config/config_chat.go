@@ -29,8 +29,8 @@ func (cm *ConfigManager) GetCurrentChatUpstream() (*UpstreamConfig, error) {
 		}
 	}
 
-	// 没有 active 渠道，回退到第一个渠道
-	return &cm.config.ChatUpstream[0], nil
+	// 没有 active 渠道，返回错误
+	return nil, fmt.Errorf("未找到 active 渠道: Chat")
 }
 
 // GetCurrentChatUpstreamWithIndex 获取当前 Chat 上游配置及其索引
@@ -49,7 +49,7 @@ func (cm *ConfigManager) GetCurrentChatUpstreamWithIndex() (*UpstreamConfig, int
 		}
 	}
 
-	return &cm.config.ChatUpstream[0], 0, nil
+	return nil, -1, fmt.Errorf("未找到 active 渠道: Chat")
 }
 
 // AddChatUpstream 添加 Chat 上游
@@ -104,7 +104,13 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 	}
 
 	if updates.Name != nil {
-		upstream.Name = *updates.Name
+		newName := *updates.Name
+		for i, u := range cm.config.ChatUpstream {
+			if i != index && u.Name == newName {
+				return false, fmt.Errorf("渠道名称已存在: %s", newName)
+			}
+		}
+		upstream.Name = newName
 	}
 	if updates.BaseURL != nil {
 		upstream.BaseURL = utils.CanonicalBaseURL(*updates.BaseURL, serviceType)

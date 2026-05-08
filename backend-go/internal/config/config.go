@@ -1015,6 +1015,8 @@ func (cm *ConfigManager) BlacklistKey(apiType string, channelIndex int, apiKey s
 
 	log.Printf("[%s-Blacklist] Key %s 已被拉黑 (原因: %s, 渠道: %s, 剩余Key: %d)",
 		apiType, utils.MaskAPIKey(apiKey), reason, upstream.Name, len(upstream.APIKeys))
+	log.Printf("[%s-Blacklist] key=%s from=active to=disabled cause=%s channel=%s",
+		apiType, utils.MaskAPIKey(apiKey), reason, upstream.Name)
 
 	if len(upstream.APIKeys) == 0 {
 		log.Printf("[%s-Blacklist] 警告: 渠道 %s 的所有 Key 都已被拉黑！", apiType, upstream.Name)
@@ -1062,6 +1064,8 @@ func (cm *ConfigManager) RestoreKey(apiType string, channelIndex int, apiKey str
 	delete(cm.failedKeysCache, cacheKey)
 
 	log.Printf("[%s-Blacklist] Key %s 已恢复 (渠道: %s)", apiType, utils.MaskAPIKey(apiKey), upstream.Name)
+	log.Printf("[%s-Blacklist] key=%s from=disabled to=active cause=manual_restore channel=%s",
+		apiType, utils.MaskAPIKey(apiKey), upstream.Name)
 
 	return cm.saveConfigLocked(cm.config)
 }

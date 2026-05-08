@@ -43,8 +43,8 @@ func (cm *ConfigManager) GetCurrentImagesUpstream() (*UpstreamConfig, error) {
 		}
 	}
 
-	// 没有 active 渠道，回退到第一个渠道
-	return &cm.config.ImagesUpstream[0], nil
+	// 没有 active 渠道，返回错误
+	return nil, fmt.Errorf("未找到 active 渠道: Images")
 }
 
 // GetCurrentImagesUpstreamWithIndex 获取当前 Images 上游配置及其索引
@@ -63,7 +63,7 @@ func (cm *ConfigManager) GetCurrentImagesUpstreamWithIndex() (*UpstreamConfig, i
 		}
 	}
 
-	return &cm.config.ImagesUpstream[0], 0, nil
+	return nil, -1, fmt.Errorf("未找到 active 渠道: Images")
 }
 
 // AddImagesUpstream 添加 Images 上游
@@ -130,7 +130,13 @@ func (cm *ConfigManager) UpdateImagesUpstream(index int, updates UpstreamUpdate)
 	}
 
 	if updates.Name != nil {
-		upstream.Name = *updates.Name
+		newName := *updates.Name
+		for i, u := range cm.config.ImagesUpstream {
+			if i != index && u.Name == newName {
+				return false, fmt.Errorf("渠道名称已存在: %s", newName)
+			}
+		}
+		upstream.Name = newName
 	}
 	if updates.BaseURL != nil {
 		upstream.BaseURL = utils.CanonicalBaseURL(*updates.BaseURL, serviceType)

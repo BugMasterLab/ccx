@@ -29,8 +29,8 @@ func (cm *ConfigManager) GetCurrentUpstream() (*UpstreamConfig, error) {
 		}
 	}
 
-	// 没有 active 渠道，回退到第一个渠道
-	return &cm.config.Upstream[0], nil
+	// 没有 active 渠道，返回错误
+	return nil, fmt.Errorf("未找到 active 渠道: Messages")
 }
 
 // GetCurrentUpstreamWithIndex 获取当前上游配置及其索引
@@ -49,7 +49,7 @@ func (cm *ConfigManager) GetCurrentUpstreamWithIndex() (*UpstreamConfig, int, er
 		}
 	}
 
-	return &cm.config.Upstream[0], 0, nil
+	return nil, -1, fmt.Errorf("未找到 active 渠道: Messages")
 }
 
 // AddUpstream 添加上游
@@ -104,7 +104,14 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 	}
 
 	if updates.Name != nil {
-		upstream.Name = *updates.Name
+		// 拒绝重复名称
+		newName := *updates.Name
+		for i, u := range cm.config.Upstream {
+			if i != index && u.Name == newName {
+				return false, fmt.Errorf("渠道名称已存在: %s", newName)
+			}
+		}
+		upstream.Name = newName
 	}
 	if updates.BaseURL != nil {
 		upstream.BaseURL = utils.CanonicalBaseURL(*updates.BaseURL, serviceType)
