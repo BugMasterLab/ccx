@@ -184,7 +184,11 @@ func DeleteApiKey(cfgManager *config.ConfigManager) gin.HandlerFunc {
 // MoveApiKeyToTop 将 Responses 渠道 API 密钥移到最前面
 func MoveApiKeyToTop(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, _ := strconv.Atoi(c.Param("id"))
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
+			return
+		}
 		apiKey := c.Param("apiKey")
 
 		if err := cfgManager.MoveResponsesAPIKeyToTop(id, apiKey); err != nil {
@@ -198,7 +202,11 @@ func MoveApiKeyToTop(cfgManager *config.ConfigManager) gin.HandlerFunc {
 // MoveApiKeyToBottom 将 Responses 渠道 API 密钥移到最后面
 func MoveApiKeyToBottom(cfgManager *config.ConfigManager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id, _ := strconv.Atoi(c.Param("id"))
+		id, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			c.JSON(400, gin.H{"error": "Invalid upstream ID"})
+			return
+		}
 		apiKey := c.Param("apiKey")
 
 		if err := cfgManager.MoveResponsesAPIKeyToBottom(id, apiKey); err != nil {
