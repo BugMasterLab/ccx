@@ -1,3 +1,10 @@
+## [v2.7.10] - 2026-05-09
+
+### Fixed
+
+- **持久化 stripResponsesUser 开关并修复冷却 Key 显示** - messages/responses/chat 三处 UpdateUpstream 补齐 `StripResponsesUser` 字段更新逻辑，使开关切换后能持久化到 `config.json`；四处 GET 渠道列表与 dashboard 端点补齐 `stripResponsesUser` 字段返回，修复前端编辑时无法回显的问题。
+- **dashboard 端点返回冷却中 Key 列表** - 新增 `BuildChannelViewWithCooldown` 辅助函数，让 dashboard 端点也返回 `cooldownApiKeys`（之前仅直接列表端点返回），修复前端无法显示冷却中 Key 的问题，并新增集成测试覆盖两种 serviceType 下 `disabledApiKeys` / `cooldownApiKeys` 的返回路径。
+
 ## [v2.7.7] - 2026-05-09
 
 ### Fixed
