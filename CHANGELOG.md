@@ -1,3 +1,9 @@
+## [v2.7.7] - 2026-05-09
+
+### Fixed
+
+- **sub2api 透传不再校验 Key 格式** - Claude 渠道开启 sub2api 透传后不再要求 API Key 必须为 Anthropic `sk-ant-` 格式，`/v1/messages` 与 `/v1/messages/count_tokens` 统一按开关进入透传路径。
+
 ## [v2.6.82] - 2026-05-09
 
 ### Other
