@@ -1,3 +1,18 @@
+## [v2.7.14] - 2026-05-10
+
+### 新增
+
+- **总 Token 统计与展示** - `types.Usage` / `RequestRecord` / `TimeWindowStats` / `PersistentRecord` / `AggregatedBucket` / `GlobalHistoryDataPoint` / `GlobalStatsSummary` 全链路新增 `TotalTokens` 字段；`extractUsageTokens` 优先取 `usage.TotalTokens`，缺失时回退至 input + output + cacheCreate + cacheRead；内存与 SQLite 两条聚合路径同步补齐 totalTokens 累加与字面量写入。SQLite schema v2→v3 迁移新增 `total_tokens` 列，`MigrateMetricsKeysToIdentity` 升至 v3→v4；批量插入 / `LoadRecords` / `QueryAggregatedHistory` SQL 同步补字段。前端 `GlobalStatsChart` 标准+紧凑两种模式新增"总 Token"展示，`ChannelOrchestration` tooltip 新增 Token 统计区块（输入/输出/总），三语 i18n 补 `chart.totalTokens`。
+- **sub2api 透传旁路 usage 解析** - 新增 `common.BufferedPassthroughWithUsage`：先 `io.MultiWriter` 完整转发响应给客户端，再从内存副本旁路 unmarshal 解析 usage；解析失败完全不影响客户端字节。`countTokensPassthroughHandleSuccess` 改用新 helper。
+- **Codex Responses 流式 totalTokens 透传** - 流结束构造 `types.ResponsesUsage` 时透传 `collectedUsage.TotalTokens`；`metricsUsageFromResponsesUsage` 输出 `*types.Usage` 时填充 `TotalTokens`；`common/stream.go` 的 `CollectedUsageData` 加 `TotalTokens`，`extractUsageFromMap` 读 `usage["total_tokens"]`，`usageFromCollectedUsage` 透传到 `*types.Usage`。
+
+### 优化
+
+- **Messages→Responses 桥接字段透传健壮性优化** - 桥接入口同步 `c.Set("requestBodyBytes", bodyBytes)` 保持 context 一致，`routeUpstream.IsNormalizeMetadataUserIDEnabled()` 时在外层先规范化；新增 `mergeRouteSwitchOverrides` helper，统一合并 5 个字段——`stripResponsesUser` / `neverBlacklistKeys`（OR 任一），`customHeaders`（仅补缺失键），`proxyUrl`（自身优先），`insecureSkipVerify`（OR 任一）。
+- **rewriteRequestBodyModel 顺序保持** - 改用逐字节扫描替代 `json.Marshal` 重排，避免重写模型字段时打乱顶层 JSON 字段顺序。
+- **UpstreamConfig.Clone 深拷贝补齐** - `Clone()` 补深拷贝 `NeverBlacklistKeys` / `RouteMessagesToResponsesPool` / `StripResponsesUser`，避免拷贝后字段共享底层引用。
+- **前端渠道编排视图新增 bridgedToResponsesPool chip** - 在编排视图中暴露桥接到 Responses 池的标记，三语 i18n 已补全。
+
 ## [v2.7.13] - 2026-05-09
 
 ### 修复
