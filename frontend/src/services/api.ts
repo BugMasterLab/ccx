@@ -188,6 +188,7 @@ export interface Channel {
   manualModels?: string[]
   autoBlacklistBalance?: boolean
   autoBlacklistEmptyStream?: boolean
+  neverBlacklistKeys?: boolean
   normalizeMetadataUserId?: boolean
   stripResponsesUser?: boolean
   streamPassthroughEnabled?: boolean

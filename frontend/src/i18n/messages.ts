@@ -206,6 +206,8 @@ export type MessageKey =
   | 'addChannel.autoBlacklistBalanceHint'
   | 'addChannel.autoBlacklistEmptyStreamLabel'
   | 'addChannel.autoBlacklistEmptyStreamHint'
+  | 'addChannel.neverBlacklistKeysLabel'
+  | 'addChannel.neverBlacklistKeysHint'
   | 'addChannel.normalizeMetadataUserIdLabel'
   | 'addChannel.normalizeMetadataUserIdHint'
   | 'addChannel.stripResponsesUserLabel'
@@ -577,6 +579,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.autoBlacklistBalanceHint': 'Automatically move the key to the blacklist when the upstream reports insufficient balance.',
     'addChannel.autoBlacklistEmptyStreamLabel': 'Auto blacklist on empty stream response',
     'addChannel.autoBlacklistEmptyStreamHint': 'Automatically blacklist the key when the upstream returns an empty stream (zero events). When off, only cooldown is applied.',
+    'addChannel.neverBlacklistKeysLabel': 'Never blacklist or cool down keys',
+    'addChannel.neverBlacklistKeysHint': 'When enabled, this channel skips automatic blacklist and cooldown. Defaults to on when 5 or fewer keys are configured.',
     'addChannel.normalizeMetadataUserIdLabel': 'Normalize metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': 'Auto-convert JSON object user_id to a flat string for upstream compatibility.',
     'addChannel.stripResponsesUserLabel': 'Strip Responses user field',
@@ -947,6 +951,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.autoBlacklistBalanceHint': 'Pindahkan key ke daftar blokir otomatis saat upstream melaporkan saldo tidak cukup.',
     'addChannel.autoBlacklistEmptyStreamLabel': 'Blacklist otomatis saat respons stream kosong',
     'addChannel.autoBlacklistEmptyStreamHint': 'Pindahkan key ke daftar blokir otomatis saat upstream mengembalikan stream kosong (tanpa event). Bila dimatikan, hanya cooldown yang diterapkan.',
+    'addChannel.neverBlacklistKeysLabel': 'Tidak pernah blacklist/cooldown key',
+    'addChannel.neverBlacklistKeysHint': 'Bila aktif, channel ini melewati blacklist dan cooldown otomatis. Default aktif bila jumlah key 5 atau kurang.',
     'addChannel.normalizeMetadataUserIdLabel': 'Normalisasi metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': 'Otomatis ubah user_id objek JSON menjadi string datar untuk kompatibilitas upstream.',
     'addChannel.stripResponsesUserLabel': 'Hapus field user Responses',
@@ -1317,6 +1323,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.autoBlacklistBalanceHint': '当上游返回余额不足时，自动将该 Key 移入拉黑列表。',
     'addChannel.autoBlacklistEmptyStreamLabel': '流式空响应时自动拉黑',
     'addChannel.autoBlacklistEmptyStreamHint': '当上游流式响应零事件时，自动将该 Key 移入拉黑列表（关闭后仅冷却）。',
+    'addChannel.neverBlacklistKeysLabel': '永不拉黑/冷却 Key',
+    'addChannel.neverBlacklistKeysHint': '开启后该渠道的 Key 不会被自动拉黑，也不会进入失败冷却；适合少量高价值 Key，默认在 Key 数量 ≤5 时开启。',
     'addChannel.normalizeMetadataUserIdLabel': '规范化 metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': '自动将 JSON 对象格式的 user_id 转换为扁平字符串，确保上游兼容性。',
     'addChannel.stripResponsesUserLabel': '移除 Responses user 字段',

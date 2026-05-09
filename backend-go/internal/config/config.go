@@ -41,6 +41,7 @@ type UpstreamConfig struct {
 	// 自动拉黑开关
 	AutoBlacklistBalance     *bool `json:"autoBlacklistBalance,omitempty"`     // 余额不足时自动拉黑 Key（默认 true）
 	AutoBlacklistEmptyStream *bool `json:"autoBlacklistEmptyStream,omitempty"` // 流式空响应时自动拉黑 Key（默认 true，关闭后仅冷却）
+	NeverBlacklistKeys       *bool `json:"neverBlacklistKeys,omitempty"`       // 永不自动拉黑或冷却 Key（默认 false）
 	// metadata.user_id 规范化开关
 	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"` // 规范化 metadata.user_id（默认 true）
 	// Responses API user 字段移除开关
@@ -114,6 +115,13 @@ func (u *UpstreamConfig) IsAutoBlacklistEmptyStreamEnabled() bool {
 		return true
 	}
 	return *u.AutoBlacklistEmptyStream
+}
+
+func (u *UpstreamConfig) IsNeverBlacklistKeysEnabled() bool {
+	if u.NeverBlacklistKeys == nil {
+		return false
+	}
+	return *u.NeverBlacklistKeys
 }
 
 // IsNormalizeMetadataUserIDEnabled 检查 metadata.user_id 规范化是否启用（默认 true）
@@ -383,6 +391,7 @@ type UpstreamUpdate struct {
 	LowQuality                       *bool          `json:"lowQuality"`
 	AutoBlacklistBalance             *bool          `json:"autoBlacklistBalance"`
 	AutoBlacklistEmptyStream         *bool          `json:"autoBlacklistEmptyStream"`
+	NeverBlacklistKeys               *bool          `json:"neverBlacklistKeys"`
 	NormalizeMetadataUserID          *bool          `json:"normalizeMetadataUserId"`
 	StripResponsesUser              *bool          `json:"stripResponsesUser"`
 	StreamPassthroughEnabled         *bool          `json:"streamPassthroughEnabled"`
@@ -1025,6 +1034,10 @@ func (cm *ConfigManager) BlacklistKey(apiType string, channelIndex int, apiKey s
 	}
 
 	upstream := &(*upstreams)[channelIndex]
+	if upstream.IsNeverBlacklistKeysEnabled() {
+		log.Printf("[%s-Blacklist] 渠道 %s 已开启永不拉黑/冷却 Key，跳过拉黑: %s", apiType, upstream.Name, utils.MaskAPIKey(apiKey))
+		return nil
+	}
 
 	// 检查 key 是否在活跃列表中
 	keyIdx := -1

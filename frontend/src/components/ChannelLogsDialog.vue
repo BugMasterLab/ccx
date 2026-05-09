@@ -91,7 +91,7 @@ const { t } = useI18n()
 
 const logs = ref<ChannelLogEntry[]>([])
 const isLoading = ref(false)
-const autoRefresh = ref(false)
+const autoRefresh = ref(true)
 const expandedIndex = ref<number | null>(null)
 let timer: ReturnType<typeof setInterval> | null = null
 

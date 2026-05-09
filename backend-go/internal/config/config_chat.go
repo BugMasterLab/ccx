@@ -203,6 +203,10 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 		v := *updates.AutoBlacklistEmptyStream
 		upstream.AutoBlacklistEmptyStream = &v
 	}
+	if updates.NeverBlacklistKeys != nil {
+		v := *updates.NeverBlacklistKeys
+		upstream.NeverBlacklistKeys = &v
+	}
 	if updates.NormalizeMetadataUserID != nil {
 		v := *updates.NormalizeMetadataUserID
 		upstream.NormalizeMetadataUserID = &v

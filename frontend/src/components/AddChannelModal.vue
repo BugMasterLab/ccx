@@ -831,6 +831,19 @@
               </div>
             </v-col>
 
+            <v-col cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-shield-key</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.neverBlacklistKeysLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.neverBlacklistKeysHint') }}</div>
+                  </div>
+                </div>
+                <v-switch v-model="form.neverBlacklistKeys" inset color="primary" hide-details @update:model-value="form.neverBlacklistKeysUserOverridden = true" />
+              </div>
+            </v-col>
+
             <v-col v-if="props.channelType === 'messages' || props.channelType === 'responses'" cols="12">
               <div class="d-flex align-center justify-space-between">
                 <div class="d-flex align-center ga-2">
@@ -1899,6 +1912,8 @@ const form = reactive({
   manualModels: [] as string[],
   autoBlacklistBalance: true,
   autoBlacklistEmptyStream: true,
+  neverBlacklistKeys: false,
+  neverBlacklistKeysUserOverridden: false,
   normalizeMetadataUserId: true,
   stripResponsesUser: false,
   keyAffinityEnabled: true,
@@ -2224,6 +2239,14 @@ watch(
   }
 )
 
+watch(
+  () => form.apiKeys.length,
+  count => {
+    if (form.neverBlacklistKeysUserOverridden) return
+    form.neverBlacklistKeys = count <= 5
+  }
+)
+
 // 工具函数
 const isValidUrl = (url: string): boolean => {
   try {
@@ -2265,6 +2288,8 @@ const resetForm = () => {
   form.manualModels = []
   form.autoBlacklistBalance = true
   form.autoBlacklistEmptyStream = true
+  form.neverBlacklistKeys = form.apiKeys.length <= 5
+  form.neverBlacklistKeysUserOverridden = false
   form.normalizeMetadataUserId = true
   form.stripResponsesUser = false
   form.keyAffinityEnabled = true
@@ -2350,6 +2375,13 @@ const loadChannelData = (channel: Channel) => {
   form.manualModels = channel.manualModels || []
   form.autoBlacklistBalance = channel.autoBlacklistBalance ?? true
   form.autoBlacklistEmptyStream = channel.autoBlacklistEmptyStream ?? true
+  if (typeof channel.neverBlacklistKeys === 'boolean') {
+    form.neverBlacklistKeys = channel.neverBlacklistKeys
+    form.neverBlacklistKeysUserOverridden = true
+  } else {
+    form.neverBlacklistKeys = (channel.apiKeys?.length ?? 0) <= 5
+    form.neverBlacklistKeysUserOverridden = false
+  }
   form.normalizeMetadataUserId = channel.normalizeMetadataUserId ?? true
   form.stripResponsesUser = channel.stripResponsesUser ?? false
   form.keyAffinityEnabled = channel.keyAffinityEnabled ?? (channel.serviceType === 'claude')

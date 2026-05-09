@@ -47,6 +47,7 @@ func BuildChannelView(up config.UpstreamConfig, index int) gin.H {
 		"disabledApiKeys":                  up.DisabledAPIKeys,
 		"autoBlacklistBalance":             up.IsAutoBlacklistBalanceEnabled(),
 		"autoBlacklistEmptyStream":         up.IsAutoBlacklistEmptyStreamEnabled(),
+		"neverBlacklistKeys":               up.IsNeverBlacklistKeysEnabled(),
 		"normalizeMetadataUserId":          up.IsNormalizeMetadataUserIDEnabled(),
 		"stripResponsesUser":               up.IsStripResponsesUserEnabled(),
 		"modelsResponseMode":               up.GetModelsResponseMode(),

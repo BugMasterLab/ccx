@@ -53,6 +53,24 @@ func SelectedAPIKeyFromContext(c *gin.Context) string {
 	return strings.TrimSpace(c.GetString(selectedAPIKeyContextKey))
 }
 
+// markKeyAsFailedRespectingNeverBlacklist 在渠道未开启“永不拉黑/冷却”时，将 key 标记为失败。
+func markKeyAsFailedRespectingNeverBlacklist(cfgManager *config.ConfigManager, upstream *config.UpstreamConfig, apiKey, apiType string) {
+	if upstream != nil && upstream.IsNeverBlacklistKeysEnabled() {
+		log.Printf("[%s-Cooldown] 渠道 %s 已开启永不拉黑/冷却 Key，跳过冷却: %s", apiType, upstream.Name, utils.MaskAPIKey(apiKey))
+		return
+	}
+	cfgManager.MarkKeyAsFailed(apiKey, apiType)
+}
+
+// markKeyAsFailedWithDurationRespectingNeverBlacklist 同上，但带固定冷却时长。
+func markKeyAsFailedWithDurationRespectingNeverBlacklist(cfgManager *config.ConfigManager, upstream *config.UpstreamConfig, apiKey, apiType string, duration time.Duration) {
+	if upstream != nil && upstream.IsNeverBlacklistKeysEnabled() {
+		log.Printf("[%s-Cooldown] 渠道 %s 已开启永不拉黑/冷却 Key，跳过冷却: %s", apiType, upstream.Name, utils.MaskAPIKey(apiKey))
+		return
+	}
+	cfgManager.MarkKeyAsFailedWithDuration(apiKey, apiType, duration)
+}
+
 // IsClaudeSub2APIPassthroughForKey 判断是否启用 sub2api 风格透传（仅替换认证）。
 // 仅在 Claude 渠道且开关开启时生效，不校验 key 格式。
 func IsClaudeSub2APIPassthroughForKey(upstream *config.UpstreamConfig, apiKey string) bool {
@@ -267,7 +285,7 @@ func TryUpstreamWithAllKeys(
 				}
 				// 真实渠道故障：计入失败，继续 failover
 				failedKeys[apiKey] = true
-				cfgManager.MarkKeyAsFailed(apiKey, apiType)
+				markKeyAsFailedRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType)
 				metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
 				channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
 				if markURLFailure != nil {
@@ -291,7 +309,7 @@ func TryUpstreamWithAllKeys(
 				if pauseRule := cfgManager.MatchPauseRule(resp.StatusCode, respBodyBytes); pauseRule != nil {
 					duration := time.Duration(pauseRule.DurationMinutes) * time.Minute
 					failedKeys[apiKey] = true
-					cfgManager.MarkKeyAsFailedWithDuration(apiKey, apiType, duration)
+					markKeyAsFailedWithDurationRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType, duration)
 					metricsManager.RecordRequestFinalizeFailure(currentBaseURL, apiKey, metricsServiceType, requestID)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
 					if markURLFailure != nil {
@@ -360,14 +378,14 @@ func TryUpstreamWithAllKeys(
 							log.Printf("[%s-Failover-Model] skip cooldown and breaker for model routing miss: channel=[%d] %s, key=%s",
 								apiType, channelIndex, upstream.Name, utils.MaskAPIKey(apiKey))
 						} else if ruleDecision.Matched && ruleDecision.Action == failoverActionCooldown {
-							cfgManager.MarkKeyAsFailedWithDuration(apiKey, apiType, ruleDecision.Duration)
+							markKeyAsFailedWithDurationRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType, ruleDecision.Duration)
 							log.Printf("[%s-Failover-Rule] 规则冷却生效: channel=[%d] %s, key=%s, duration=%s",
 								apiType, channelIndex, upstream.Name, utils.MaskAPIKey(apiKey), ruleDecision.Duration)
 						} else if skipDefaultCooldownForRuleDrivenClaude {
 							log.Printf("[%s-Failover-Rule] Claude 未命中规则，仅本次跳过该 key，不写入默认冷却: channel=[%d] %s, key=%s, status=%d",
 								apiType, channelIndex, upstream.Name, utils.MaskAPIKey(apiKey), resp.StatusCode)
 						} else {
-							cfgManager.MarkKeyAsFailed(apiKey, apiType)
+							markKeyAsFailedRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType)
 						}
 					}
 					failureClass := metrics.FailureClassRetryable
@@ -462,7 +480,7 @@ func TryUpstreamWithAllKeys(
 							log.Printf("[%s-Blacklist] 拉黑 Key 失败: %v", apiType, blacklistErr)
 						}
 					} else {
-						cfgManager.MarkKeyAsFailed(apiKey, apiType)
+						markKeyAsFailedRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType)
 					}
 					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
@@ -482,7 +500,7 @@ func TryUpstreamWithAllKeys(
 				} else if errors.Is(err, ErrInvalidResponseBody) {
 					// 无效响应体（如 HTML）：Header 未发送，可安全 failover；保持冷却语义
 					failedKeys[apiKey] = true
-					cfgManager.MarkKeyAsFailed(apiKey, apiType)
+					markKeyAsFailedRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType)
 					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
 					if markURLFailure != nil {
@@ -498,7 +516,7 @@ func TryUpstreamWithAllKeys(
 					isRateLimit := blErr.Reason == "rate_limit"
 					// 速率限制只冷却不拉黑，其他错误按原逻辑拉黑
 					if isRateLimit {
-						cfgManager.MarkKeyAsFailed(apiKey, apiType)
+						markKeyAsFailedRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType)
 					} else {
 						if !isBalanceError || upstream.IsAutoBlacklistBalanceEnabled() {
 							if blacklistErr := cfgManager.BlacklistKey(apiType, channelIndex, apiKey, blErr.Reason, blErr.Message); blacklistErr != nil {
@@ -524,7 +542,7 @@ func TryUpstreamWithAllKeys(
 					continue
 				} else {
 					// 真实渠道故障：计入失败指标
-					cfgManager.MarkKeyAsFailed(apiKey, apiType)
+					markKeyAsFailedRespectingNeverBlacklist(cfgManager, upstream, apiKey, apiType)
 					metricsManager.RecordRequestFinalizeFailureWithClass(currentBaseURL, apiKey, metricsServiceType, requestID, metrics.FailureClassRetryable)
 					channelScheduler.RecordRequestEnd(currentBaseURL, apiKey, metricsServiceType, kind)
 					// 记录渠道日志
