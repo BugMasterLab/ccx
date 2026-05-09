@@ -233,6 +233,10 @@ func (cm *ConfigManager) UpdateUpstream(index int, updates UpstreamUpdate) (shou
 		v := *updates.NormalizeMetadataUserID
 		upstream.NormalizeMetadataUserID = &v
 	}
+	if updates.StripResponsesUser != nil {
+		v := *updates.StripResponsesUser
+		upstream.StripResponsesUser = &v
+	}
 	if updates.StreamPassthroughEnabled != nil {
 		v := *updates.StreamPassthroughEnabled
 		upstream.StreamPassthroughEnabled = &v

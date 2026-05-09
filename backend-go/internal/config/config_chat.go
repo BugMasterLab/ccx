@@ -207,6 +207,10 @@ func (cm *ConfigManager) UpdateChatUpstream(index int, updates UpstreamUpdate) (
 		v := *updates.NormalizeMetadataUserID
 		upstream.NormalizeMetadataUserID = &v
 	}
+	if updates.StripResponsesUser != nil {
+		v := *updates.StripResponsesUser
+		upstream.StripResponsesUser = &v
+	}
 	if updates.StreamPassthroughEnabled != nil {
 		v := *updates.StreamPassthroughEnabled
 		upstream.StreamPassthroughEnabled = &v

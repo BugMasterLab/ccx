@@ -654,9 +654,20 @@ func GetChannelDashboard(cfgManager *config.ConfigManager, sch *scheduler.Channe
 		}
 
 		// 1. 构建 channels 数据
+		apiType := "Messages"
+		switch kind {
+		case scheduler.ChannelKindResponses:
+			apiType = "Responses"
+		case scheduler.ChannelKindGemini:
+			apiType = "Gemini"
+		case scheduler.ChannelKindChat:
+			apiType = "Chat"
+		case scheduler.ChannelKindImages:
+			apiType = "Images"
+		}
 		channels := make([]gin.H, len(upstreams))
 		for i, up := range upstreams {
-			channel := common.BuildChannelView(up, i)
+			channel := common.BuildChannelViewWithCooldown(up, i, cfgManager, apiType)
 
 			if channelType == "gemini" {
 				channel["injectDummyThoughtSignature"] = up.InjectDummyThoughtSignature

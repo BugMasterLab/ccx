@@ -5,6 +5,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// BuildChannelViewWithCooldown 构建渠道视图（含冷却 key 列表）。
+// apiType 用于查询 cfgManager 中的运行时冷却数据，传 "Messages"/"Responses"/"Chat"/"Gemini"/"Images"。
+func BuildChannelViewWithCooldown(up config.UpstreamConfig, index int, cfgManager *config.ConfigManager, apiType string) gin.H {
+	view := BuildChannelView(up, index)
+	if cfgManager != nil && apiType != "" {
+		view["cooldownApiKeys"] = cfgManager.GetCooldownKeys(apiType, index)
+	}
+	return view
+}
+
 func BuildChannelView(up config.UpstreamConfig, index int) gin.H {
 	status := config.GetChannelStatus(&up)
 	priority := config.GetChannelPriority(&up, index)
@@ -38,6 +48,7 @@ func BuildChannelView(up config.UpstreamConfig, index int) gin.H {
 		"autoBlacklistBalance":             up.IsAutoBlacklistBalanceEnabled(),
 		"autoBlacklistEmptyStream":         up.IsAutoBlacklistEmptyStreamEnabled(),
 		"normalizeMetadataUserId":          up.IsNormalizeMetadataUserIDEnabled(),
+		"stripResponsesUser":               up.IsStripResponsesUserEnabled(),
 		"modelsResponseMode":               up.GetModelsResponseMode(),
 		"manualModels":                     up.ManualModels,
 		"streamPassthroughEnabled":         up.IsStreamPassthroughEnabled(),
