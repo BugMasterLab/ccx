@@ -19,7 +19,12 @@ import (
 
 func setupMessagesTestConfigManager(t *testing.T, upstream []config.UpstreamConfig) *config.ConfigManager {
 	t.Helper()
-	cfg := config.Config{Upstream: upstream}
+	return setupMessagesTestConfigManagerWithResponses(t, upstream, nil)
+}
+
+func setupMessagesTestConfigManagerWithResponses(t *testing.T, upstream []config.UpstreamConfig, responsesUpstream []config.UpstreamConfig) *config.ConfigManager {
+	t.Helper()
+	cfg := config.Config{Upstream: upstream, ResponsesUpstream: responsesUpstream}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		t.Fatalf("serialize config: %v", err)
@@ -44,8 +49,19 @@ func newMessagesTestRouter(t *testing.T, upstream config.UpstreamConfig) *gin.En
 
 func newMessagesTestRouterWithMetrics(t *testing.T, upstream config.UpstreamConfig) (*gin.Engine, *metrics.MetricsManager) {
 	t.Helper()
+	messagesUpstream := upstream
+	var responsesUpstream []config.UpstreamConfig
+	if upstream.ServiceType == "responses" {
+		messagesUpstream = config.UpstreamConfig{
+			Name:        upstream.Name + "-route-switch",
+			ServiceType: "responses",
+			Status:      "active",
+		}
+		responsesUpstream = []config.UpstreamConfig{upstream}
+	}
+
 	gin.SetMode(gin.TestMode)
-	cfgManager := setupMessagesTestConfigManager(t, []config.UpstreamConfig{upstream})
+	cfgManager := setupMessagesTestConfigManagerWithResponses(t, []config.UpstreamConfig{messagesUpstream}, responsesUpstream)
 	messagesMetrics := metrics.NewMetricsManager()
 	channelScheduler := scheduler.NewChannelScheduler(
 		cfgManager,

@@ -110,6 +110,11 @@ func handleMultiChannel(
 				return common.MultiChannelAttemptResult{}
 			}
 
+			if strings.EqualFold(upstream.ServiceType, "responses") {
+				log.Printf("[Messages-ResponsesBridge] 选中路由开关渠道: [%d] %s", channelIndex, upstream.Name)
+				return tryMessagesRequestViaResponsesPool(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, userID, startTime)
+			}
+
 			provider := providers.GetProvider(upstream.ServiceType)
 			if provider == nil {
 				return common.MultiChannelAttemptResult{}
@@ -197,6 +202,19 @@ func handleSingleChannel(
 		return
 	}
 
+	if strings.EqualFold(upstream.ServiceType, "responses") {
+		log.Printf("[Messages-ResponsesBridge] 单渠道路由开关: [%d] %s", channelIndex, upstream.Name)
+		result := tryMessagesRequestViaResponsesPool(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, userID, startTime)
+		if result.Handled {
+			return
+		}
+		c.JSON(503, gin.H{
+			"error": "Responses 渠道池不可用，请先在 Responses 标签页配置可用渠道",
+			"code":  "NO_RESPONSES_UPSTREAM",
+		})
+		return
+	}
+
 	if len(upstream.APIKeys) == 0 {
 		c.JSON(503, gin.H{
 			"error": fmt.Sprintf("当前渠道 \"%s\" 未配置API密钥", upstream.Name),
@@ -258,6 +276,107 @@ func handleSingleChannel(
 
 	log.Printf("[Messages-Error] 所有API密钥都失败了")
 	common.HandleAllKeysFailed(c, cfgManager.GetFuzzyModeEnabled(), lastFailoverError, lastError, "Messages")
+}
+
+func tryMessagesRequestViaResponsesPool(
+	c *gin.Context,
+	envCfg *config.EnvConfig,
+	cfgManager *config.ConfigManager,
+	channelScheduler *scheduler.ChannelScheduler,
+	bodyBytes []byte,
+	claudeReq types.ClaudeRequest,
+	userID string,
+	startTime time.Time,
+) common.MultiChannelAttemptResult {
+	provider := providers.GetProvider("responses")
+	if provider == nil {
+		return common.MultiChannelAttemptResult{}
+	}
+
+	metricsManager := channelScheduler.GetResponsesMetricsManager()
+	result := common.MultiChannelAttemptResult{}
+
+	common.HandleMultiChannelFailover(
+		c,
+		envCfg,
+		channelScheduler,
+		scheduler.ChannelKindResponses,
+		"Responses",
+		userID,
+		claudeReq.Model,
+		func(selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
+			upstream := selection.Upstream
+			channelIndex := selection.ChannelIndex
+
+			if upstream == nil {
+				return common.MultiChannelAttemptResult{}
+			}
+
+			log.Printf("[Messages-ResponsesBridge] 使用 Responses 渠道: [%d] %s", channelIndex, upstream.Name)
+			baseURLs := upstream.GetAllBaseURLs()
+			sortedURLResults := channelScheduler.GetSortedURLsForChannel(scheduler.ChannelKindResponses, channelIndex, baseURLs)
+
+			handled, successKey, successBaseURLIdx, failoverErr, usage, lastErr := common.TryUpstreamWithAllKeys(
+				c,
+				envCfg,
+				cfgManager,
+				channelScheduler,
+				scheduler.ChannelKindResponses,
+				"Responses",
+				metricsManager,
+				upstream,
+				sortedURLResults,
+				bodyBytes,
+				claudeReq.Stream,
+				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
+					return cfgManager.GetNextAPIKeyForUser(upstream, failedKeys, "Responses", userID)
+				},
+				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+					req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
+					return req, err
+				},
+				func(apiKey string) {
+					if err := cfgManager.DeprioritizeAPIKey(apiKey); err != nil {
+						log.Printf("[Messages-ResponsesBridge] 警告: Responses 密钥降级失败: %v", err)
+					}
+				},
+				func(url string) {
+					channelScheduler.MarkURLFailure(scheduler.ChannelKindResponses, channelIndex, url)
+				},
+				func(url string) {
+					channelScheduler.MarkURLSuccess(scheduler.ChannelKindResponses, channelIndex, url)
+				},
+				func(c *gin.Context, resp *http.Response, upstreamCopy *config.UpstreamConfig, apiKey string, actualRequestBody []byte) (*types.Usage, error) {
+					if claudeReq.Stream {
+						return common.HandleStreamResponse(c, resp, provider, envCfg, actualRequestBody, upstreamCopy)
+					}
+					return handleNormalResponse(c, resp, provider, envCfg, startTime, actualRequestBody, upstreamCopy, apiKey)
+				},
+				claudeReq.Model,
+				selection.ChannelIndex,
+				channelScheduler.GetChannelLogStore(scheduler.ChannelKindResponses),
+			)
+
+			return common.MultiChannelAttemptResult{
+				Handled:           handled,
+				Attempted:         true,
+				SuccessKey:        successKey,
+				SuccessBaseURLIdx: successBaseURLIdx,
+				FailoverError:     failoverErr,
+				Usage:             usage,
+				LastError:         lastErr,
+			}
+		},
+		func(_ *scheduler.SelectionResult, handledResult common.MultiChannelAttemptResult) {
+			result = handledResult
+		},
+		func(_ *gin.Context, failoverErr *common.FailoverError, lastError error) {
+			result.FailoverError = failoverErr
+			result.LastError = lastError
+		},
+	)
+
+	return result
 }
 
 // handleNormalResponse 处理非流式响应

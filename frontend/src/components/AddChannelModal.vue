@@ -164,13 +164,18 @@
                 density="comfortable"
                 rows="3"
                 no-resize
-                :rules="[rules.required, rules.baseUrls]"
-                required
+                :rules="messagesResponsesRouteSwitch ? [] : [rules.required, rules.baseUrls]"
+                :required="!messagesResponsesRouteSwitch"
                 :error-messages="errors.baseUrl"
                 hide-details="auto"
               />
+              <div v-if="messagesResponsesRouteSwitch" class="base-url-hint">
+                <span class="text-caption text-primary">
+                  该渠道是 Responses(Codex) 路由开关，不需要填写 Base URL；真实上游地址使用 Responses 标签页中的渠道池。
+                </span>
+              </div>
               <!-- 固定高度的提示区域，防止布局跳动；有错误时不显示 -->
-              <div v-show="formExpectedRequestUrls.length > 0 && !baseUrlHasError" class="base-url-hint">
+              <div v-show="!messagesResponsesRouteSwitch && formExpectedRequestUrls.length > 0 && !baseUrlHasError" class="base-url-hint">
                 <div v-for="(item, index) in formExpectedRequestUrls" :key="index" class="expected-request-item">
                   <span class="text-caption text-medium-emphasis"> {{ t('addChannel.expectedRequest') }} {{ item.expectedUrl }} </span>
                 </div>
@@ -453,15 +458,21 @@
                 <v-card-title class="d-flex align-center justify-space-between pa-4 pb-2">
                   <div class="d-flex align-center ga-2">
                     <v-icon :color="hasConfigurableKeys ? 'primary' : 'error'">mdi-key</v-icon>
-                    <span class="section-title">{{ t('channelCard.apiKeyManagement') }} *</span>
-                    <v-chip v-if="!hasConfigurableKeys" size="x-small" color="error" variant="tonal">
+                    <span class="section-title">{{ t('channelCard.apiKeyManagement') }}<template v-if="!messagesResponsesRouteSwitch"> *</template></span>
+                    <v-chip v-if="!hasConfigurableKeys && !messagesResponsesRouteSwitch" size="x-small" color="error" variant="tonal">
                       {{ t('addChannel.apiKeyRequired') }}
+                    </v-chip>
+                    <v-chip v-if="messagesResponsesRouteSwitch" size="x-small" color="primary" variant="tonal">
+                      路由开关
                     </v-chip>
                   </div>
                   <v-chip size="small" color="info" variant="tonal"> {{ t('addChannel.apiKeyLoadBalance') }} </v-chip>
                 </v-card-title>
 
                 <v-card-text class="pt-2">
+                  <v-alert v-if="messagesResponsesRouteSwitch" type="info" variant="tonal" density="compact" class="mb-4">
+                    该渠道只用于把 Claude(Messages) 请求路由到 Responses(Codex) 渠道池；真实 API Key 请在 Responses 标签页维护。
+                  </v-alert>
                   <!-- 现有密钥列表 -->
                   <div v-if="form.apiKeys.length" class="mb-4">
                     <v-list density="compact" class="bg-transparent">
@@ -2158,8 +2169,9 @@ const rules = {
 // 计算属性
 const dialogMode = ref<'create' | 'edit'>('create')
 const isEditing = computed(() => dialogMode.value === 'edit')
+const messagesResponsesRouteSwitch = computed(() => props.channelType === 'messages' && form.serviceType === 'responses')
 const hasDisabledKeysAvailable = computed(() => visibleDisabledKeys.value.length > 0)
-const hasConfigurableKeys = computed(() => form.apiKeys.length > 0 || (isEditing.value && hasDisabledKeysAvailable.value))
+const hasConfigurableKeys = computed(() => messagesResponsesRouteSwitch.value || form.apiKeys.length > 0 || (isEditing.value && hasDisabledKeysAvailable.value))
 const batchApiKeyResultClass = computed(() =>
   batchApiKeyResultType.value === 'warning' ? 'text-warning' : 'text-success'
 )
@@ -2196,8 +2208,9 @@ const subtitleClasses = computed(() => {
 })
 
 const isFormValid = computed(() => {
+  const hasValidBaseUrl = messagesResponsesRouteSwitch.value || (form.baseUrl.trim() && isValidUrl(form.baseUrl))
   return (
-    form.name.trim() && form.serviceType && form.baseUrl.trim() && isValidUrl(form.baseUrl) && hasConfigurableKeys.value
+    form.name.trim() && form.serviceType && hasValidBaseUrl && hasConfigurableKeys.value
   )
 })
 
