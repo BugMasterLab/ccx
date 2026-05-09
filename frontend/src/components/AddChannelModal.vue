@@ -833,6 +833,19 @@
               </div>
             </v-col>
 
+            <v-col v-if="form.serviceType === 'responses'" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-account-remove</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.stripResponsesUserLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.stripResponsesUserHint') }}</div>
+                  </div>
+                </div>
+                <v-switch v-model="form.stripResponsesUser" inset color="primary" hide-details />
+              </div>
+            </v-col>
+
             <v-col v-if="form.serviceType === 'claude'" cols="12">
               <v-card variant="outlined" rounded="lg">
                 <v-card-title class="section-card-title d-flex align-center justify-space-between ga-2">
@@ -1876,6 +1889,7 @@ const form = reactive({
   autoBlacklistBalance: true,
   autoBlacklistEmptyStream: true,
   normalizeMetadataUserId: true,
+  stripResponsesUser: false,
   keyAffinityEnabled: true,
   streamPassthroughEnabled: false,
   sub2apiPassthroughEnabled: true,
@@ -2239,6 +2253,7 @@ const resetForm = () => {
   form.autoBlacklistBalance = true
   form.autoBlacklistEmptyStream = true
   form.normalizeMetadataUserId = true
+  form.stripResponsesUser = false
   form.keyAffinityEnabled = true
   form.streamPassthroughEnabled = false
   form.sub2apiPassthroughEnabled = true
@@ -2323,6 +2338,7 @@ const loadChannelData = (channel: Channel) => {
   form.autoBlacklistBalance = channel.autoBlacklistBalance ?? true
   form.autoBlacklistEmptyStream = channel.autoBlacklistEmptyStream ?? true
   form.normalizeMetadataUserId = channel.normalizeMetadataUserId ?? true
+  form.stripResponsesUser = channel.stripResponsesUser ?? false
   form.keyAffinityEnabled = channel.keyAffinityEnabled ?? (channel.serviceType === 'claude')
   form.streamPassthroughEnabled = channel.streamPassthroughEnabled ?? true
   form.sub2apiPassthroughEnabled = channel.sub2apiPassthroughEnabled ?? (channel.serviceType === 'claude')
@@ -2490,7 +2506,13 @@ const localRestoredKeys = ref(new Set<string>())
 const visibleDisabledKeys = computed(() =>
   (props.channel?.disabledApiKeys || []).filter(dk => !localRestoredKeys.value.has(dk.key))
 )
-const visibleCooldownKeys = computed(() => props.channel?.cooldownApiKeys || [])
+const visibleCooldownKeys = computed(() => {
+  const cooldownKeys = props.channel?.cooldownApiKeys || []
+  if (cooldownKeys.length === 0) return []
+
+  const activeKeys = new Set(form.apiKeys)
+  return cooldownKeys.filter(ck => activeKeys.has(ck.key))
+})
 
 const formatCooldownRemaining = (seconds: number): string => {
   if (!Number.isFinite(seconds) || seconds <= 0) return '即将恢复'

@@ -42,6 +42,7 @@ func (p *ResponsesProvider) ConvertToProviderRequest(
 	if err != nil {
 		return nil, bodyBytes, err
 	}
+	stripResponsesUserField(providerReq, upstream)
 
 	reqBody, err := utils.MarshalJSONNoEscape(providerReq)
 	if err != nil {
@@ -135,6 +136,16 @@ func (p *ResponsesProvider) buildProviderRequestBody(c *gin.Context, requestPath
 	}
 
 	return providerReq, bodyBytes, nil
+}
+
+func stripResponsesUserField(providerReq interface{}, upstream *config.UpstreamConfig) {
+	if upstream == nil || !strings.EqualFold(upstream.ServiceType, "responses") || !upstream.IsStripResponsesUserEnabled() {
+		return
+	}
+
+	if reqMap, ok := providerReq.(map[string]interface{}); ok {
+		delete(reqMap, "user")
+	}
 }
 
 func (p *ResponsesProvider) buildResponsesRequestFromClaude(c *gin.Context, bodyBytes []byte, upstream *config.UpstreamConfig) (map[string]interface{}, error) {

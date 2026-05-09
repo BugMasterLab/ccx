@@ -208,6 +208,8 @@ export type MessageKey =
   | 'addChannel.autoBlacklistEmptyStreamHint'
   | 'addChannel.normalizeMetadataUserIdLabel'
   | 'addChannel.normalizeMetadataUserIdHint'
+  | 'addChannel.stripResponsesUserLabel'
+  | 'addChannel.stripResponsesUserHint'
   | 'addChannel.injectDummyThoughtSignatureLabel'
   | 'addChannel.injectDummyThoughtSignatureHint'
   | 'addChannel.stripThoughtSignatureLabel'
@@ -577,6 +579,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.autoBlacklistEmptyStreamHint': 'Automatically blacklist the key when the upstream returns an empty stream (zero events). When off, only cooldown is applied.',
     'addChannel.normalizeMetadataUserIdLabel': 'Normalize metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': 'Auto-convert JSON object user_id to a flat string for upstream compatibility.',
+    'addChannel.stripResponsesUserLabel': 'Strip Responses user field',
+    'addChannel.stripResponsesUserHint': 'Remove the user field sent to Responses API upstreams while keeping prompt_cache_key.',
     'addChannel.injectDummyThoughtSignatureLabel': 'Inject dummy thought signature',
     'addChannel.injectDummyThoughtSignatureHint': 'Injects a dummy signature into functionCall for third-party APIs that require this field. Disable it for the official API.',
     'addChannel.stripThoughtSignatureLabel': 'Strip thought signature',

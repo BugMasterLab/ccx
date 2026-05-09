@@ -43,6 +43,8 @@ type UpstreamConfig struct {
 	AutoBlacklistEmptyStream *bool `json:"autoBlacklistEmptyStream,omitempty"` // 流式空响应时自动拉黑 Key（默认 true，关闭后仅冷却）
 	// metadata.user_id 规范化开关
 	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"` // 规范化 metadata.user_id（默认 true）
+	// Responses API user 字段移除开关
+	StripResponsesUser *bool `json:"stripResponsesUser,omitempty"` // 移除发往 Responses API 上游的 user 字段（默认 false）
 	// Gemini 特定配置
 	InjectDummyThoughtSignature bool `json:"injectDummyThoughtSignature,omitempty"` // 给空 thought_signature 注入 dummy 值（兼容 x666.me 等要求必须有该字段的 API）
 	StripThoughtSignature       bool `json:"stripThoughtSignature,omitempty"`       // 移除 thought_signature 字段（兼容旧版 Gemini API）
@@ -120,6 +122,14 @@ func (u *UpstreamConfig) IsNormalizeMetadataUserIDEnabled() bool {
 		return true
 	}
 	return *u.NormalizeMetadataUserID
+}
+
+// IsStripResponsesUserEnabled 检查是否移除 Responses API user 字段（默认 false）
+func (u *UpstreamConfig) IsStripResponsesUserEnabled() bool {
+	if u.StripResponsesUser == nil {
+		return false
+	}
+	return *u.StripResponsesUser
 }
 
 // IsStreamPassthroughEnabled 检查流式是否直接透传（默认 true）
@@ -374,6 +384,7 @@ type UpstreamUpdate struct {
 	AutoBlacklistBalance             *bool          `json:"autoBlacklistBalance"`
 	AutoBlacklistEmptyStream         *bool          `json:"autoBlacklistEmptyStream"`
 	NormalizeMetadataUserID          *bool          `json:"normalizeMetadataUserId"`
+	StripResponsesUser              *bool          `json:"stripResponsesUser"`
 	StreamPassthroughEnabled         *bool          `json:"streamPassthroughEnabled"`
 	Sub2APIPassthroughEnabled        *bool          `json:"sub2apiPassthroughEnabled"`
 	KeyAffinityEnabled               *bool          `json:"keyAffinityEnabled"`

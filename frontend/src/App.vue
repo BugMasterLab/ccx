@@ -369,7 +369,7 @@
     <!-- 添加渠道模态框 -->
     <AddChannelModal
       v-model:show="dialogStore.showAddChannelModal"
-      :channel="dialogStore.editingChannel"
+      :channel="activeEditingChannel"
       :channel-type="channelStore.activeTab"
       @save="saveChannel"
       @test-capability="testChannelCapability"
@@ -533,6 +533,12 @@ const systemStatusDesc = computed(() => {
 })
 
 // 对话框状态已迁移到 DialogStore
+const activeEditingChannel = computed(() => {
+  const editingChannel = dialogStore.editingChannel
+  if (!editingChannel) return null
+
+  return channelStore.currentChannelsData.channels?.find(channel => channel.index === editingChannel.index) ?? editingChannel
+})
 
 // 主题和偏好设置已迁移到 PreferencesStore
 

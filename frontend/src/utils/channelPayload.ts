@@ -1,4 +1,4 @@
-import type { Channel } from '../services/api'
+﻿import type { Channel } from '../services/api'
 import { normalizeAdvancedChannelOptions } from './channelAdvancedOptions'
 import { deduplicateEquivalentBaseUrls } from './baseUrlSemantics'
 
@@ -27,6 +27,7 @@ export interface ChannelFormLike {
   autoBlacklistBalance: boolean
   autoBlacklistEmptyStream: boolean
   normalizeMetadataUserId: boolean
+  stripResponsesUser?: boolean
   streamPassthroughEnabled: boolean
   sub2apiPassthroughEnabled: boolean
   keyAffinityEnabled?: boolean
@@ -92,6 +93,7 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     autoBlacklistBalance: form.autoBlacklistBalance,
     autoBlacklistEmptyStream: form.autoBlacklistEmptyStream,
     normalizeMetadataUserId: form.normalizeMetadataUserId,
+    stripResponsesUser: form.serviceType === 'responses' ? !!form.stripResponsesUser : false,
     streamPassthroughEnabled,
     sub2apiPassthroughEnabled,
     keyAffinityEnabled: form.serviceType === 'claude' ? (form.keyAffinityEnabled ?? true) : !!form.keyAffinityEnabled,

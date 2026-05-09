@@ -110,6 +110,28 @@ func TestResponsesProvider_BuildResponsesRequestFromClaude(t *testing.T) {
 	}
 }
 
+func TestResponsesProvider_StripResponsesUserField(t *testing.T) {
+	stripEnabled := true
+	req := map[string]interface{}{
+		"model":            "gpt-5.4",
+		"input":            []interface{}{},
+		"user":             "user-session-id",
+		"prompt_cache_key": "user-session-id",
+	}
+
+	stripResponsesUserField(req, &config.UpstreamConfig{
+		ServiceType:        "responses",
+		StripResponsesUser: &stripEnabled,
+	})
+
+	if _, exists := req["user"]; exists {
+		t.Fatalf("user field should be stripped")
+	}
+	if req["prompt_cache_key"] != "user-session-id" {
+		t.Fatalf("prompt_cache_key = %v, want user-session-id", req["prompt_cache_key"])
+	}
+}
+
 func TestResponsesProvider_BuildResponsesRequestFromClaude_AssistantTextUsesOutputText(t *testing.T) {
 	provider := &ResponsesProvider{}
 	upstream := &config.UpstreamConfig{
