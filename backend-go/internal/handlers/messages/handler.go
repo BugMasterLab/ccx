@@ -346,6 +346,10 @@ func tryMessagesRequestViaResponsesPool(
 					return cfgManager.GetNextAPIKeyForUser(upstream, failedKeys, "Responses", userID)
 				},
 				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
+					if routeUpstream != nil && routeUpstream.IsStripResponsesUserEnabled() && !upstreamCopy.IsStripResponsesUserEnabled() {
+						v := true
+						upstreamCopy.StripResponsesUser = &v
+					}
 					req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 					return req, err
 				},
