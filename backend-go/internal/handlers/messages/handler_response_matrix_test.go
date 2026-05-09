@@ -270,6 +270,67 @@ func TestMessagesHandler_NonStreamMatrix_AllFourUpstreams(t *testing.T) {
 	}
 }
 
+func TestRewriteRequestBodyModel_PreservesTopLevelOrder(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":"hi"}],"model":"old-model","stream":false}`)
+
+	rewritten, err := rewriteRequestBodyModel(body, "new-model")
+	if err != nil {
+		t.Fatalf("rewriteRequestBodyModel() error = %v", err)
+	}
+
+	want := `{"messages":[{"role":"user","content":"hi"}],"model":"new-model","stream":false}`
+	if string(rewritten) != want {
+		t.Fatalf("rewritten = %s, want %s", rewritten, want)
+	}
+}
+
+func TestRewriteRequestBodyModel_IgnoresNestedModel(t *testing.T) {
+	_, err := rewriteRequestBodyModel([]byte(`{"messages":[{"model":"inner"}]}`), "new-model")
+	if err == nil {
+		t.Fatal("rewriteRequestBodyModel() error = nil, want error")
+	}
+}
+
+func TestMergeRouteSwitchOverrides(t *testing.T) {
+	enabled := true
+	routeUpstream := &config.UpstreamConfig{
+		NeverBlacklistKeys: &enabled,
+		StripResponsesUser: &enabled,
+		CustomHeaders: map[string]string{
+			"X-Route":  "route",
+			"X-Shared": "route",
+		},
+		ProxyURL:           "http://route-proxy",
+		InsecureSkipVerify: true,
+	}
+	upstreamCopy := &config.UpstreamConfig{
+		CustomHeaders: map[string]string{
+			"X-Shared": "responses",
+		},
+	}
+
+	mergeRouteSwitchOverrides(routeUpstream, upstreamCopy)
+
+	if !upstreamCopy.IsNeverBlacklistKeysEnabled() {
+		t.Fatal("NeverBlacklistKeys was not propagated")
+	}
+	if !upstreamCopy.IsStripResponsesUserEnabled() {
+		t.Fatal("StripResponsesUser was not propagated")
+	}
+	if !upstreamCopy.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify was not propagated")
+	}
+	if upstreamCopy.ProxyURL != "http://route-proxy" {
+		t.Fatalf("ProxyURL = %q, want route proxy", upstreamCopy.ProxyURL)
+	}
+	if upstreamCopy.CustomHeaders["X-Route"] != "route" {
+		t.Fatalf("X-Route header = %q, want route", upstreamCopy.CustomHeaders["X-Route"])
+	}
+	if upstreamCopy.CustomHeaders["X-Shared"] != "responses" {
+		t.Fatalf("X-Shared header = %q, want responses", upstreamCopy.CustomHeaders["X-Shared"])
+	}
+}
+
 func TestMessagesHandler_NonStreamMatrix_ToolUse(t *testing.T) {
 	tests := []struct {
 		name         string

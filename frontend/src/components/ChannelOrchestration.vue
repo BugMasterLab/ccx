@@ -129,6 +129,13 @@
                 <v-icon start size="12">mdi-rocket-launch</v-icon>
                 {{ formatPromotionRemaining(element.promotionUntil) }}
               </v-chip>
+              <!-- Bridge to Responses pool chip -->
+              <v-tooltip v-if="element.serviceType === 'responses' && element.routeMessagesToResponsesPool !== false" location="top" :open-delay="200" content-class="ccx-tooltip">
+                <template #activator="{ props: tip }">
+                  <v-chip v-bind="tip" size="x-small" color="info" variant="tonal" class="ml-2" prepend-icon="mdi-routes">{{ t('orchestration.bridgeToPoolChip') }}</v-chip>
+                </template>
+                {{ t('orchestration.bridgeToPoolHint') }}
+              </v-tooltip>
               <!-- Official website link button -->
               <v-btn
                 :href="getWebsiteUrl(element)"

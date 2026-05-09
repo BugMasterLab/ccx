@@ -2,6 +2,51 @@ package config
 
 import "testing"
 
+func TestUpstreamConfigClone_DeepCopy(t *testing.T) {
+	enabled := true
+	src := UpstreamConfig{
+		APIKeys:                      []string{"k1"},
+		ModelMapping:                 map[string]string{"a": "b"},
+		CustomHeaders:                map[string]string{"X": "Y"},
+		BaseURLs:                     []string{"u1"},
+		FailoverRules:                []FailoverRule{{Description: "r1"}},
+		NeverBlacklistKeys:           &enabled,
+		RouteMessagesToResponsesPool: &enabled,
+		NormalizeMetadataUserID:      &enabled,
+		StripResponsesUser:           &enabled,
+	}
+
+	dst := src.Clone()
+	dst.APIKeys[0] = "k2"
+	dst.ModelMapping["a"] = "c"
+	dst.CustomHeaders["X"] = "Z"
+	dst.BaseURLs[0] = "u2"
+	dst.FailoverRules[0].Description = "r2"
+	*dst.NeverBlacklistKeys = false
+	*dst.RouteMessagesToResponsesPool = false
+	*dst.NormalizeMetadataUserID = false
+	*dst.StripResponsesUser = false
+
+	if src.APIKeys[0] != "k1" {
+		t.Fatalf("APIKeys shared backing array")
+	}
+	if src.ModelMapping["a"] != "b" {
+		t.Fatalf("ModelMapping shared backing map")
+	}
+	if src.CustomHeaders["X"] != "Y" {
+		t.Fatalf("CustomHeaders shared backing map")
+	}
+	if src.BaseURLs[0] != "u1" {
+		t.Fatalf("BaseURLs shared backing array")
+	}
+	if src.FailoverRules[0].Description != "r1" {
+		t.Fatalf("FailoverRules shared backing array")
+	}
+	if !*src.NeverBlacklistKeys || !*src.RouteMessagesToResponsesPool || !*src.NormalizeMetadataUserID || !*src.StripResponsesUser {
+		t.Fatalf("boolean pointer fields were not deep copied")
+	}
+}
+
 func TestSupportsModel(t *testing.T) {
 	tests := []struct {
 		name            string

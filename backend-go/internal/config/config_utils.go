@@ -249,9 +249,21 @@ func (u *UpstreamConfig) Clone() *UpstreamConfig {
 		v := *u.AutoBlacklistEmptyStream
 		cloned.AutoBlacklistEmptyStream = &v
 	}
+	if u.NeverBlacklistKeys != nil {
+		v := *u.NeverBlacklistKeys
+		cloned.NeverBlacklistKeys = &v
+	}
+	if u.RouteMessagesToResponsesPool != nil {
+		v := *u.RouteMessagesToResponsesPool
+		cloned.RouteMessagesToResponsesPool = &v
+	}
 	if u.NormalizeMetadataUserID != nil {
 		v := *u.NormalizeMetadataUserID
 		cloned.NormalizeMetadataUserID = &v
+	}
+	if u.StripResponsesUser != nil {
+		v := *u.StripResponsesUser
+		cloned.StripResponsesUser = &v
 	}
 	if u.StreamPassthroughEnabled != nil {
 		v := *u.StreamPassthroughEnabled

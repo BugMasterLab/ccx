@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -307,6 +308,11 @@ func tryMessagesRequestViaResponsesPool(
 		}
 	}
 
+	if routeUpstream != nil && routeUpstream.IsNormalizeMetadataUserIDEnabled() {
+		bodyBytes = common.NormalizeMetadataUserID(bodyBytes)
+	}
+	c.Set("requestBodyBytes", bodyBytes)
+
 	metricsManager := channelScheduler.GetResponsesMetricsManager()
 	result := common.MultiChannelAttemptResult{}
 
@@ -346,10 +352,7 @@ func tryMessagesRequestViaResponsesPool(
 					return cfgManager.GetNextAPIKeyForUser(upstream, failedKeys, "Responses", userID)
 				},
 				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
-					if routeUpstream != nil && routeUpstream.IsStripResponsesUserEnabled() && !upstreamCopy.IsStripResponsesUserEnabled() {
-						v := true
-						upstreamCopy.StripResponsesUser = &v
-					}
+					mergeRouteSwitchOverrides(routeUpstream, upstreamCopy)
 					req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
 					return req, err
 				},
@@ -397,22 +400,137 @@ func tryMessagesRequestViaResponsesPool(
 	return result
 }
 
+func mergeRouteSwitchOverrides(routeUpstream, upstreamCopy *config.UpstreamConfig) {
+	if routeUpstream == nil || upstreamCopy == nil {
+		return
+	}
+
+	if routeUpstream.IsStripResponsesUserEnabled() && !upstreamCopy.IsStripResponsesUserEnabled() {
+		v := true
+		upstreamCopy.StripResponsesUser = &v
+	}
+	if routeUpstream.IsNeverBlacklistKeysEnabled() && !upstreamCopy.IsNeverBlacklistKeysEnabled() {
+		v := true
+		upstreamCopy.NeverBlacklistKeys = &v
+	}
+	if routeUpstream.InsecureSkipVerify {
+		upstreamCopy.InsecureSkipVerify = true
+	}
+	if upstreamCopy.ProxyURL == "" {
+		upstreamCopy.ProxyURL = routeUpstream.ProxyURL
+	}
+	if len(routeUpstream.CustomHeaders) > 0 {
+		if upstreamCopy.CustomHeaders == nil {
+			upstreamCopy.CustomHeaders = make(map[string]string, len(routeUpstream.CustomHeaders))
+		}
+		for key, value := range routeUpstream.CustomHeaders {
+			if _, exists := upstreamCopy.CustomHeaders[key]; !exists {
+				upstreamCopy.CustomHeaders[key] = value
+			}
+		}
+	}
+}
+
 // rewriteRequestBodyModel 将请求体顶层 "model" 字段改写为新值。
 // 如果请求体不是合法 JSON 对象或没有 model 字段，则返回错误。
 func rewriteRequestBodyModel(bodyBytes []byte, newModel string) ([]byte, error) {
 	if len(bodyBytes) == 0 {
 		return bodyBytes, nil
 	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &obj); err != nil {
 		return nil, err
+	}
+	if _, ok := obj["model"]; !ok {
+		return nil, fmt.Errorf("model field not found")
 	}
 	encoded, err := json.Marshal(newModel)
 	if err != nil {
 		return nil, err
 	}
-	raw["model"] = encoded
-	return json.Marshal(raw)
+	return replaceTopLevelStringField(bodyBytes, "model", encoded)
+}
+
+func replaceTopLevelStringField(bodyBytes []byte, key string, encodedValue []byte) ([]byte, error) {
+	needle := strconv.Quote(key)
+	inString := false
+	escaped := false
+	depth := 0
+
+	for i := 0; i < len(bodyBytes); i++ {
+		b := bodyBytes[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if b == '\\' {
+				escaped = true
+				continue
+			}
+			if b == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch b {
+		case '"':
+			if depth == 1 && strings.HasPrefix(string(bodyBytes[i:]), needle) {
+				j := i + len(needle)
+				for j < len(bodyBytes) && isJSONWhitespace(bodyBytes[j]) {
+					j++
+				}
+				if j >= len(bodyBytes) || bodyBytes[j] != ':' {
+					inString = true
+					continue
+				}
+				j++
+				for j < len(bodyBytes) && isJSONWhitespace(bodyBytes[j]) {
+					j++
+				}
+				if j >= len(bodyBytes) || bodyBytes[j] != '"' {
+					return nil, fmt.Errorf("model field is not string")
+				}
+				end, err := findJSONStringEnd(bodyBytes, j)
+				if err != nil {
+					return nil, err
+				}
+				rewritten := make([]byte, 0, len(bodyBytes)-(end-j)+len(encodedValue))
+				rewritten = append(rewritten, bodyBytes[:j]...)
+				rewritten = append(rewritten, encodedValue...)
+				rewritten = append(rewritten, bodyBytes[end:]...)
+				return rewritten, nil
+			}
+			inString = true
+		case '{', '[':
+			depth++
+		case '}', ']':
+			depth--
+		}
+	}
+	return nil, fmt.Errorf("model field not found")
+}
+
+func findJSONStringEnd(bodyBytes []byte, start int) (int, error) {
+	escaped := false
+	for i := start + 1; i < len(bodyBytes); i++ {
+		if escaped {
+			escaped = false
+			continue
+		}
+		switch bodyBytes[i] {
+		case '\\':
+			escaped = true
+		case '"':
+			return i + 1, nil
+		}
+	}
+	return 0, fmt.Errorf("unterminated string")
+}
+
+func isJSONWhitespace(b byte) bool {
+	return b == ' ' || b == '\n' || b == '\r' || b == '\t'
 }
 
 // handleNormalResponse 处理非流式响应

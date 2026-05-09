@@ -131,6 +131,8 @@ export type MessageKey =
   | 'orchestration.resumeReset'
   | 'orchestration.pause'
   | 'orchestration.moveToPool'
+  | 'orchestration.bridgeToPoolChip'
+  | 'orchestration.bridgeToPoolHint'
   | 'orchestration.delete'
   | 'orchestration.keepOne'
   | 'orchestration.noActiveChannels'
@@ -506,6 +508,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.resumeReset': 'Resume (reset metrics)',
     'orchestration.pause': 'Pause',
     'orchestration.moveToPool': 'Move to standby pool',
+    'orchestration.bridgeToPoolChip': 'Bridge',
+    'orchestration.bridgeToPoolHint': 'This channel routes Messages API requests to the Responses pool; metrics are available in the Responses tab',
     'orchestration.delete': 'Delete',
     'orchestration.keepOne': '(keep at least one)',
     'orchestration.noActiveChannels': 'No active channels',
@@ -880,6 +884,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.resumeReset': 'Lanjutkan (reset metrik)',
     'orchestration.pause': 'Jeda',
     'orchestration.moveToPool': 'Pindah ke pool standby',
+    'orchestration.bridgeToPoolChip': 'Bridge',
+    'orchestration.bridgeToPoolHint': 'Kanal ini merutekan permintaan Messages API ke pool Responses; metrik tersedia di tab Responses',
     'orchestration.delete': 'Hapus',
     'orchestration.keepOne': '(sisakan minimal satu)',
     'orchestration.noActiveChannels': 'Belum ada channel aktif',
@@ -1254,6 +1260,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'orchestration.resumeReset': '恢复 (重置指标)',
     'orchestration.pause': '暂停',
     'orchestration.moveToPool': '移至备用池',
+    'orchestration.bridgeToPoolChip': '桥接',
+    'orchestration.bridgeToPoolHint': '该渠道将 Messages API 请求桥接至 Responses 池；指标可在 Responses 标签页查看',
     'orchestration.delete': '删除',
     'orchestration.keepOne': '(至少保留一个)',
     'orchestration.noActiveChannels': '暂无活跃渠道',
