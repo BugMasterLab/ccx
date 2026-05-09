@@ -1,3 +1,11 @@
+## [v2.7.11] - 2026-05-09
+
+### 新增
+
+- **渠道级 neverBlacklistKeys 开关** - 新增按渠道生效的"永不拉黑/冷却 Key"开关，在故障转移循环中短路 `BlacklistKey` 与冷却逻辑；同步在所有渠道 payload、dashboard 视图和更新端点中暴露该字段。前端表单在渠道 Key 数量不超过 5 时默认开启，跟踪用户覆盖并在编辑时回显已保存值。
+- **渠道日志弹窗默认自动刷新** - 渠道日志对话框打开时默认启用自动刷新，便于实时观察上游调用情况。
+- **Messages 渠道路由透传到 Codex 池** - 允许 Messages serviceType=responses 渠道作为路由开关，将请求委派至 Responses 渠道池进行故障转移，同时保留 Claude Messages 响应处理；这类路由开关型渠道允许省略本地 Key 和 baseURL。
+
 ## [v2.7.10] - 2026-05-09
 
 ### Fixed
