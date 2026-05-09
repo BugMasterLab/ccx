@@ -65,7 +65,6 @@ func shouldSkipClaudeModelRewriteForAuthOnlyPassthrough(c *gin.Context, upstream
 	return upstream != nil &&
 		strings.EqualFold(upstream.ServiceType, "claude") &&
 		upstream.IsSub2APIPassthroughEnabled() &&
-		utils.IsAnthropicAPIKey(apiKey) &&
 		isClaudeMessagesFamilyPath(c)
 }
 

@@ -2,7 +2,6 @@ package providers
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"testing"
 
@@ -53,12 +52,13 @@ func TestClaudeProvider_Sub2APIPassthrough_AuthOnlyAndHeaderFilter(t *testing.T)
 	}
 }
 
-func TestClaudeProvider_Sub2APIPassthrough_OnlyAppliesToAnthropicKey(t *testing.T) {
+func TestClaudeProvider_Sub2APIPassthrough_DoesNotValidateKeyFormat(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	enabled := true
 	requestBody := []byte(`{"model":"claude-3-5-sonnet-latest","messages":[{"role":"user","content":"hi"}]}`)
 	c := newGinContext(http.MethodPost, "/v1/messages", requestBody, context.Background())
+	c.Request.Header.Set("Authorization", "Bearer inbound-token")
 
 	upstream := &config.UpstreamConfig{
 		BaseURL:                   "https://api.anthropic.com",
@@ -68,7 +68,7 @@ func TestClaudeProvider_Sub2APIPassthrough_OnlyAppliesToAnthropicKey(t *testing.
 	}
 
 	p := &ClaudeProvider{}
-	req, _, err := p.ConvertToProviderRequest(c, upstream, "sk-non-anthropic")
+	req, forwardedBody, err := p.ConvertToProviderRequest(c, upstream, "sk-non-anthropic")
 	if err != nil {
 		t.Fatalf("ConvertToProviderRequest() err = %v", err)
 	}
@@ -76,11 +76,7 @@ func TestClaudeProvider_Sub2APIPassthrough_OnlyAppliesToAnthropicKey(t *testing.
 	if got := req.Header.Get("Authorization"); got != "Bearer sk-non-anthropic" {
 		t.Fatalf("Authorization = %q, want %q", got, "Bearer sk-non-anthropic")
 	}
-	bodyBytes, err := io.ReadAll(req.Body)
-	if err != nil {
-		t.Fatalf("read req body: %v", err)
-	}
-	if gjson.GetBytes(bodyBytes, "model").String() != "claude-3-opus-20240229" {
-		t.Fatalf("model should be rewritten when not Anthropic API key passthrough, got %s", gjson.GetBytes(bodyBytes, "model").String())
+	if gjson.GetBytes(forwardedBody, "model").String() != "claude-3-5-sonnet-latest" {
+		t.Fatalf("model should keep original without key format validation, got %s", gjson.GetBytes(forwardedBody, "model").String())
 	}
 }

@@ -411,36 +411,6 @@ func shouldUseSub2APIPassthrough(upstream *config.UpstreamConfig) bool {
 		upstream.IsSub2APIPassthroughEnabled()
 }
 
-func hasAnthropicAPIKey(keys []string) bool {
-	for _, key := range keys {
-		if utils.IsAnthropicAPIKey(key) {
-			return true
-		}
-	}
-	return false
-}
-
-func getNextAnthropicAPIKey(cfgManager *config.ConfigManager, upstream *config.UpstreamConfig, failedKeys map[string]bool, apiType string, userID string) (string, error) {
-	filteredFailed := make(map[string]bool, len(failedKeys)+len(upstream.APIKeys))
-	for k, v := range failedKeys {
-		filteredFailed[k] = v
-	}
-
-	hasAnthropic := false
-	for _, key := range upstream.APIKeys {
-		if utils.IsAnthropicAPIKey(key) {
-			hasAnthropic = true
-			continue
-		}
-		filteredFailed[key] = true
-	}
-	if !hasAnthropic {
-		return "", fmt.Errorf("no anthropic api key available")
-	}
-
-	return cfgManager.GetNextAPIKeyForUser(upstream, filteredFailed, apiType, userID)
-}
-
 func countTokensPassthroughHandleSuccess(c *gin.Context, resp *http.Response) (*types.Usage, error) {
 	defer resp.Body.Close()
 	return nil, common.PassthroughResponse(c, resp)
@@ -456,7 +426,7 @@ func tryCountTokensSub2APIPassthroughSingleChannel(
 	model string,
 ) bool {
 	upstream, channelIndex, err := cfgManager.GetCurrentUpstreamWithIndex()
-	if err != nil || !shouldUseSub2APIPassthrough(upstream) || !hasAnthropicAPIKey(upstream.APIKeys) {
+	if err != nil || !shouldUseSub2APIPassthrough(upstream) {
 		return false
 	}
 
@@ -482,7 +452,7 @@ func tryCountTokensSub2APIPassthroughSingleChannel(
 		bodyBytes,
 		false,
 		func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
-			return getNextAnthropicAPIKey(cfgManager, upstream, failedKeys, "Messages", userID)
+			return cfgManager.GetNextAPIKeyForUser(upstream, failedKeys, "Messages", userID)
 		},
 		func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 			req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)
@@ -533,7 +503,7 @@ func tryCountTokensSub2APIPassthroughMultiChannel(
 		func(selection *scheduler.SelectionResult) common.MultiChannelAttemptResult {
 			upstream := selection.Upstream
 			channelIndex := selection.ChannelIndex
-			if upstream == nil || !shouldUseSub2APIPassthrough(upstream) || !hasAnthropicAPIKey(upstream.APIKeys) {
+			if upstream == nil || !shouldUseSub2APIPassthrough(upstream) {
 				return common.MultiChannelAttemptResult{}
 			}
 
@@ -560,7 +530,7 @@ func tryCountTokensSub2APIPassthroughMultiChannel(
 				bodyBytes,
 				false,
 				func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error) {
-					return getNextAnthropicAPIKey(cfgManager, upstream, failedKeys, "Messages", userID)
+					return cfgManager.GetNextAPIKeyForUser(upstream, failedKeys, "Messages", userID)
 				},
 				func(c *gin.Context, upstreamCopy *config.UpstreamConfig, apiKey string) (*http.Request, error) {
 					req, _, err := provider.ConvertToProviderRequest(c, upstreamCopy, apiKey)

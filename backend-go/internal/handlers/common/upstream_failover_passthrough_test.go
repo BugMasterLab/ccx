@@ -36,7 +36,7 @@ func TestIsClaudeSub2APIPassthroughForKey(t *testing.T) {
 				Sub2APIPassthroughEnabled: &enabled,
 			},
 			apiKey: "sk-not-ant",
-			want:   false,
+			want:   true,
 		},
 		{
 			name: "non-claude channel",
@@ -94,14 +94,14 @@ func TestShouldDirectClaudePassthroughForKey(t *testing.T) {
 			want:   true,
 		},
 		{
-			name: "sub2api passthrough on but non-anthropic key",
+			name: "sub2api passthrough on with non-anthropic key",
 			upstream: &config.UpstreamConfig{
 				ServiceType:               "claude",
 				StreamPassthroughEnabled:  &off,
 				Sub2APIPassthroughEnabled: &on,
 			},
 			apiKey: "sk-not-ant",
-			want:   false,
+			want:   true,
 		},
 		{
 			name: "non-claude channel",

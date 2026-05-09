@@ -54,12 +54,11 @@ func SelectedAPIKeyFromContext(c *gin.Context) string {
 }
 
 // IsClaudeSub2APIPassthroughForKey 判断是否启用 sub2api 风格透传（仅替换认证）。
-// 仅在 Claude 渠道、开关开启且当前 key 为 Anthropic 官方 key 时生效。
+// 仅在 Claude 渠道且开关开启时生效，不校验 key 格式。
 func IsClaudeSub2APIPassthroughForKey(upstream *config.UpstreamConfig, apiKey string) bool {
 	return upstream != nil &&
 		strings.EqualFold(upstream.ServiceType, "claude") &&
-		upstream.IsSub2APIPassthroughEnabled() &&
-		utils.IsAnthropicAPIKey(apiKey)
+		upstream.IsSub2APIPassthroughEnabled()
 }
 
 // ShouldDirectClaudePassthroughForKey 判断当前请求是否应直接透传响应（SSE 与非 SSE 均适用）。
