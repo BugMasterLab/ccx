@@ -1,3 +1,10 @@
+## [v2.7.12] - 2026-05-09
+
+### 新增
+
+- **routeMessagesToResponsesPool 开关与路由模型映射** - Messages 渠道（serviceType=responses）新增 `routeMessagesToResponsesPool` 开关（默认开启），关闭后渠道使用自身 baseURL 与 Key 而不再强制走 Responses 渠道池；bridge 启用时会将路由开关渠道的 `ModelMapping` 应用到出站请求体，使上游收到重写后的模型名。
+- **补齐 mdi-shield-key 图标注册** - 注册"永不拉黑"开关使用的 `mdi-shield-key` 图标，修复前端图标缺失问题。
+
 ## [v2.7.11] - 2026-05-09
 
 ### 新增
