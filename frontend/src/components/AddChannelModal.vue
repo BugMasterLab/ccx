@@ -831,6 +831,19 @@
               </div>
             </v-col>
 
+            <v-col v-if="props.channelType === 'messages' && form.serviceType === 'responses'" cols="12">
+              <div class="d-flex align-center justify-space-between">
+                <div class="d-flex align-center ga-2">
+                  <v-icon color="primary">mdi-routes</v-icon>
+                  <div>
+                    <div class="section-title section-title--soft">{{ t('addChannel.routeToResponsesPoolLabel') }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ t('addChannel.routeToResponsesPoolHint') }}</div>
+                  </div>
+                </div>
+                <v-switch v-model="form.routeMessagesToResponsesPool" inset color="primary" hide-details />
+              </div>
+            </v-col>
+
             <v-col cols="12">
               <div class="d-flex align-center justify-space-between">
                 <div class="d-flex align-center ga-2">
@@ -1914,6 +1927,7 @@ const form = reactive({
   autoBlacklistEmptyStream: true,
   neverBlacklistKeys: false,
   neverBlacklistKeysUserOverridden: false,
+  routeMessagesToResponsesPool: true,
   normalizeMetadataUserId: true,
   stripResponsesUser: false,
   keyAffinityEnabled: true,
@@ -2184,7 +2198,11 @@ const rules = {
 // 计算属性
 const dialogMode = ref<'create' | 'edit'>('create')
 const isEditing = computed(() => dialogMode.value === 'edit')
-const messagesResponsesRouteSwitch = computed(() => props.channelType === 'messages' && form.serviceType === 'responses')
+const messagesResponsesRouteSwitch = computed(
+  () => props.channelType === 'messages'
+    && form.serviceType === 'responses'
+    && form.routeMessagesToResponsesPool !== false
+)
 const hasDisabledKeysAvailable = computed(() => visibleDisabledKeys.value.length > 0)
 const hasConfigurableKeys = computed(() => messagesResponsesRouteSwitch.value || form.apiKeys.length > 0 || (isEditing.value && hasDisabledKeysAvailable.value))
 const batchApiKeyResultClass = computed(() =>
@@ -2290,6 +2308,7 @@ const resetForm = () => {
   form.autoBlacklistEmptyStream = true
   form.neverBlacklistKeys = form.apiKeys.length <= 5
   form.neverBlacklistKeysUserOverridden = false
+  form.routeMessagesToResponsesPool = true
   form.normalizeMetadataUserId = true
   form.stripResponsesUser = false
   form.keyAffinityEnabled = true
@@ -2382,6 +2401,7 @@ const loadChannelData = (channel: Channel) => {
     form.neverBlacklistKeys = (channel.apiKeys?.length ?? 0) <= 5
     form.neverBlacklistKeysUserOverridden = false
   }
+  form.routeMessagesToResponsesPool = channel.routeMessagesToResponsesPool ?? true
   form.normalizeMetadataUserId = channel.normalizeMetadataUserId ?? true
   form.stripResponsesUser = channel.stripResponsesUser ?? false
   form.keyAffinityEnabled = channel.keyAffinityEnabled ?? (channel.serviceType === 'claude')

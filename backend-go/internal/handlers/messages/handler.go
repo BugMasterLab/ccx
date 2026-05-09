@@ -110,9 +110,9 @@ func handleMultiChannel(
 				return common.MultiChannelAttemptResult{}
 			}
 
-			if strings.EqualFold(upstream.ServiceType, "responses") {
+			if strings.EqualFold(upstream.ServiceType, "responses") && upstream.IsRouteMessagesToResponsesPoolEnabled() {
 				log.Printf("[Messages-ResponsesBridge] 选中路由开关渠道: [%d] %s", channelIndex, upstream.Name)
-				return tryMessagesRequestViaResponsesPool(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, userID, startTime)
+				return tryMessagesRequestViaResponsesPool(c, envCfg, cfgManager, channelScheduler, upstream, bodyBytes, claudeReq, userID, startTime)
 			}
 
 			provider := providers.GetProvider(upstream.ServiceType)
@@ -202,9 +202,9 @@ func handleSingleChannel(
 		return
 	}
 
-	if strings.EqualFold(upstream.ServiceType, "responses") {
+	if strings.EqualFold(upstream.ServiceType, "responses") && upstream.IsRouteMessagesToResponsesPoolEnabled() {
 		log.Printf("[Messages-ResponsesBridge] 单渠道路由开关: [%d] %s", channelIndex, upstream.Name)
-		result := tryMessagesRequestViaResponsesPool(c, envCfg, cfgManager, channelScheduler, bodyBytes, claudeReq, userID, startTime)
+		result := tryMessagesRequestViaResponsesPool(c, envCfg, cfgManager, channelScheduler, upstream, bodyBytes, claudeReq, userID, startTime)
 		if result.Handled {
 			return
 		}
@@ -283,6 +283,7 @@ func tryMessagesRequestViaResponsesPool(
 	envCfg *config.EnvConfig,
 	cfgManager *config.ConfigManager,
 	channelScheduler *scheduler.ChannelScheduler,
+	routeUpstream *config.UpstreamConfig,
 	bodyBytes []byte,
 	claudeReq types.ClaudeRequest,
 	userID string,
@@ -291,6 +292,19 @@ func tryMessagesRequestViaResponsesPool(
 	provider := providers.GetProvider("responses")
 	if provider == nil {
 		return common.MultiChannelAttemptResult{}
+	}
+
+	if routeUpstream != nil && len(routeUpstream.ModelMapping) > 0 {
+		mapped := config.RedirectModel(claudeReq.Model, routeUpstream)
+		if mapped != "" && mapped != claudeReq.Model {
+			log.Printf("[Messages-ResponsesBridge] 应用路由开关渠道 ModelMapping: %s -> %s", claudeReq.Model, mapped)
+			if rewritten, err := rewriteRequestBodyModel(bodyBytes, mapped); err == nil {
+				bodyBytes = rewritten
+				claudeReq.Model = mapped
+			} else {
+				log.Printf("[Messages-ResponsesBridge] 警告: 改写请求体 model 失败: %v", err)
+			}
+		}
 	}
 
 	metricsManager := channelScheduler.GetResponsesMetricsManager()
@@ -377,6 +391,24 @@ func tryMessagesRequestViaResponsesPool(
 	)
 
 	return result
+}
+
+// rewriteRequestBodyModel 将请求体顶层 "model" 字段改写为新值。
+// 如果请求体不是合法 JSON 对象或没有 model 字段，则返回错误。
+func rewriteRequestBodyModel(bodyBytes []byte, newModel string) ([]byte, error) {
+	if len(bodyBytes) == 0 {
+		return bodyBytes, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(newModel)
+	if err != nil {
+		return nil, err
+	}
+	raw["model"] = encoded
+	return json.Marshal(raw)
 }
 
 // handleNormalResponse 处理非流式响应

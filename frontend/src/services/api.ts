@@ -189,6 +189,7 @@ export interface Channel {
   autoBlacklistBalance?: boolean
   autoBlacklistEmptyStream?: boolean
   neverBlacklistKeys?: boolean
+  routeMessagesToResponsesPool?: boolean
   normalizeMetadataUserId?: boolean
   stripResponsesUser?: boolean
   streamPassthroughEnabled?: boolean

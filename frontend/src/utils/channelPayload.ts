@@ -27,6 +27,7 @@ export interface ChannelFormLike {
   autoBlacklistBalance: boolean
   autoBlacklistEmptyStream: boolean
   neverBlacklistKeys?: boolean
+  routeMessagesToResponsesPool?: boolean
   normalizeMetadataUserId: boolean
   stripResponsesUser?: boolean
   streamPassthroughEnabled: boolean
@@ -96,6 +97,9 @@ export function buildChannelPayload(form: ChannelFormLike): Omit<Channel, 'index
     normalizeMetadataUserId: form.normalizeMetadataUserId,
     stripResponsesUser: form.serviceType === 'responses' ? !!form.stripResponsesUser : false,
     neverBlacklistKeys: !!form.neverBlacklistKeys,
+    routeMessagesToResponsesPool: form.serviceType === 'responses'
+      ? form.routeMessagesToResponsesPool !== false
+      : true,
     streamPassthroughEnabled,
     sub2apiPassthroughEnabled,
     keyAffinityEnabled: form.serviceType === 'claude' ? (form.keyAffinityEnabled ?? true) : !!form.keyAffinityEnabled,

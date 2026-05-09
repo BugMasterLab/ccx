@@ -208,6 +208,8 @@ export type MessageKey =
   | 'addChannel.autoBlacklistEmptyStreamHint'
   | 'addChannel.neverBlacklistKeysLabel'
   | 'addChannel.neverBlacklistKeysHint'
+  | 'addChannel.routeToResponsesPoolLabel'
+  | 'addChannel.routeToResponsesPoolHint'
   | 'addChannel.normalizeMetadataUserIdLabel'
   | 'addChannel.normalizeMetadataUserIdHint'
   | 'addChannel.stripResponsesUserLabel'
@@ -581,6 +583,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.autoBlacklistEmptyStreamHint': 'Automatically blacklist the key when the upstream returns an empty stream (zero events). When off, only cooldown is applied.',
     'addChannel.neverBlacklistKeysLabel': 'Never blacklist or cool down keys',
     'addChannel.neverBlacklistKeysHint': 'When enabled, this channel skips automatic blacklist and cooldown. Defaults to on when 5 or fewer keys are configured.',
+    'addChannel.routeToResponsesPoolLabel': 'Bridge requests to Responses pool',
+    'addChannel.routeToResponsesPoolHint': 'When enabled, the Messages request is forwarded to the Responses (Codex) channel pool for failover. Disable to keep this channel using its own base URL and keys.',
     'addChannel.normalizeMetadataUserIdLabel': 'Normalize metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': 'Auto-convert JSON object user_id to a flat string for upstream compatibility.',
     'addChannel.stripResponsesUserLabel': 'Strip Responses user field',
@@ -953,6 +957,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.autoBlacklistEmptyStreamHint': 'Pindahkan key ke daftar blokir otomatis saat upstream mengembalikan stream kosong (tanpa event). Bila dimatikan, hanya cooldown yang diterapkan.',
     'addChannel.neverBlacklistKeysLabel': 'Tidak pernah blacklist/cooldown key',
     'addChannel.neverBlacklistKeysHint': 'Bila aktif, channel ini melewati blacklist dan cooldown otomatis. Default aktif bila jumlah key 5 atau kurang.',
+    'addChannel.routeToResponsesPoolLabel': 'Jembatani permintaan ke pool Responses',
+    'addChannel.routeToResponsesPoolHint': 'Saat aktif, permintaan Messages diteruskan ke pool channel Responses (Codex) untuk failover. Matikan agar channel ini memakai base URL dan key sendiri.',
     'addChannel.normalizeMetadataUserIdLabel': 'Normalisasi metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': 'Otomatis ubah user_id objek JSON menjadi string datar untuk kompatibilitas upstream.',
     'addChannel.stripResponsesUserLabel': 'Hapus field user Responses',
@@ -1325,6 +1331,8 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'addChannel.autoBlacklistEmptyStreamHint': '当上游流式响应零事件时，自动将该 Key 移入拉黑列表（关闭后仅冷却）。',
     'addChannel.neverBlacklistKeysLabel': '永不拉黑/冷却 Key',
     'addChannel.neverBlacklistKeysHint': '开启后该渠道的 Key 不会被自动拉黑，也不会进入失败冷却；适合少量高价值 Key，默认在 Key 数量 ≤5 时开启。',
+    'addChannel.routeToResponsesPoolLabel': '桥接到 Responses 渠道池',
+    'addChannel.routeToResponsesPoolHint': '开启后该 Messages 渠道作为路由开关，将请求桥接到 Responses(Codex) 渠道池实现高可用；关闭后使用本渠道自身的 BaseURL 与 Key。',
     'addChannel.normalizeMetadataUserIdLabel': '规范化 metadata.user_id',
     'addChannel.normalizeMetadataUserIdHint': '自动将 JSON 对象格式的 user_id 转换为扁平字符串，确保上游兼容性。',
     'addChannel.stripResponsesUserLabel': '移除 Responses user 字段',

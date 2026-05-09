@@ -42,6 +42,8 @@ type UpstreamConfig struct {
 	AutoBlacklistBalance     *bool `json:"autoBlacklistBalance,omitempty"`     // 余额不足时自动拉黑 Key（默认 true）
 	AutoBlacklistEmptyStream *bool `json:"autoBlacklistEmptyStream,omitempty"` // 流式空响应时自动拉黑 Key（默认 true，关闭后仅冷却）
 	NeverBlacklistKeys       *bool `json:"neverBlacklistKeys,omitempty"`       // 永不自动拉黑或冷却 Key（默认 false）
+	// 仅 Messages 渠道生效：当 ServiceType=responses 时，是否将请求桥接到 Responses 渠道池（默认 true）
+	RouteMessagesToResponsesPool *bool `json:"routeMessagesToResponsesPool,omitempty"`
 	// metadata.user_id 规范化开关
 	NormalizeMetadataUserID *bool `json:"normalizeMetadataUserId,omitempty"` // 规范化 metadata.user_id（默认 true）
 	// Responses API user 字段移除开关
@@ -122,6 +124,14 @@ func (u *UpstreamConfig) IsNeverBlacklistKeysEnabled() bool {
 		return false
 	}
 	return *u.NeverBlacklistKeys
+}
+
+// IsRouteMessagesToResponsesPoolEnabled 仅 Messages 渠道（ServiceType=responses）生效；默认 true，保持旧行为兼容。
+func (u *UpstreamConfig) IsRouteMessagesToResponsesPoolEnabled() bool {
+	if u.RouteMessagesToResponsesPool == nil {
+		return true
+	}
+	return *u.RouteMessagesToResponsesPool
 }
 
 // IsNormalizeMetadataUserIDEnabled 检查 metadata.user_id 规范化是否启用（默认 true）
@@ -392,6 +402,7 @@ type UpstreamUpdate struct {
 	AutoBlacklistBalance             *bool          `json:"autoBlacklistBalance"`
 	AutoBlacklistEmptyStream         *bool          `json:"autoBlacklistEmptyStream"`
 	NeverBlacklistKeys               *bool          `json:"neverBlacklistKeys"`
+	RouteMessagesToResponsesPool     *bool          `json:"routeMessagesToResponsesPool"`
 	NormalizeMetadataUserID          *bool          `json:"normalizeMetadataUserId"`
 	StripResponsesUser              *bool          `json:"stripResponsesUser"`
 	StreamPassthroughEnabled         *bool          `json:"streamPassthroughEnabled"`

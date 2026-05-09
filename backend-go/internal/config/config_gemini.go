@@ -214,6 +214,10 @@ func (cm *ConfigManager) UpdateGeminiUpstream(index int, updates UpstreamUpdate)
 		v := *updates.NeverBlacklistKeys
 		upstream.NeverBlacklistKeys = &v
 	}
+	if updates.RouteMessagesToResponsesPool != nil {
+		v := *updates.RouteMessagesToResponsesPool
+		upstream.RouteMessagesToResponsesPool = &v
+	}
 	if updates.NormalizeMetadataUserID != nil {
 		v := *updates.NormalizeMetadataUserID
 		upstream.NormalizeMetadataUserID = &v

@@ -60,6 +60,7 @@ func GetUpstreams(cfgManager *config.ConfigManager) gin.HandlerFunc {
 				"autoBlacklistBalance":             up.IsAutoBlacklistBalanceEnabled(),
 				"autoBlacklistEmptyStream":         up.IsAutoBlacklistEmptyStreamEnabled(),
 				"neverBlacklistKeys":               up.IsNeverBlacklistKeysEnabled(),
+				"routeMessagesToResponsesPool":    up.IsRouteMessagesToResponsesPoolEnabled(),
 				"normalizeMetadataUserId":          up.IsNormalizeMetadataUserIDEnabled(),
 				"stripResponsesUser":               up.IsStripResponsesUserEnabled(),
 				"streamPassthroughEnabled":         up.IsStreamPassthroughEnabled(),
