@@ -1,3 +1,9 @@
+## [v2.7.13] - 2026-05-09
+
+### 修复
+
+- **路由开关渠道 stripResponsesUser 透传到 Codex 池** - Messages 路由开关渠道（serviceType=responses）在桥接到 Responses 渠道池时，将路由开关渠道自身的 `stripResponsesUser` 配置应用到出站请求副本，确保即使开关配置在 Messages 路由开关渠道而非底层 Codex 上游，也能从出站 Responses 请求中剥离 `user` 字段。
+
 ## [v2.7.12] - 2026-05-09
 
 ### 新增
