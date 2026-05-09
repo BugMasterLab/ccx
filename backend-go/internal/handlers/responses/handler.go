@@ -381,6 +381,7 @@ func metricsUsageFromResponsesUsage(usage types.ResponsesUsage, promptTokensTota
 	return &types.Usage{
 		InputTokens:                usage.InputTokens,
 		OutputTokens:               usage.OutputTokens,
+		TotalTokens:                usage.TotalTokens,
 		CacheCreationInputTokens:   usage.CacheCreationInputTokens,
 		CacheReadInputTokens:       cacheReadTokens,
 		PromptTokensTotal:          promptTokensTotal,
@@ -896,6 +897,7 @@ func handleStreamSuccess(
 	return metricsUsageFromResponsesUsage(types.ResponsesUsage{
 		InputTokens:                collectedUsage.InputTokens,
 		OutputTokens:               collectedUsage.OutputTokens,
+		TotalTokens:                collectedUsage.TotalTokens,
 		CacheCreationInputTokens:   collectedUsage.CacheCreationInputTokens,
 		CacheReadInputTokens:       collectedUsage.CacheReadInputTokens,
 		CacheCreation5mInputTokens: collectedUsage.CacheCreation5mInputTokens,

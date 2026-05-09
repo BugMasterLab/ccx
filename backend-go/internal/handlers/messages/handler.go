@@ -686,7 +686,7 @@ func shouldUseSub2APIPassthrough(upstream *config.UpstreamConfig) bool {
 
 func countTokensPassthroughHandleSuccess(c *gin.Context, resp *http.Response) (*types.Usage, error) {
 	defer resp.Body.Close()
-	return nil, common.PassthroughResponse(c, resp)
+	return common.BufferedPassthroughWithUsage(c, resp)
 }
 
 func tryCountTokensSub2APIPassthroughSingleChannel(

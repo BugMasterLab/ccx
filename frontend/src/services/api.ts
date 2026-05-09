@@ -109,6 +109,7 @@ export interface TimeWindowStats {
   successRate: number
   inputTokens?: number
   outputTokens?: number
+  totalTokens?: number
   cacheCreationTokens?: number
   cacheReadTokens?: number
   cacheHitRate?: number
@@ -468,6 +469,7 @@ export interface GlobalStatsSummary {
   totalFailure: number
   totalInputTokens: number
   totalOutputTokens: number
+  totalTokens: number
   totalCacheCreationTokens: number
   totalCacheReadTokens: number
   avgSuccessRate: number

@@ -76,6 +76,7 @@ type RequestRecord struct {
 	FailureClass             FailureClass
 	InputTokens              int64
 	OutputTokens             int64
+	TotalTokens              int64
 	CacheCreationInputTokens int64
 	CacheReadInputTokens     int64
 }
@@ -140,6 +141,7 @@ type TimeWindowStats struct {
 	// Token 统计（按时间窗口聚合）
 	InputTokens         int64 `json:"inputTokens,omitempty"`
 	OutputTokens        int64 `json:"outputTokens,omitempty"`
+	TotalTokens         int64 `json:"totalTokens,omitempty"`
 	CacheCreationTokens int64 `json:"cacheCreationTokens,omitempty"`
 	CacheReadTokens     int64 `json:"cacheReadTokens,omitempty"`
 	// CacheHitRate 缓存命中率（Token口径），范围 0-100
@@ -277,6 +279,7 @@ func (m *MetricsManager) loadFromStore() error {
 				FailureClass:             normalizeFailureClass(r.Success, r.FailureClass),
 				InputTokens:              r.InputTokens,
 				OutputTokens:             r.OutputTokens,
+				TotalTokens:              r.TotalTokens,
 				CacheCreationInputTokens: r.CacheCreationTokens,
 				CacheReadInputTokens:     r.CacheReadTokens,
 			})
@@ -695,9 +698,9 @@ func isBreakerRelevantFailure(success bool, failureClass FailureClass) bool {
 	return normalizeFailureClass(success, failureClass).IsBreakerRelevant()
 }
 
-func extractUsageTokens(usage *types.Usage) (int64, int64, int64, int64) {
+func extractUsageTokens(usage *types.Usage) (int64, int64, int64, int64, int64) {
 	if usage == nil {
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, 0
 	}
 	inputTokens := int64(usage.InputTokens)
 	cacheReadTokens := int64(usage.CacheReadInputTokens)
@@ -713,7 +716,11 @@ func extractUsageTokens(usage *types.Usage) (int64, int64, int64, int64) {
 	if cacheCreationTokens <= 0 {
 		cacheCreationTokens = int64(usage.CacheCreation5mInputTokens + usage.CacheCreation1hInputTokens)
 	}
-	return inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens
+	totalTokens := int64(usage.TotalTokens)
+	if totalTokens <= 0 {
+		totalTokens = inputTokens + outputTokens + cacheCreationTokens + cacheReadTokens
+	}
+	return inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens
 }
 
 func (m *MetricsManager) appendToBreakerWindowKey(metrics *KeyMetrics, success bool) {
@@ -908,9 +915,9 @@ func (m *MetricsManager) recordSuccessWithUsageLocked(baseURL, apiKey, serviceTy
 	m.appendToWindowKey(metrics, true)
 	m.handleBreakerSuccessLocked(metrics, now)
 
-	inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens := extractUsageTokens(usage)
+	inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens := extractUsageTokens(usage)
 
-	m.appendToHistoryKeyWithUsage(metrics, now, true, FailureClassNone, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens)
+	m.appendToHistoryKeyWithUsage(metrics, now, true, FailureClassNone, inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens)
 
 	if m.store != nil {
 		m.store.AddRecord(PersistentRecord{
@@ -922,6 +929,7 @@ func (m *MetricsManager) recordSuccessWithUsageLocked(baseURL, apiKey, serviceTy
 			FailureClass:        FailureClassNone,
 			InputTokens:         inputTokens,
 			OutputTokens:        outputTokens,
+			TotalTokens:         totalTokens,
 			CacheCreationTokens: cacheCreationTokens,
 			CacheReadTokens:     cacheReadTokens,
 			APIType:             m.apiType,
@@ -962,6 +970,7 @@ func (m *MetricsManager) recordFailureLocked(baseURL, apiKey, serviceType string
 			FailureClass:        normalizeFailureClass(false, failureClass),
 			InputTokens:         0,
 			OutputTokens:        0,
+			TotalTokens:         0,
 			CacheCreationTokens: 0,
 			CacheReadTokens:     0,
 			APIType:             m.apiType,
@@ -1062,9 +1071,10 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 		m.appendToWindowKey(metrics, true)
 		m.handleBreakerSuccessLocked(metrics, now)
 
-		inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens := extractUsageTokens(usage)
+		inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens := extractUsageTokens(usage)
 		record.InputTokens = inputTokens
 		record.OutputTokens = outputTokens
+		record.TotalTokens = totalTokens
 		record.CacheCreationInputTokens = cacheCreationTokens
 		record.CacheReadInputTokens = cacheReadTokens
 
@@ -1078,6 +1088,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 				FailureClass:        FailureClassNone,
 				InputTokens:         inputTokens,
 				OutputTokens:        outputTokens,
+				TotalTokens:         totalTokens,
 				CacheCreationTokens: cacheCreationTokens,
 				CacheReadTokens:     cacheReadTokens,
 				APIType:             m.apiType,
@@ -1094,6 +1105,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 	m.handleBreakerFailureLocked(metrics, failureClass, now)
 	record.InputTokens = 0
 	record.OutputTokens = 0
+	record.TotalTokens = 0
 	record.CacheCreationInputTokens = 0
 	record.CacheReadInputTokens = 0
 
@@ -1107,6 +1119,7 @@ func (m *MetricsManager) RecordRequestFinalizeOutcome(baseURL, apiKey, serviceTy
 			FailureClass:        failureClass,
 			InputTokens:         0,
 			OutputTokens:        0,
+			TotalTokens:         0,
 			CacheCreationTokens: 0,
 			CacheReadTokens:     0,
 			APIType:             m.apiType,
@@ -1216,7 +1229,7 @@ func (m *MetricsManager) appendToWindowKey(metrics *KeyMetrics, success bool) {
 
 // appendToHistoryKey 向 Key 历史记录添加请求（保留24小时）
 func (m *MetricsManager) appendToHistoryKey(metrics *KeyMetrics, timestamp time.Time, success bool, failureClass FailureClass) {
-	m.appendToHistoryKeyWithUsage(metrics, timestamp, success, failureClass, 0, 0, 0, 0)
+	m.appendToHistoryKeyWithUsage(metrics, timestamp, success, failureClass, 0, 0, 0, 0, 0)
 }
 
 // cleanupHistoryLocked 清理超过 24 小时的历史记录，并同步修正 pendingHistoryIdx 索引。
@@ -1263,13 +1276,14 @@ func (m *MetricsManager) cleanupHistoryLocked(metrics *KeyMetrics) {
 }
 
 // appendToHistoryKeyWithUsage 向 Key 历史记录添加请求（带 Usage 数据）
-func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timestamp time.Time, success bool, failureClass FailureClass, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64) {
+func (m *MetricsManager) appendToHistoryKeyWithUsage(metrics *KeyMetrics, timestamp time.Time, success bool, failureClass FailureClass, inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens int64) {
 	metrics.requestHistory = append(metrics.requestHistory, RequestRecord{
 		Timestamp:                timestamp,
 		Success:                  success,
 		FailureClass:             normalizeFailureClass(success, failureClass),
 		InputTokens:              inputTokens,
 		OutputTokens:             outputTokens,
+		TotalTokens:              totalTokens,
 		CacheCreationInputTokens: cacheCreationTokens,
 		CacheReadInputTokens:     cacheReadTokens,
 	})
@@ -2379,7 +2393,7 @@ func (m *MetricsManager) calculateAggregatedTimeWindowsInternal(baseURL string, 
 	for label, duration := range windows {
 		cutoff := now.Add(-duration)
 		var requestCount, successCount, failureCount int64
-		var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
+		var inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens int64
 
 		for _, apiKey := range activeKeys {
 			for _, metrics := range m.getMetricsVariantsLocked(baseURL, apiKey, serviceType) {
@@ -2395,6 +2409,7 @@ func (m *MetricsManager) calculateAggregatedTimeWindowsInternal(baseURL string, 
 						outputTokens += record.OutputTokens
 						cacheCreationTokens += record.CacheCreationInputTokens
 						cacheReadTokens += record.CacheReadInputTokens
+						totalTokens += record.TotalTokens
 					}
 				}
 			}
@@ -2418,6 +2433,7 @@ func (m *MetricsManager) calculateAggregatedTimeWindowsInternal(baseURL string, 
 			SuccessRate:         successRate,
 			InputTokens:         inputTokens,
 			OutputTokens:        outputTokens,
+			TotalTokens:         totalTokens,
 			CacheCreationTokens: cacheCreationTokens,
 			CacheReadTokens:     cacheReadTokens,
 			CacheHitRate:        cacheHitRate,
@@ -2442,7 +2458,7 @@ func (m *MetricsManager) calculateAggregatedTimeWindowsMultiURL(baseURLs []strin
 	for label, duration := range windows {
 		cutoff := now.Add(-duration)
 		var requestCount, successCount, failureCount int64
-		var inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens int64
+		var inputTokens, outputTokens, totalTokens, cacheCreationTokens, cacheReadTokens int64
 
 		// 遍历所有 BaseURL 和 Key 的组合
 		for _, metrics := range m.getIdentityMetricsByMultiURLAndKeysLocked(baseURLs, activeKeys, serviceType) {
@@ -2458,6 +2474,7 @@ func (m *MetricsManager) calculateAggregatedTimeWindowsMultiURL(baseURLs []strin
 					outputTokens += record.OutputTokens
 					cacheCreationTokens += record.CacheCreationInputTokens
 					cacheReadTokens += record.CacheReadInputTokens
+					totalTokens += record.TotalTokens
 				}
 			}
 		}
@@ -2480,6 +2497,7 @@ func (m *MetricsManager) calculateAggregatedTimeWindowsMultiURL(baseURLs []strin
 			SuccessRate:         successRate,
 			InputTokens:         inputTokens,
 			OutputTokens:        outputTokens,
+			TotalTokens:         totalTokens,
 			CacheCreationTokens: cacheCreationTokens,
 			CacheReadTokens:     cacheReadTokens,
 			CacheHitRate:        cacheHitRate,
@@ -3165,6 +3183,7 @@ type GlobalHistoryDataPoint struct {
 	SuccessRate         float64   `json:"successRate"`
 	InputTokens         int64     `json:"inputTokens"`
 	OutputTokens        int64     `json:"outputTokens"`
+	TotalTokens         int64     `json:"totalTokens"`
 	CacheCreationTokens int64     `json:"cacheCreationTokens"`
 	CacheReadTokens     int64     `json:"cacheReadTokens"`
 }
@@ -3176,6 +3195,7 @@ type GlobalStatsSummary struct {
 	TotalFailure             int64   `json:"totalFailure"`
 	TotalInputTokens         int64   `json:"totalInputTokens"`
 	TotalOutputTokens        int64   `json:"totalOutputTokens"`
+	TotalTokens              int64   `json:"totalTokens"`
 	TotalCacheCreationTokens int64   `json:"totalCacheCreationTokens"`
 	TotalCacheReadTokens     int64   `json:"totalCacheReadTokens"`
 	AvgSuccessRate           float64 `json:"avgSuccessRate"`
@@ -3223,7 +3243,7 @@ func (m *MetricsManager) GetGlobalHistoricalStatsWithTokens(duration, interval t
 
 	// 汇总统计
 	var totalRequests, totalSuccess, totalFailure int64
-	var totalInputTokens, totalOutputTokens, totalCacheCreation, totalCacheRead int64
+	var totalInputTokens, totalOutputTokens, totalCacheCreation, totalCacheRead, totalTokens int64
 
 	// 按模型分桶（复用 modelBucket 结构）
 	type modelBucket struct {
@@ -3253,6 +3273,7 @@ func (m *MetricsManager) GetGlobalHistoricalStatsWithTokens(duration, interval t
 					b.outputTokens += record.OutputTokens
 					b.cacheCreationTokens += record.CacheCreationInputTokens
 					b.cacheReadTokens += record.CacheReadInputTokens
+					b.totalTokens += record.TotalTokens
 
 					// 累加汇总
 					totalRequests++
@@ -3265,6 +3286,7 @@ func (m *MetricsManager) GetGlobalHistoricalStatsWithTokens(duration, interval t
 					totalOutputTokens += record.OutputTokens
 					totalCacheCreation += record.CacheCreationInputTokens
 					totalCacheRead += record.CacheReadInputTokens
+					totalTokens += record.TotalTokens
 
 					// 同时按模型分桶（跳过无模型信息的记录）
 					if model := record.Model; model != "" {
@@ -3302,6 +3324,7 @@ func (m *MetricsManager) GetGlobalHistoricalStatsWithTokens(duration, interval t
 			SuccessRate:         successRate,
 			InputTokens:         b.inputTokens,
 			OutputTokens:        b.outputTokens,
+			TotalTokens:         b.totalTokens,
 			CacheCreationTokens: b.cacheCreationTokens,
 			CacheReadTokens:     b.cacheReadTokens,
 		}
@@ -3361,6 +3384,7 @@ type globalBucketData struct {
 	outputTokens        int64
 	cacheCreationTokens int64
 	cacheReadTokens     int64
+	totalTokens         int64
 }
 
 // CalculateTodayDuration 计算"今日"时间范围（从今天 0 点到现在）

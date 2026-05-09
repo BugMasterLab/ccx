@@ -306,6 +306,7 @@ export type MessageKey =
   | 'chart.successRate'
   | 'chart.inputTokens'
   | 'chart.outputTokens'
+  | 'chart.totalTokens'
   | 'chart.input'
   | 'chart.output'
   | 'chart.requestUnit'
@@ -683,6 +684,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.successRate': 'Availability',
     'chart.inputTokens': 'Input tokens',
     'chart.outputTokens': 'Output tokens',
+    'chart.totalTokens': 'Total tokens',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'requests',
@@ -1059,6 +1061,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.successRate': 'Ketersediaan',
     'chart.inputTokens': 'Input token',
     'chart.outputTokens': 'Output token',
+    'chart.totalTokens': 'Total token',
     'chart.input': 'input',
     'chart.output': 'output',
     'chart.requestUnit': 'request',
@@ -1435,6 +1438,7 @@ export const messages: Record<SupportedLocale, Record<MessageKey, string>> = {
     'chart.successRate': '可用率',
     'chart.inputTokens': '输入 Token',
     'chart.outputTokens': '输出 Token',
+    'chart.totalTokens': '总 Token',
     'chart.input': '输入',
     'chart.output': '输出',
     'chart.requestUnit': '请求',

@@ -63,8 +63,8 @@ func TestMigrateMetricsKeysToIdentity_MigratesRecordsAndCircuitStates(t *testing
 	if err != nil {
 		t.Fatalf("schemaVersion() error = %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("schemaVersion = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("schemaVersion = %d, want 4", version)
 	}
 
 	var migratedRecordCount int
@@ -354,8 +354,8 @@ func TestMigrateMetricsKeysToIdentity_IgnoresConflictingMappingsWithoutLegacyRow
 	if err != nil {
 		t.Fatalf("schemaVersion() error = %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("schemaVersion = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("schemaVersion = %d, want 4", version)
 	}
 }
 
@@ -451,8 +451,8 @@ func TestSchemaVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("schemaVersion() error = %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("schemaVersion = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("schemaVersion = %d, want 3", version)
 	}
 }
 

@@ -387,6 +387,7 @@ type StreamContext struct {
 type CollectedUsageData struct {
 	InputTokens              int
 	OutputTokens             int
+	TotalTokens              int
 	CacheCreationInputTokens int
 	CacheReadInputTokens     int
 	// 缓存 TTL 细分
@@ -1134,6 +1135,9 @@ func extractUsageFromMap(usage map[string]interface{}) CollectedUsageData {
 	} else if v, ok := usage["completion_tokens"].(float64); ok {
 		data.OutputTokens = int(v)
 	}
+	if v, ok := usage["total_tokens"].(float64); ok {
+		data.TotalTokens = int(v)
+	}
 	if v, ok := usage["cache_creation_input_tokens"].(float64); ok {
 		data.CacheCreationInputTokens = int(v)
 	}
@@ -1243,6 +1247,7 @@ func usageFromCollectedUsage(data CollectedUsageData) *types.Usage {
 	return &types.Usage{
 		InputTokens:                data.InputTokens,
 		OutputTokens:               data.OutputTokens,
+		TotalTokens:                data.TotalTokens,
 		CacheCreationInputTokens:   data.CacheCreationInputTokens,
 		CacheReadInputTokens:       data.CacheReadInputTokens,
 		CacheCreation5mInputTokens: data.CacheCreation5mInputTokens,

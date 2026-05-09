@@ -229,6 +229,23 @@
                       <span>{{ t('orchestration.hours24') }}:</span>
                       <span>{{ formatCacheStats(get24hStats(element.index)) }}</span>
                     </div>
+	                    <div class="text-caption font-weight-bold mt-2 mb-1">{{ t('chart.totalTokens') }}</div>
+	                    <div class="metrics-tooltip-row">
+	                      <span>{{ t('orchestration.minutes15') }}:</span>
+	                      <span>{{ formatTokenStats(get15mStats(element.index)) }}</span>
+	                    </div>
+	                    <div class="metrics-tooltip-row">
+	                      <span>{{ t('orchestration.hour1') }}:</span>
+	                      <span>{{ formatTokenStats(get1hStats(element.index)) }}</span>
+	                    </div>
+	                    <div class="metrics-tooltip-row">
+	                      <span>{{ t('orchestration.hours6') }}:</span>
+	                      <span>{{ formatTokenStats(get6hStats(element.index)) }}</span>
+	                    </div>
+	                    <div class="metrics-tooltip-row">
+	                      <span>{{ t('orchestration.hours24') }}:</span>
+	                      <span>{{ formatTokenStats(get24hStats(element.index)) }}</span>
+	                    </div>
                   </div>
                 </v-tooltip>
               </template>
@@ -887,6 +904,15 @@ const formatCacheStats = (stats?: TimeWindowStats): string => {
 
   const hitRate = stats.cacheHitRate ?? (cacheReadTokens / denom * 100)
   return `${t('orchestration.hitRate')} ${hitRate.toFixed(0)}% 路 ${t('orchestration.read')} ${formatTokens(cacheReadTokens)} 路 ${t('orchestration.write')} ${formatTokens(cacheCreationTokens)}`
+}
+
+const formatTokenStats = (stats?: TimeWindowStats): string => {
+	if (!stats || !stats.requestCount) return '--'
+	const total = stats.totalTokens ?? ((stats.inputTokens ?? 0) + (stats.outputTokens ?? 0) + (stats.cacheCreationTokens ?? 0) + (stats.cacheReadTokens ?? 0))
+	if (total <= 0) return '--'
+	const input = stats.inputTokens ?? 0
+	const output = stats.outputTokens ?? 0
+	return `${t('chart.input')} ${formatTokens(input)} 路 ${t('chart.output')} ${formatTokens(output)} 路 ${t('chart.total')} ${formatTokens(total)}`
 }
 
 // Get the official website URL (prefer website; otherwise extract the domain from baseUrl)

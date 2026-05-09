@@ -73,6 +73,7 @@ type PersistentRecord struct {
 	FailureClass        FailureClass // 失败分类（用于重建 breaker 窗口）
 	InputTokens         int64        // 输入 Token 数
 	OutputTokens        int64        // 输出 Token 数
+	TotalTokens         int64        // 总 Token 数（优先使用上游 total_tokens）
 	CacheCreationTokens int64        // 缓存创建 Token
 	CacheReadTokens     int64        // 缓存读取 Token
 	Model               string       // 请求模型

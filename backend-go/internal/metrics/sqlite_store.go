@@ -128,6 +128,7 @@ func initSchema(db *sql.DB) error {
 			output_tokens INTEGER DEFAULT 0,
 			cache_creation_tokens INTEGER DEFAULT 0,
 			cache_read_tokens INTEGER DEFAULT 0,
+			total_tokens INTEGER DEFAULT 0,
 			api_type TEXT NOT NULL DEFAULT 'messages'
 		);
 
@@ -194,7 +195,23 @@ func initSchema(db *sql.DB) error {
 				}
 			}
 		}
-		log.Printf("[SQLite-Migration] schema 升级: v1 -> v2 (添加 failure_class 列与 circuit_states 表)")
+		log.Printf("[SQLite-Migration] schema 升级: v1 -> v2 (添加 failure_class 列)")
+		version = 2
+	}
+
+	if version < 3 {
+		migrations := []string{
+			"ALTER TABLE request_records ADD COLUMN total_tokens INTEGER DEFAULT 0",
+			"PRAGMA user_version = 3",
+		}
+		for _, sql := range migrations {
+			if _, err := db.Exec(sql); err != nil {
+				if !strings.Contains(err.Error(), "duplicate column name") {
+					return fmt.Errorf("migration v2->v3 failed: %w", err)
+				}
+			}
+		}
+		log.Printf("[SQLite-Migration] schema 升级: v2 -> v3 (添加 total_tokens 列)")
 	}
 
 	return nil
@@ -228,7 +245,7 @@ func (s *SQLiteStore) MigrateMetricsKeysToIdentity(cfg config.Config) error {
 	if err != nil {
 		return fmt.Errorf("读取 schema 版本失败: %w", err)
 	}
-	if version >= 3 {
+	if version >= 4 {
 		return nil
 	}
 
@@ -252,14 +269,14 @@ func (s *SQLiteStore) MigrateMetricsKeysToIdentity(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec("PRAGMA user_version = 3"); err != nil {
+	if _, err := tx.Exec("PRAGMA user_version = 4"); err != nil {
 		return fmt.Errorf("写入 schema 版本失败: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("提交 metrics key 迁移失败: %w", err)
 	}
 
-	log.Printf("[SQLite-Migration] schema/data 升级: v2 -> v3 (迁移 request_records=%d, circuit_states=%d, merged_states=%d)", updatedRecords, migratedStates, mergedStates)
+	log.Printf("[SQLite-Migration] schema/data 升级: v3 -> v4 (total_tokens列由initSchema添加; 迁移 request_records=%d, circuit_states=%d, merged_states=%d)", updatedRecords, migratedStates, mergedStates)
 	return nil
 }
 
@@ -617,8 +634,8 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO request_records
 		(metrics_key, base_url, key_mask, timestamp, success, failure_class,
-		 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, api_type, model)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, total_tokens, api_type, model)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		return err
@@ -632,7 +649,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 		}
 		_, err := stmt.Exec(
 			r.MetricsKey, r.BaseURL, r.KeyMask, r.Timestamp.Unix(), success, string(r.FailureClass),
-			r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens, r.APIType, r.Model,
+			r.InputTokens, r.OutputTokens, r.CacheCreationTokens, r.CacheReadTokens, r.TotalTokens, r.APIType, r.Model,
 		)
 		if err != nil {
 			return err
@@ -646,7 +663,7 @@ func (s *SQLiteStore) batchInsertRecords(records []PersistentRecord) error {
 func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]PersistentRecord, error) {
 	rows, err := s.db.Query(`
 		SELECT metrics_key, base_url, key_mask, timestamp, success, failure_class,
-		       input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, model
+		       input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens, total_tokens, model
 		FROM request_records
 		WHERE timestamp >= ? AND api_type = ?
 		ORDER BY timestamp ASC
@@ -666,7 +683,7 @@ func (s *SQLiteStore) LoadRecords(since time.Time, apiType string) ([]Persistent
 
 		err := rows.Scan(
 			&r.MetricsKey, &r.BaseURL, &r.KeyMask, &ts, &success, &failureClass,
-			&r.InputTokens, &r.OutputTokens, &r.CacheCreationTokens, &r.CacheReadTokens, &r.Model,
+			&r.InputTokens, &r.OutputTokens, &r.CacheCreationTokens, &r.CacheReadTokens, &r.TotalTokens, &r.Model,
 		)
 		if err != nil {
 			return nil, err
@@ -1001,6 +1018,7 @@ type AggregatedBucket struct {
 	OutputTokens        int64
 	CacheCreationTokens int64
 	CacheReadTokens     int64
+	TotalTokens         int64
 }
 
 // QueryAggregatedHistory 从 SQLite 查询聚合历史数据
@@ -1021,7 +1039,8 @@ func (s *SQLiteStore) QueryAggregatedHistory(apiType string, since time.Time, in
 			SUM(input_tokens) AS input_tokens,
 			SUM(output_tokens) AS output_tokens,
 			SUM(cache_creation_tokens) AS cache_creation_tokens,
-			SUM(cache_read_tokens) AS cache_read_tokens
+			SUM(cache_read_tokens) AS cache_read_tokens,
+			SUM(total_tokens) AS total_tokens
 		FROM request_records
 		WHERE api_type = ? AND timestamp >= ?`
 
@@ -1048,7 +1067,7 @@ func (s *SQLiteStore) QueryAggregatedHistory(apiType string, since time.Time, in
 	for rows.Next() {
 		var bucket int64
 		var b AggregatedBucket
-		if err := rows.Scan(&bucket, &b.TotalRequests, &b.SuccessCount, &b.InputTokens, &b.OutputTokens, &b.CacheCreationTokens, &b.CacheReadTokens); err != nil {
+		if err := rows.Scan(&bucket, &b.TotalRequests, &b.SuccessCount, &b.InputTokens, &b.OutputTokens, &b.CacheCreationTokens, &b.CacheReadTokens, &b.TotalTokens); err != nil {
 			return nil, fmt.Errorf("扫描聚合结果失败: %w", err)
 		}
 		b.Timestamp = time.Unix(bucket, 0)

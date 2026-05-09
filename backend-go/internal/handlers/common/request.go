@@ -57,6 +57,25 @@ func PassthroughResponse(c *gin.Context, resp *http.Response) error {
 	return err
 }
 
+// BufferedPassthroughWithUsage 先完整转发响应给客户端，再从内存副本旁路解析 usage。
+// 与 PassthroughJSONResponseWithUsage 的区别：客户端的字节流不被 JSON 解码阻塞，
+// 解析失败也完全不影响客户端收到的响应。适用于 token-counting 等小 JSON 响应。
+func BufferedPassthroughWithUsage(c *gin.Context, resp *http.Response) (*types.Usage, error) {
+	utils.ForwardResponseHeaders(resp.Header, c.Writer)
+	c.Status(resp.StatusCode)
+
+	var buf bytes.Buffer
+	if _, err := io.Copy(io.MultiWriter(c.Writer, &buf), resp.Body); err != nil {
+		return nil, err
+	}
+
+	var payload map[string]interface{}
+	if err := json.Unmarshal(buf.Bytes(), &payload); err != nil {
+		return nil, nil
+	}
+	return extractUsageFromJSONPayload(payload), nil
+}
+
 // PassthroughUsageOptions controls metrics-only usage normalization for
 // passthrough responses. The client response is still forwarded unchanged.
 type PassthroughUsageOptions struct {

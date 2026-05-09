@@ -44,7 +44,7 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 
 			// 构建与内存查询兼容的响应格式
 			dataPoints := make([]metrics.GlobalHistoryDataPoint, 0, len(buckets))
-			var totalReqs, totalSuccess, totalInput, totalOutput, totalCacheCreate, totalCacheRead int64
+			var totalReqs, totalSuccess, totalInput, totalOutput, totalCacheCreate, totalCacheRead, totalTokens int64
 			for _, b := range buckets {
 				var successRate float64
 				if b.TotalRequests > 0 {
@@ -58,6 +58,7 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 					SuccessRate:         successRate,
 					InputTokens:         b.InputTokens,
 					OutputTokens:        b.OutputTokens,
+					TotalTokens:         b.TotalTokens,
 					CacheCreationTokens: b.CacheCreationTokens,
 					CacheReadTokens:     b.CacheReadTokens,
 				})
@@ -67,6 +68,7 @@ func GetGlobalStatsHistory(metricsManager *metrics.MetricsManager) gin.HandlerFu
 				totalOutput += b.OutputTokens
 				totalCacheCreate += b.CacheCreationTokens
 				totalCacheRead += b.CacheReadTokens
+				totalTokens += b.TotalTokens
 			}
 
 			var overallRate float64

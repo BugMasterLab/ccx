@@ -59,6 +59,10 @@
         <div class="summary-label">{{ t('chart.outputTokens') }}</div>
         <div class="summary-value">{{ formatNumber(summary.totalOutputTokens) }}</div>
       </div>
+      <div class="summary-card">
+        <div class="summary-label">{{ t('chart.totalTokens') }}</div>
+        <div class="summary-value">{{ formatNumber(summary.totalTokens ?? (summary.totalInputTokens + summary.totalOutputTokens)) }}</div>
+      </div>
     </div>
 
     <!-- Compact summary (single line) -->
@@ -69,6 +73,7 @@
       </span>
       <span><strong>{{ formatNumber(summary.totalInputTokens) }}</strong> {{ t('chart.input') }}</span>
       <span><strong>{{ formatNumber(summary.totalOutputTokens) }}</strong> {{ t('chart.output') }}</span>
+      <span><strong>{{ formatNumber(summary.totalTokens ?? (summary.totalInputTokens + summary.totalOutputTokens)) }}</strong> {{ t('chart.total') }}</span>
     </div>
 
     <!-- Loading state -->

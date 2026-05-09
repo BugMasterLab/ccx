@@ -120,6 +120,7 @@ type OpenAIChoice struct {
 type Usage struct {
 	InputTokens              int `json:"input_tokens,omitempty"`
 	OutputTokens             int `json:"output_tokens,omitempty"`
+	TotalTokens              int `json:"total_tokens,omitempty"`
 	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
 	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 	// PromptTokensTotal 仅供内部统计使用，用于保留上游返回的总 prompt tokens 口径。
