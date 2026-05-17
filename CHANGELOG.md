@@ -1,3 +1,9 @@
+## [v2.7.17] - 2026-05-17
+
+### 修复
+
+- **OpenAI Chat→Claude 转换 3 处问题修正** - `claude_converter.go` 的 `MapReasoningEffortToThinking` 改为大小写不敏感匹配（`strings.ToLower`）；`handler.go` 中 `tool_calls→tool_use` 转换时 id 为空时自动生成 `toolu_` 前缀 ID；`handler.go` 修正 messages 全为 system 时追加空 user fallback 的插入方向，避免 Claude API 报错。
+
 ## [v2.7.16] - 2026-05-17
 
 ### 新增
