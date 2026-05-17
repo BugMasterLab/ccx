@@ -30,6 +30,21 @@ func isClientSideError(err error) bool {
 	return errors.Is(err, context.Canceled)
 }
 
+// isTimeoutError 判断错误是否为响应头等待超时（连接建立但上游迟迟未回包）
+// 对应 net/http 和 http2 的 "timeout awaiting response headers" 错误，
+// 以及原始 TCP 层的 "i/o timeout"，可对同一 key/URL 安全重试。
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "timeout awaiting response headers") ||
+		strings.Contains(errStr, "i/o timeout")
+}
+
+// maxTimeoutRetries 响应头超时时对同一 key 的最大尝试总次数（含首次）
+const maxTimeoutRetries = 5
+
 // NextAPIKeyFunc 返回下一个可用 API key（按 failover 策略）
 type NextAPIKeyFunc func(upstream *config.UpstreamConfig, failedKeys map[string]bool) (string, error)
 
@@ -218,7 +233,7 @@ func TryUpstreamWithAllKeys(
 		failedKeys := make(map[string]bool)  // 每个 BaseURL 重置失败 Key 列表
 		maxRetries := len(upstream.APIKeys)
 
-		for attempt := 0; attempt < maxRetries; attempt++ {
+		for attempt := range maxRetries {
 			apiKey, err := nextAPIKey(upstream, failedKeys)
 			if err != nil {
 				lastError = err
@@ -272,6 +287,24 @@ func TryUpstreamWithAllKeys(
 			requestID := metricsManager.RecordRequestConnected(currentBaseURL, apiKey, metricsServiceType, redirectedModel)
 
 			resp, err := SendRequest(req, upstream, envCfg, isStream, apiType)
+			// 响应头超时：对同一 key/URL 原位重试，不切换 key，不写冷却
+			if err != nil && isTimeoutError(err) && !isClientSideError(err) {
+				for retryNum := range maxTimeoutRetries - 1 {
+					log.Printf("[%s-Timeout-Retry] 上游响应头超时，第 %d/%d 次重试 (Key: %s, URL: %s)",
+						apiType, retryNum+2, maxTimeoutRetries, utils.MaskAPIKey(apiKey), currentBaseURL)
+					RestoreRequestBody(c, attemptBody)
+					c.Set("requestBodyBytes", attemptBody)
+					retryReq, retryBuildErr := buildRequest(c, upstreamCopy, apiKey)
+					if retryBuildErr != nil {
+						log.Printf("[%s-Timeout-Retry] 请求重建失败，停止重试: %v", apiType, retryBuildErr)
+						break
+					}
+					resp, err = SendRequest(retryReq, upstream, envCfg, isStream, apiType)
+					if err == nil || !isTimeoutError(err) {
+						break
+					}
+				}
+			}
 			if err != nil {
 				lastError = err
 				// 区分客户端取消和真实渠道故障（统一口径）

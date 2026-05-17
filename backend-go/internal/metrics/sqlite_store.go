@@ -214,7 +214,39 @@ func initSchema(db *sql.DB) error {
 		log.Printf("[SQLite-Migration] schema 升级: v2 -> v3 (添加 total_tokens 列)")
 	}
 
+	// 防御性修复：对已处于 v3（旧版 MigrateMetricsKeysToIdentity 设置）但缺少
+	// total_tokens 列的数据库，幂等补列。不影响新装或已正确迁移的实例。
+	if err := ensureColumnExistsSQLite(db, "request_records", "total_tokens", "INTEGER DEFAULT 0"); err != nil {
+		return fmt.Errorf("确保 total_tokens 列存在失败: %w", err)
+	}
+
 	return nil
+}
+
+// ensureColumnExistsSQLite 检查 SQLite 表是否含指定列，不存在则 ALTER TABLE 添加。
+// 幂等：可对任意版本数据库安全调用。
+func ensureColumnExistsSQLite(db *sql.DB, table, column, colDef string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, dfltValue, pk any
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			return err
+		}
+		if strings.EqualFold(name, column) {
+			return nil // 列已存在
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colDef))
+	return err
 }
 
 func (s *SQLiteStore) schemaVersion() (int, error) {
