@@ -1,3 +1,9 @@
+## [v2.7.16] - 2026-05-17
+
+### 新增
+
+- **OpenAI Chat/Codex → Claude 格式转换补全** - `openai.go` 对 `tool_calls` ID 为空时自动生成 `toolu_` 前缀 + 24 位随机字母数字（`crypto/rand`），`messages` 全为 `system` 时补空 `user` fallback，避免 Claude API 报错；`claude_converter.go` 新增 `MapReasoningEffortToThinking`，将 `reasoning.effort`（`none/auto/low/medium/high/xhigh`）映射为 Claude `thinking.budget_tokens` 配置，覆盖 `/v1/responses → Claude` 上游路径；`types/responses.go` 在 `ResponsesRequest` 新增 `Reasoning` 字段解析 Codex reasoning 配置；`handlers/chat/handler.go` 新增 `buildChatUsageFromClaude`，标准化 OpenAI Chat `usage` 输出：`prompt_tokens` 含 cache tokens，`prompt_tokens_details.cached_tokens` / `completion_tokens_details.reasoning_tokens` 按 OpenAI 规范填充。
+
 ## [v2.7.15] - 2026-05-17
 
 ### 修复
