@@ -1,3 +1,10 @@
+## [v2.7.15] - 2026-05-17
+
+### 修复
+
+- **响应头超时自动重试** - `upstream_failover` 新增 `isTimeoutError` 检测，对同一 key/URL 最多重试 5 次再切换，覆盖 `net/http` 及 `http2` 响应头超时场景。
+- **SQLite total_tokens 列缺失** - `sqlite_store` 新增 `ensureColumnExistsSQLite` 防御性补列，修复旧版 `MigrateMetricsKeysToIdentity` 将 `user_version` 设为 3 导致 `total_tokens` 迁移被跳过的 schema 版本冲突问题。
+
 ## [v2.7.14] - 2026-05-10
 
 ### 新增
