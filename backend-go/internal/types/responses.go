@@ -21,6 +21,7 @@ type ResponsesRequest struct {
 	Tools              []map[string]interface{} `json:"tools,omitempty"`               // function tools
 	ToolChoice         interface{}              `json:"tool_choice,omitempty"`         // string 或 object
 	ParallelToolCalls  *bool                    `json:"parallel_tool_calls,omitempty"` // 是否允许并行工具调用
+	Reasoning          map[string]interface{}   `json:"reasoning,omitempty"`           // reasoning 配置（含 effort 等子字段）
 
 	// TransformerMetadata 转换器元数据（仅内存使用，不序列化）
 	// 用于在单次请求的转换流程中保留原始格式信息，如 system 数组格式等

@@ -3,9 +3,11 @@ package providers
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"regexp"
 	"strings"
@@ -16,6 +18,22 @@ import (
 	"github.com/BenedictKing/ccx/internal/utils"
 	"github.com/gin-gonic/gin"
 )
+
+// generateClaudeToolUseID 生成 Claude 兼容的 tool_use ID：toolu_ + 24 位随机字母数字
+func generateClaudeToolUseID() string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var b strings.Builder
+	b.WriteString("toolu_")
+	for range 24 {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+		if err != nil {
+			b.WriteByte(letters[0])
+			continue
+		}
+		b.WriteByte(letters[n.Int64()])
+	}
+	return b.String()
+}
 
 // OpenAIProvider OpenAI 提供商
 type OpenAIProvider struct{}
@@ -135,6 +153,21 @@ func (p *OpenAIProvider) convertMessages(claudeReq *types.ClaudeRequest) []types
 	for _, msg := range claudeReq.Messages {
 		openaiMsg := p.convertMessage(msg)
 		messages = append(messages, openaiMsg...)
+	}
+
+	// system-only fallback: 若处理后只剩 system 消息（或为空），追加一条空 user 消息
+	hasNonSystem := false
+	for _, m := range messages {
+		if m.Role != "system" {
+			hasNonSystem = true
+			break
+		}
+	}
+	if !hasNonSystem {
+		messages = append(messages, types.OpenAIMessage{
+			Role:    "user",
+			Content: "",
+		})
 	}
 
 	return messages
@@ -345,9 +378,14 @@ func (p *OpenAIProvider) ConvertToClaudeResponse(providerResp *types.ProviderRes
 			json.Unmarshal([]byte(toolCall.Function.Arguments), &input)
 			input = sanitizeClaudeToolInput(toolCall.Function.Name, input)
 
+			toolCallID := toolCall.ID
+			if toolCallID == "" {
+				toolCallID = generateClaudeToolUseID()
+			}
+
 			claudeResp.Content = append(claudeResp.Content, types.ClaudeContent{
 				Type:  "tool_use",
-				ID:    toolCall.ID,
+				ID:    toolCallID,
 				Name:  toolCall.Function.Name,
 				Input: input,
 			})

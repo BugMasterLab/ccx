@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/BenedictKing/ccx/internal/config"
+	"github.com/BenedictKing/ccx/internal/converters"
 	"github.com/BenedictKing/ccx/internal/handlers/common"
 	"github.com/BenedictKing/ccx/internal/middleware"
 	"github.com/BenedictKing/ccx/internal/scheduler"
@@ -405,6 +406,18 @@ func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (
 		claudeReq["top_p"] = topP
 	}
 
+	// 转换 reasoning_effort → Claude thinking 配置
+	// 优先级：客户端已显式提供的 thinking 字段不被覆盖
+	if _, hasThinking := reqMap["thinking"]; !hasThinking {
+		if effortRaw, ok := reqMap["reasoning_effort"]; ok {
+			if effort, ok := effortRaw.(string); ok {
+				if thinkingCfg := converters.MapReasoningEffortToThinking(effort); thinkingCfg != nil {
+					claudeReq["thinking"] = thinkingCfg
+				}
+			}
+		}
+	}
+
 	// 转换 messages：提取 system 消息，其余转为 Claude 格式
 	if messages, ok := reqMap["messages"].([]interface{}); ok {
 		var claudeMessages []map[string]interface{}
@@ -580,14 +593,18 @@ func handleSuccess(
 		}
 		c.Data(resp.StatusCode, "application/json", respBytes)
 
-		// 提取 usage
+		// 提取 usage（保留 cache token 用于内部统计）
 		var usage *types.Usage
 		if u, ok := claudeResp["usage"].(map[string]interface{}); ok {
 			inputTokens, _ := u["input_tokens"].(float64)
 			outputTokens, _ := u["output_tokens"].(float64)
+			cacheCreation, _ := u["cache_creation_input_tokens"].(float64)
+			cacheRead, _ := u["cache_read_input_tokens"].(float64)
 			usage = &types.Usage{
-				InputTokens:  int(inputTokens),
-				OutputTokens: int(outputTokens),
+				InputTokens:              int(inputTokens),
+				OutputTokens:             int(outputTokens),
+				CacheCreationInputTokens: int(cacheCreation),
+				CacheReadInputTokens:     int(cacheRead),
 			}
 		}
 		return usage, nil
@@ -695,18 +712,59 @@ func convertClaudeResponseToChat(claudeResp map[string]interface{}, model string
 		},
 	}
 
-	// 转换 usage
+	// 转换 usage（标准 OpenAI Chat 格式：含 prompt_tokens_details / completion_tokens_details）
 	if u, ok := claudeResp["usage"].(map[string]interface{}); ok {
-		inputTokens, _ := u["input_tokens"].(float64)
-		outputTokens, _ := u["output_tokens"].(float64)
-		result["usage"] = map[string]interface{}{
-			"prompt_tokens":     int(inputTokens),
-			"completion_tokens": int(outputTokens),
-			"total_tokens":      int(inputTokens + outputTokens),
-		}
+		result["usage"] = buildChatUsageFromClaude(u)
 	}
 
 	return result
+}
+
+// buildChatUsageFromClaude 将 Claude usage 映射为标准 OpenAI Chat usage：
+//   - prompt_tokens = input_tokens + cache_creation_input_tokens + cache_read_input_tokens
+//   - prompt_tokens_details.cached_tokens = cache_read_input_tokens
+//   - completion_tokens_details.reasoning_tokens = reasoning_tokens（若有）
+//   - total_tokens = prompt_tokens + completion_tokens
+func buildChatUsageFromClaude(u map[string]interface{}) map[string]interface{} {
+	inputTokens, _ := u["input_tokens"].(float64)
+	outputTokens, _ := u["output_tokens"].(float64)
+	cacheCreation, _ := u["cache_creation_input_tokens"].(float64)
+	cacheRead, _ := u["cache_read_input_tokens"].(float64)
+
+	promptTokens := int(inputTokens) + int(cacheCreation) + int(cacheRead)
+	completionTokens := int(outputTokens)
+
+	usage := map[string]interface{}{
+		"prompt_tokens":     promptTokens,
+		"completion_tokens": completionTokens,
+		"total_tokens":      promptTokens + completionTokens,
+	}
+
+	// prompt_tokens_details
+	promptDetails := map[string]interface{}{
+		"cached_tokens": int(cacheRead),
+	}
+	if int(cacheCreation) > 0 {
+		promptDetails["cache_creation_tokens"] = int(cacheCreation)
+	}
+	usage["prompt_tokens_details"] = promptDetails
+
+	// completion_tokens_details.reasoning_tokens（若上游提供）
+	var reasoningTokens int
+	if v, ok := u["reasoning_tokens"].(float64); ok {
+		reasoningTokens = int(v)
+	} else if details, ok := u["output_tokens_details"].(map[string]interface{}); ok {
+		if v, ok := details["reasoning_tokens"].(float64); ok {
+			reasoningTokens = int(v)
+		}
+	}
+	if reasoningTokens > 0 {
+		usage["completion_tokens_details"] = map[string]interface{}{
+			"reasoning_tokens": reasoningTokens,
+		}
+	}
+
+	return usage
 }
 
 // handleStreamSuccess 处理流式响应
@@ -890,19 +948,38 @@ func streamClaudeToChat(
 						},
 					}
 
-					// 提取 usage
+					// 提取 usage（合并 message_start 中记录的 cache token）
 					if usage, ok := event["usage"].(map[string]interface{}); ok {
 						inputTokens, _ := usage["input_tokens"].(float64)
 						outputTokens, _ := usage["output_tokens"].(float64)
+						cacheCreation, _ := usage["cache_creation_input_tokens"].(float64)
+						cacheRead, _ := usage["cache_read_input_tokens"].(float64)
+
+						// message_delta 通常只回传 output_tokens，input/cache 取自 message_start
+						if int(inputTokens) == 0 && totalUsage != nil {
+							inputTokens = float64(totalUsage.InputTokens)
+						}
+						if int(cacheCreation) == 0 && totalUsage != nil {
+							cacheCreation = float64(totalUsage.CacheCreationInputTokens)
+						}
+						if int(cacheRead) == 0 && totalUsage != nil {
+							cacheRead = float64(totalUsage.CacheReadInputTokens)
+						}
+
 						totalUsage = &types.Usage{
-							InputTokens:  int(inputTokens),
-							OutputTokens: int(outputTokens),
+							InputTokens:              int(inputTokens),
+							OutputTokens:             int(outputTokens),
+							CacheCreationInputTokens: int(cacheCreation),
+							CacheReadInputTokens:     int(cacheRead),
 						}
-						stopChunk["usage"] = map[string]interface{}{
-							"prompt_tokens":     int(inputTokens),
-							"completion_tokens": int(outputTokens),
-							"total_tokens":      int(inputTokens + outputTokens),
+
+						mergedUsage := map[string]interface{}{
+							"input_tokens":                inputTokens,
+							"output_tokens":               outputTokens,
+							"cache_creation_input_tokens": cacheCreation,
+							"cache_read_input_tokens":     cacheRead,
 						}
+						stopChunk["usage"] = buildChatUsageFromClaude(mergedUsage)
 					}
 
 					chunkBytes, _ := json.Marshal(stopChunk)
@@ -912,13 +989,17 @@ func streamClaudeToChat(
 					}
 
 				case "message_start":
-					// 提取初始 usage（input_tokens）
+					// 提取初始 usage（input_tokens / cache_*_input_tokens）
 					if msg, ok := event["message"].(map[string]interface{}); ok {
 						if usage, ok := msg["usage"].(map[string]interface{}); ok {
 							inputTokens, _ := usage["input_tokens"].(float64)
+							cacheCreation, _ := usage["cache_creation_input_tokens"].(float64)
+							cacheRead, _ := usage["cache_read_input_tokens"].(float64)
 							totalUsage = &types.Usage{
-								InputTokens:  int(inputTokens),
-								OutputTokens: 0,
+								InputTokens:              int(inputTokens),
+								OutputTokens:             0,
+								CacheCreationInputTokens: int(cacheCreation),
+								CacheReadInputTokens:     int(cacheRead),
 							}
 						}
 					}
