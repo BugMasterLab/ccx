@@ -3,10 +3,12 @@ package chat
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"strings"
 	"time"
@@ -460,6 +462,9 @@ func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (
 						}
 						fn, _ := tcMap["function"].(map[string]interface{})
 						toolID, _ := tcMap["id"].(string)
+						if toolID == "" {
+							toolID = genToolUseID()
+						}
 						toolName, _ := fn["name"].(string)
 						argsStr, _ := fn["arguments"].(string)
 						var argsObj interface{}
@@ -511,6 +516,13 @@ func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (
 		if len(systemParts) > 0 {
 			claudeReq["system"] = strings.Join(systemParts, "\n\n")
 		}
+		// system-only fallback：全为 system 消息时 Claude API 会报错，补空 user 消息
+		if len(claudeMessages) == 0 {
+			claudeMessages = append(claudeMessages, map[string]interface{}{
+				"role":    "user",
+				"content": "",
+			})
+		}
 		claudeReq["messages"] = claudeMessages
 	}
 
@@ -551,6 +563,22 @@ func convertChatToClaudeRequest(bodyBytes []byte, model string, isStream bool) (
 }
 
 // handleSuccess 处理成功的响应
+// genToolUseID 生成 Claude 兼容的 tool_use ID：toolu_ + 24 位随机字母数字
+func genToolUseID() string {
+	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	var b strings.Builder
+	b.WriteString("toolu_")
+	for range 24 {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(letters))))
+		if err != nil {
+			b.WriteByte(letters[0])
+			continue
+		}
+		b.WriteByte(letters[n.Int64()])
+	}
+	return b.String()
+}
+
 func handleSuccess(
 	c *gin.Context,
 	resp *http.Response,

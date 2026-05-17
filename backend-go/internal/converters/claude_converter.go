@@ -1,6 +1,8 @@
 package converters
 
 import (
+	"strings"
+
 	"github.com/BenedictKing/ccx/internal/session"
 	"github.com/BenedictKing/ccx/internal/types"
 )
@@ -21,7 +23,7 @@ import (
 //
 // 调用方在请求体已存在 thinking 字段时应跳过本函数，避免覆盖客户端显式配置。
 func MapReasoningEffortToThinking(effort string) map[string]interface{} {
-	switch effort {
+	switch strings.ToLower(effort) {
 	case "none", "":
 		return nil
 	case "auto", "medium":
